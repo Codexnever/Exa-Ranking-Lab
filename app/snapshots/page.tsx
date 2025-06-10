@@ -26,6 +26,7 @@ import { useAuth } from "@/contexts/auth-context"
 import { useState } from "react"
 import type { QueryConfig } from "@/lib/types"
 import { useToast } from "@/components/ui/use-toast"
+import { useSnapshotsStore, useAnalyticsStore } from "@/store"
 
 export default function Snapshots() {
   const { snapshots, isLoading } = useSnapshots()
@@ -40,6 +41,10 @@ export default function Snapshots() {
   })
   const [selectedQueryId, setSelectedQueryId] = useState<string>("")
   const [creating, setCreating] = useState(false)
+
+  // Zustand stores for direct mutation
+  const snapshotsStore = useSnapshotsStore()
+  const analyticsStore = useAnalyticsStore()
 
   // Get query information for each snapshot
   const snapshotsWithQueries = snapshots.map((snapshot) => {
@@ -181,6 +186,27 @@ export default function Snapshots() {
         }
         throw new Error(`Failed to create snapshot: ${res.status} ${res.statusText}`)
       }
+
+      // --- Optimistic UI update: add new snapshot locally and recalculate analytics ---
+      const created = await res.json()
+      const snapshotId = created.id || created.$id || Math.random().toString(36).slice(2)
+      const newSnapshot = {
+        id: snapshotId,
+        userId: user.$id, // Use correct user ID property
+        queryId: selectedQueryId,
+        timestamp: timestamp ? new Date(timestamp) : new Date(),
+        results,
+        metadata: {
+          responseTime,
+          totalResults,
+        },
+      }
+      // Update Zustand snapshot store
+      snapshotsStore.snapshots = [newSnapshot, ...snapshotsStore.snapshots]
+      // Recalculate analytics instantly
+      analyticsStore.calculateAnalyticsFromSnapshots(snapshotsStore.snapshots)
+      // Optionally, trigger a background fetch for backend-correct analytics
+      analyticsStore.fetchAnalytics()
 
       toast({ title: "Snapshot created!", description: `Snapshot for '${queryConfig.query}' created.` })
       
