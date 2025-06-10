@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/lib/database-service"
 import { users } from "@/lib/appwrite-server"
+import { getCurrentUser } from "@/lib/auth"
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,33 +28,10 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // 🔐 Validate JWT
-    const authHeader = request.headers.get("authorization")
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    // 🔐 Validate JWT and get user
+    const user = await getCurrentUser(request)
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const jwt = authHeader.split("Bearer ")[1].trim()
-
-    let user
-    try {
-      const response = await fetch(`${process.env.APPWRITE_ENDPOINT}/v1/account/jwt`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Appwrite-Project": process.env.APPWRITE_PROJECT_ID!,
-          "X-Appwrite-Key": process.env.APPWRITE_API_KEY!,
-          Authorization: `Bearer ${jwt}`,
-        },
-      })
-
-      if (!response.ok) throw new Error("Invalid JWT")
-
-      user = await response.json()
-      console.log("✅ JWT verified for user:", user.$id)
-    } catch (err) {
-      console.error("[JWT Verification Error]", err)
-      return NextResponse.json({ error: "Invalid JWT" }, { status: 401 })
     }
 
     // 🛠 Proceed to snapshot creation

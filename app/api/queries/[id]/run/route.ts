@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/lib/database-service"
 import { ExaClient } from "@/lib/exa-client"
+import { getCurrentUser } from "@/lib/auth"
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const params = await context.params
@@ -9,44 +10,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 }
 
 async function handlePost(request: NextRequest, queryId: string) {
-  const authHeader = request.headers.get("authorization")
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Unauthorized - Missing JWT" }, { status: 401 })
-  }
-
-  const jwt = authHeader.split("Bearer ")[1]
-  console.log("This is JWT:", jwt)
-
-  let user
-  try {
-    // Debug environment variables
-    const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID
-
-    if (!projectId) {
-      throw new Error("APPWRITE_PROJECT_ID environment variable is not set")
-    }
-    
-    // This is an Appwrite JWT, verify it with Appwrite's API
-    const response = await fetch(process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT + "/v1/account", {
-      method: "GET",
-      headers: {
-        "X-Appwrite-Project": projectId,
-        "Authorization": `Bearer ${jwt}`,
-      },
-    })
-    
-    console.log("Appwrite response status:", response.status)
-    
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.log("Appwrite error response:", errorText)
-      throw new Error(`Appwrite API error: ${response.status} - ${errorText}`)
-    }
-    
-    user = await response.json()
-    console.log("✅ JWT verified for user:", user.$id)
-  } catch (err) {
-    console.error("[JWT Verification Error]", err)
+  // Use getCurrentUser to verify JWT and get user
+  const user = await getCurrentUser(request)
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized - JWT verification failed" }, { status: 401 })
   }
 

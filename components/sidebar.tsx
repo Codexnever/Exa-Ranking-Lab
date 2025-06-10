@@ -136,18 +136,6 @@ export default function Sidebar() {
           </Collapsible>
         </div>
       </div>
-
-      <div className="p-4 border-t">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
-            <span className="text-blue-700 font-medium text-sm">JS</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900">John Smith</p>
-            <p className="text-xs text-gray-500 truncate">Developer</p>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
