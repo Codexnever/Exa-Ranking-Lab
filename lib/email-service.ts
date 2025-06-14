@@ -38,7 +38,7 @@ class EmailService {
       throw new Error("Failed to send email")
     }
   }
-
+//Dont be send querycompletion notification  throw email that is hectic
   async sendQueryCompletionNotification(userEmail: string, queryName: string, resultCount: number): Promise<void> {
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -58,7 +58,7 @@ class EmailService {
       html,
     })
   }
-
+//that is also hectic sendQueryFaliureNoti. 
   async sendQueryFailureNotification(userEmail: string, queryName: string, error: string): Promise<void> {
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -76,33 +76,6 @@ class EmailService {
       to: userEmail,
       subject: `Query "${queryName}" Failed`,
       html,
-    })
-  }
-
-  async sendDataExport(userEmail: string, pdfBuffer: Buffer): Promise<void> {
-    const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563eb;">Data Export Ready</h2>
-        <p>Your requested data export has been generated and is attached to this email.</p>
-        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p><strong>Export Date:</strong> ${new Date().toLocaleString()}</p>
-          <p><strong>Format:</strong> PDF</p>
-        </div>
-        <p>The export includes all your queries, snapshots, analytics, and feedback data.</p>
-      </div>
-    `
-
-    await this.sendEmail({
-      to: userEmail,
-      subject: "Your Exa Ranking Lab Data Export",
-      html,
-      attachments: [
-        {
-          filename: `exa-ranking-lab-export-${new Date().toISOString().split("T")[0]}.pdf`,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        },
-      ],
     })
   }
 

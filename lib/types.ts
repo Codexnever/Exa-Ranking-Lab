@@ -2,7 +2,7 @@ export interface QueryConfig {
   id: string
   name: string
   query: string
-  category: "web" | "news" | "research" | "code"
+  category: "company" | "research paper" | "news" | "pdf" | "github" | "tweet" | "personal site" | "linkedin profile" | "financial report"
   filters: {
     includeDomains?: string[]
     excludeDomains?: string[]

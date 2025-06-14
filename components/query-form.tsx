@@ -30,7 +30,7 @@ const availableTags = [
   "CSS",
 ]
 
-const QueryCategory = z.enum(["web", "news", "research", "code"])
+const QueryCategory = z.enum(["company", "research paper", "news", "pdf", "github", "tweet", "personal site","linkedin profile", "financial report"])
 const QueryFrequency = z.enum(["hourly", "daily", "weekly"])
 
 type QueryCategory = z.infer<typeof QueryCategory>
@@ -71,7 +71,7 @@ export function QueryForm({ onSubmit }: QueryFormProps) {
     defaultValues: {
       name: "",
       query: "",
-      category: "web",
+      category: "news",
       filters: {
         numResults: 10,
         includeDomains: [],

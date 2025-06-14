@@ -98,7 +98,7 @@ class DatabaseService {
       const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.QUERIES, [
         Query.equal("userId", userId)
       ])
-console.log('Database Service.ts {response}:-',response)
+ console.log('Database Service.ts {response}:-',response)
       return response.documents.map((doc) => this.transformQueryDocument(doc))
     } catch (error) {
       console.error("Failed to fetch queries:", error)
@@ -199,6 +199,7 @@ console.log('Database Service.ts {response}:-',response)
 
   async getSnapshots(queryId?: string, userId?: string): Promise<RankingSnapshot[]> {
     try {
+      console.log('2nd Getting Snapshots fro Server')
       if (this.isLocal) {
         const snapshots = this.loadFromStorage<RankingSnapshot>("snapshots")
         let filtered = snapshots
@@ -210,7 +211,8 @@ console.log('Database Service.ts {response}:-',response)
       const queries = []
       if (queryId) queries.push(Query.equal("queryId", queryId))
       if (userId) queries.push(Query.equal("userId", userId))
-      const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries)
+        const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries)
+      console.log('Getting DBs Snapshots',response)
       return response.documents.map((doc) => this.transformSnapshotDocument(doc))
     } catch (error) {
       console.error("Failed to fetch snapshots:", error)
@@ -226,7 +228,7 @@ console.log('Database Service.ts {response}:-',response)
       }
 
       const document = await databases.getDocument(DATABASE_ID, COLLECTIONS.SNAPSHOTS, id)
-      console.log('getting snapshot',document)
+      console.log('getting snapshot from Server',document)
       return this.transformSnapshotDocument(document)
     } catch (error) {
       console.error("Failed to fetch snapshot:", error)
@@ -283,6 +285,7 @@ console.log('Database Service.ts {response}:-',response)
   // Analytics operations
   async getAnalytics(userId?: string): Promise<AnalyticsData> {
   try {
+    console.log('Gettinng Analytics from Server')
     let snapshots: RankingSnapshot[];
 
     if (this.isLocal) {

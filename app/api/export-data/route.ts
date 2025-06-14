@@ -67,6 +67,18 @@ export async function GET(request: NextRequest) {
         break
       }
 
+      case "all": {
+        // Export all user data for full backup/export
+        const [queries, snapshots, feedback, analytics] = await Promise.all([
+          databaseService.getQueries(user.$id),
+          databaseService.getSnapshots(undefined, user.$id),
+          databaseService.getFeedback(),
+          databaseService.getAnalytics(user.$id),
+        ])
+        data = { queries, snapshots, feedback, analytics }
+        break
+      }
+
       default:
         return NextResponse.json({ error: "Invalid export type" }, { status: 400 })
     }

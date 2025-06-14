@@ -88,7 +88,7 @@ export default function Analytics() {
   useEffect(() => {
     fetchAnalytics()
   }, [])
-console.log("Debugg Analytics response frontend:", analytics);
+  console.log("Debugg Analytics response frontend:", analytics);
 
   // Calculate time range based on selection
   const timeRangeMs = useMemo(() => {

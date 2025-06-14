@@ -12,8 +12,11 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Settings, Key, Bell, Database, Download, Trash2, Shield } from "lucide-react"
 import { toast } from "sonner"
+import { saveAs } from "file-saver"
+import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
 
 export default function SettingsPage() {
+  //Api Key expose Here
   const [apiKey, setApiKey] = useState("24147791-a3e7-485c-9203-39b54618c9f0")
   const [notifications, setNotifications] = useState({
     queryComplete: true,
@@ -28,6 +31,10 @@ export default function SettingsPage() {
     timezone: "UTC",
   })
 
+  const { clearAnalytics } = useAnalyticsStore()
+  const setQueriesStore = useQueriesStore((state) => state)
+  const setSnapshotsStore = useSnapshotsStore((state) => state)
+
   const handleSaveApiKey = () => {
     // In a real app, this would save to environment variables or secure storage
     toast.success("API key updated successfully!")
@@ -41,12 +48,43 @@ export default function SettingsPage() {
     toast.success("Preferences saved!")
   }
 
-  const handleExportData = () => {
-    toast.success("Data export started! You'll receive an email when ready.")
+  const handleExportData = async () => {
+    try {
+      toast.loading("Generating data export PDF...")
+      // Fetch all export data from the API
+      const res = await fetch("/api/export-data?type=all")
+      if (!res.ok) throw new Error("Failed to fetch export data")
+      const { data } = await res.json()
+      // Call a new API endpoint to generate the PDF and return it as a blob
+      const pdfRes = await fetch("/api/export-data/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data }),
+      })
+      if (!pdfRes.ok) throw new Error("Failed to generate PDF")
+      const blob = await pdfRes.blob()
+      saveAs(blob, `Exa-ranking-lab-export-${new Date().toISOString().split("T")[0]}.pdf`)
+      toast.success("Data export downloaded!")
+    } catch (error: any) {
+      toast.error(error.message || "Failed to export data")
+    }
   }
 
-  const handleClearData = () => {
-    toast.success("All data cleared successfully!")
+  const handleClearData = async () => {
+    try {
+      toast.loading("Clearing all data...")
+      const res = await fetch("/api/clear-data", { method: "POST" })
+      if (!res.ok) throw new Error("Failed to clear data on server")
+      // Clear all client state
+      setQueriesStore.queries = []
+      setQueriesStore.error = null
+      setSnapshotsStore.snapshots = []
+      setSnapshotsStore.error = null
+      clearAnalytics()
+      toast.success("All data cleared successfully!")
+    } catch (error: any) {
+      toast.error(error.message || "Failed to clear data")
+    }
   }
 
   const testApiConnection = async () => {
@@ -75,7 +113,6 @@ export default function SettingsPage() {
           <p className="text-gray-600 mt-1">Manage your account preferences and application settings</p>
         </div>
       </div>
-
       <Tabs defaultValue="api" className="space-y-6">
         <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="api">API Configuration</TabsTrigger>
@@ -84,7 +121,6 @@ export default function SettingsPage() {
           <TabsTrigger value="data">Data Management</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
-
         <TabsContent value="api" className="space-y-6">
           <Card>
             <CardHeader>
@@ -113,7 +149,6 @@ export default function SettingsPage() {
                   Your API key is used to authenticate requests to the Exa API. Keep it secure.
                 </p>
               </div>
-
               <div className="space-y-2">
                 <Label>API Status</Label>
                 <div className="flex items-center gap-2">
@@ -123,7 +158,6 @@ export default function SettingsPage() {
                   <span className="text-sm text-gray-600">Last tested: 2 minutes ago</span>
                 </div>
               </div>
-
               <div className="space-y-2">
                 <Label>Rate Limits</Label>
                 <div className="grid gap-2 md:grid-cols-2">
@@ -139,12 +173,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
-
               <Button onClick={handleSaveApiKey}>Save API Configuration</Button>
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="notifications" className="space-y-6">
           <Card>
             <CardHeader>
@@ -206,12 +238,10 @@ export default function SettingsPage() {
                   />
                 </div>
               </div>
-
               <Button onClick={handleSaveNotifications}>Save Notification Settings</Button>
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="preferences" className="space-y-6">
           <Card>
             <CardHeader>
@@ -287,12 +317,10 @@ export default function SettingsPage() {
                   </Select>
                 </div>
               </div>
-
               <Button onClick={handleSavePreferences}>Save Preferences</Button>
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="data" className="space-y-6">
           <Card>
             <CardHeader>
@@ -314,7 +342,6 @@ export default function SettingsPage() {
                     Export
                   </Button>
                 </div>
-
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h3 className="font-medium">Clear All Data</h3>
@@ -326,7 +353,6 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               </div>
-
               <div className="space-y-2">
                 <Label>Storage Usage</Label>
                 <div className="grid gap-2 md:grid-cols-3">
@@ -336,18 +362,17 @@ export default function SettingsPage() {
                   </div>
                   <div className="p-3 border rounded-lg">
                     <div className="text-sm font-medium">Snapshots</div>
-                    <div className="text-lg font-bold">1,247</div>
+                    <div className="text-lg font-bold">--</div>
                   </div>
                   <div className="p-3 border rounded-lg">
                     <div className="text-sm font-medium">Feedback</div>
-                    <div className="text-lg font-bold">89</div>
+                    <div className="text-lg font-bold">--</div>
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="security" className="space-y-6">
           <Card>
             <CardHeader>
@@ -368,7 +393,6 @@ export default function SettingsPage() {
                     Secure
                   </Badge>
                 </div>
-
                 <div className="p-4 border rounded-lg">
                   <h3 className="font-medium mb-2">Data Encryption</h3>
                   <p className="text-sm text-gray-500 mb-3">
@@ -378,7 +402,6 @@ export default function SettingsPage() {
                     Enabled
                   </Badge>
                 </div>
-
                 <div className="p-4 border rounded-lg">
                   <h3 className="font-medium mb-2">Access Logs</h3>
                   <p className="text-sm text-gray-500 mb-3">

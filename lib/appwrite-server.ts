@@ -4,7 +4,7 @@ import { Client, Users } from "node-appwrite"
 const serverClient = new Client()
   .setEndpoint(process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT!)
   .setProject(process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID!)
-  .setKey(process.env.APPWRITE_API_KEY!) // ✅ Add to .env
+  .setKey(process.env.APPWRITE_API_KEY!)
 
 export const users = new Users(serverClient)
 

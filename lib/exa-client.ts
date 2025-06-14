@@ -1,6 +1,6 @@
 interface ExaSearchOptions {
   query: string
-  category?: "web" | "news" | "research" | "code"
+  category?: "company" | "research paper" | "news" | "pdf" | "github" | "tweet" | "personal site" | "linkedin profile" | "financial report"
   includeDomains?: string[]
   excludeDomains?: string[]
   startDate?: string
@@ -45,7 +45,7 @@ export class ExaClient {
         ...(options.excludeDomains?.length && { excludeDomains: options.excludeDomains }),
         summary: true,
       }
-
+      console.log('Checking Request size from Exa client:', options.numResults)
       const response = await fetch(`${this.baseUrl}/search`, {
         method: "POST",
         headers: {
