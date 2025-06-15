@@ -217,7 +217,8 @@ export const useQueriesStore = create<QueriesStoreType>()(
             toast.error("Please log in to delete queries")
             throw new Error("Unauthorized")
           }
-          if (!response.ok) {            const error = await response.json()
+          if (!response.ok) {
+            const error = await response.json()
             throw new Error(error.details || "Failed to delete query")
           }
           set((state: QueriesStoreType): QueriesState => ({
@@ -226,6 +227,17 @@ export const useQueriesStore = create<QueriesStoreType>()(
             error: null
           }))
           toast.success("Query deleted successfully")
+          // Recalculate analytics after delete
+          const { fetchSnapshots } = require('./use-snapshots-store')
+          const { useAnalyticsStore } = require('./use-analytics-store')
+          const userId = typeof window !== 'undefined' ? localStorage.getItem('user_id') : null
+          if (userId) {
+            // Fetch latest snapshots for user, then recalculate analytics
+            fetchSnapshots(undefined, userId).then(() => {
+              const snapshots = require('./use-snapshots-store').useSnapshotsStore.getState().snapshots
+              useAnalyticsStore.getState().calculateAnalyticsFromSnapshots(snapshots)
+            })
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to delete query"
           set({ error: message, isLoading: false })

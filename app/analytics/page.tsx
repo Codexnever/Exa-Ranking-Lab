@@ -10,6 +10,7 @@ import { TrendingUp, TrendingDown, BarChart3, LucidePieChart, Download, Globe, C
 import { useAnalytics } from "@/hooks/use-analytics"
 import { useQueries } from "@/hooks/use-queries"
 import { useSnapshots } from "@/hooks/use-snapshots"
+// import { useAnalyticsStore } from "@/store"
 import {
   LineChart as RechartsLineChart,
   Line,
@@ -85,10 +86,13 @@ export default function Analytics() {
   const { snapshots } = useSnapshots()
   const [timeRange, setTimeRange] = useState("30d")
 
-  useEffect(() => {
-    fetchAnalytics()
-  }, [])
   console.log("Debugg Analytics response frontend:", analytics);
+
+  // Recalculate analytics from current snapshots and persist in localStorage
+  // useEffect(() => {
+  //   console.log("Calculating analytics from of BIG:")
+  //   useAnalyticsStore.getState().calculateAnalyticsFromSnapshots(snapshots)
+  // }, [])
 
   // Calculate time range based on selection
   const timeRangeMs = useMemo(() => {
@@ -148,10 +152,15 @@ export default function Analytics() {
   // Generate category distribution data with colors
   const categoryDistribution = useMemo(() => {
     const categoryColors = {
-      web: "#3b82f6",
-      news: "#22c55e",
-      research: "#eab308",
-      code: "#ec4899"
+      "company": "#3b82f6",           // blue
+      "research paper": "#a21caf",    // purple
+      "news": "#22c55e",              // green
+      "pdf": "#f59e42",               // orange
+      "github": "#24292f",            // github black
+      "tweet": "#1da1f2",             // twitter blue
+      "personal site": "#f43f5e",     // pink/red
+      "linkedin profile": "#0a66c2",  // linkedin blue
+      "financial report": "#eab308"    // yellow
     };
 
     const categories = queries.reduce<Record<string, number>>((acc, query: QueryConfig) => {

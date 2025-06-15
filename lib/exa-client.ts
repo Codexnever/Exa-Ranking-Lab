@@ -35,26 +35,28 @@ export class ExaClient {
     const startTime = Date.now()
 
     try {
-      const requestBody = {
-        query: options.query,
-        size: options.numResults || 10,
-        ...(options.category && { category: options.category }),
-        ...(options.startDate && { dateStart: options.startDate }),
-        ...(options.endDate && { dateEnd: options.endDate }),
-        ...(options.includeDomains?.length && { domains: options.includeDomains }),
-        ...(options.excludeDomains?.length && { excludeDomains: options.excludeDomains }),
-        summary: true,
-      }
-      console.log('Checking Request size from Exa client:', options.numResults)
-      const response = await fetch(`${this.baseUrl}/search`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify(requestBody),
-      })
+     const requestBody = {
+    query: options.query,
+    numResults: options.numResults || 10,  // ✅ Fixed from 'size'
+    ...(options.category && { category: options.category }),  // ✅ Correct
+    ...(options.startDate && { start_published_date: options.startDate }),  // ✅ Fixed from 'dateStart'
+    ...(options.endDate && { end_published_date: options.endDate }),  // ✅ Fixed from 'dateEnd'
+    ...(options.includeDomains?.length && { include_domains: options.includeDomains }),  // ✅ Fixed from 'domains'
+    ...(options.excludeDomains?.length && { exclude_domains: options.excludeDomains }),  // ✅ Already correct
+    summary: true,
+}
+
+console.log('Checking Request numResults from Exa client:', options.numResults)
+
+const response = await fetch(`${this.baseUrl}/search`, {
+    method: "POST",
+    headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    },
+    body: JSON.stringify(requestBody),
+})
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))

@@ -12,9 +12,10 @@ interface QueryTableProps {
   queries: QueryConfig[]
   onRunQuery: (queryId: string) => void
   onDeleteQuery: (queryId: string) => void
+  onEditQuery: (query: QueryConfig) => void
 }
 
-export default function QueryTable({ queries, onRunQuery, onDeleteQuery }: QueryTableProps) {
+export default function QueryTable({ queries, onRunQuery, onDeleteQuery, onEditQuery }: QueryTableProps) {
   const [runningQueries, setRunningQueries] = useState<Set<string>>(new Set())
 
   const handleRunQuery = async (queryId: string) => {
@@ -167,7 +168,7 @@ export default function QueryTable({ queries, onRunQuery, onDeleteQuery }: Query
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => onEditQuery(query)}>
                           <Edit className="mr-2 h-4 w-4" />
                           <span>Edit</span>
                         </DropdownMenuItem>

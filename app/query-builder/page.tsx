@@ -85,6 +85,14 @@ export default function QueryBuilder() {
     }
   }
 
+  // Handle editing a query
+  const handleEditQuery = (query: QueryConfig) => {
+    // You can open a modal or set state to edit the query
+    // For now, just log it (replace with your edit logic/UI)
+    console.log('Edit query:', query)
+    toast.info(`Edit query: ${query.name}`)
+  }
+
   // Handle filter changes
   const handleFilterChange = (newFilters: Filters) => {
     setFilters(newFilters)
@@ -102,6 +110,7 @@ export default function QueryBuilder() {
             queries={filteredQueries}
             onRunQuery={handleRunQuery}
             onDeleteQuery={handleDeleteQuery}
+            onEditQuery={handleEditQuery}
           />
         </div>
       </div>

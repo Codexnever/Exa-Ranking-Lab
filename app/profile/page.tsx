@@ -12,7 +12,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/contexts/auth-context"
-import { databaseService } from "@/lib/database-service"
 import { toast } from "sonner"
 import { User, Calendar, Activity, Users, Shield } from "lucide-react"
 

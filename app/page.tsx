@@ -12,6 +12,7 @@ import { useSnapshots } from "@/hooks/use-snapshots"
 import { useAuth } from "@/contexts/auth-context"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
+import { useAnalyticsStore } from "@/store"
 
 export default function Dashboard() {
   const { user, loading } = useAuth()
@@ -61,7 +62,11 @@ export default function Dashboard() {
     if (diffHours < 24) return `${diffHours}h ago`
     return `${Math.floor(diffHours / 24)}d ago`
   }
-
+    // Recalculate analytics from current snapshots and persist in localStorage
+  useEffect(() => {
+      console.log("Calculating analytics from of BIG:")
+    useAnalyticsStore.getState().calculateAnalyticsFromSnapshots(snapshots)
+  }, [])
   useEffect(() => {
     if (loading) return
     const verifySession = async () => {

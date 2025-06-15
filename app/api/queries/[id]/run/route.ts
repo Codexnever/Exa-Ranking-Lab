@@ -39,7 +39,9 @@ async function handlePost(request: NextRequest, queryId: string) {
       excludeDomains: query.filters?.excludeDomains,
       startDate: query.filters?.startDate,
       endDate: query.filters?.endDate,
+      numResults: query.filters?.numResults,
     })
+    console.log("[Exa Search Results]", exaResults)
 
     const responseTime = (Date.now() - start) / 1000
 
@@ -47,13 +49,13 @@ async function handlePost(request: NextRequest, queryId: string) {
       id: r.id || `${query.id}_${idx}`,
       position: idx + 1,
       domain: r.domain || (r.url ? new URL(r.url).hostname : ""),
-      contentType: r.type || "web",
+      contentType: r.type || "auto",
       title: r.title,
       snippet: r.snippet,
       url: r.url,
       ...r,
     }))
-
+console.log('mapped result contentType', mappedResults.map(r => r.contentType))
     const snapshot = await databaseService.createSnapshot({
       queryId: query.id,
       userId: user.$id,
@@ -64,7 +66,7 @@ async function handlePost(request: NextRequest, queryId: string) {
         totalResults: mappedResults.length,
       },
     })
-
+    console.log("[Snapshot Created]", snapshot)
     return NextResponse.json({
       success: true,
       snapshot,

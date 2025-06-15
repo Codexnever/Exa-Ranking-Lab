@@ -1,6 +1,7 @@
 import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite"
 import { ID, Query } from "appwrite"
 import type { QueryConfig, RankingSnapshot, UserFeedback, AnalyticsData } from "@/lib/types"
+import { CATEGORY_MAP, CATEGORY_MAP_REVERSE } from "@/lib/category-map"
 
 class DatabaseService {
   private isLocal: boolean
@@ -38,6 +39,9 @@ class DatabaseService {
   // Query operations
   async createQuery(query: Omit<QueryConfig, "id" | "createdAt">): Promise<QueryConfig> {
       try {
+        if (!query.category || !(query.category in CATEGORY_MAP)) {
+          throw new Error(`Invalid or missing category. Received: ${query.category}`)
+        }
         // Only generate uniqueId for local mode
         if (this.isLocal) {
           const uniqueId = ID.unique();
@@ -59,13 +63,15 @@ class DatabaseService {
           uniqueId,
           {
             ...query,
+            category: CATEGORY_MAP[query.category], // Map to Appwrite-safe value
             status: (query as any).status || 'active',
             filters: JSON.stringify(query.filters || {}),
-            schedule: JSON.stringify(query.schedule || { enabled: false, frequency: "daily" }),
+            schedule: JSON.stringify(query.schedule ), //|| { enabled: false, frequency: "daily" }
             tags: JSON.stringify(query.tags || []),
             createdAt: new Date().toISOString(),
           }
         );
+        console.log('Creating CreatQuery:-',document)
         return this.transformQueryDocument(document);
       } catch (error: any) {
         // Improved error logging for unique constraint violations
@@ -107,6 +113,7 @@ class DatabaseService {
   }
 
   async getQuery(id: string): Promise<QueryConfig | null> {
+    console.log('getting databasequeryid:-',id)
     try {
       if (!id) {
         console.error("No query ID provided")
@@ -128,6 +135,7 @@ class DatabaseService {
 
   async updateQuery(id: string, updates: Partial<QueryConfig>): Promise<QueryConfig | null> {
     try {
+      console.log('updateQuery called with:', { id, updates })
       if (this.isLocal) {
         const queries = this.loadFromStorage<QueryConfig>("queries")
         const index = queries.findIndex((q) => q.id === id)
@@ -138,12 +146,14 @@ class DatabaseService {
       }
 
       const updateData: any = { ...updates }
+      if (updates.category) updateData.category = CATEGORY_MAP[updates.category] || updates.category
       if (updates.filters) updateData.filters = JSON.stringify(updates.filters)
       if (updates.schedule) updateData.schedule = JSON.stringify(updates.schedule)
       if (updates.tags) updateData.tags = JSON.stringify(updates.tags)
       if (updates.lastRun) updateData.lastRun = updates.lastRun.toISOString()
 
       const document = await databases.updateDocument(DATABASE_ID, COLLECTIONS.QUERIES, id, updateData)
+      console.log('updateQuery Appwrite response:', document)
       return this.transformQueryDocument(document)
     } catch (error) {
       console.error("Failed to update query:", error)
@@ -172,6 +182,7 @@ class DatabaseService {
   // Snapshot operations
   async createSnapshot(snapshot: Omit<RankingSnapshot, "id"> & { userId: string }): Promise<RankingSnapshot> {
     try {
+      console.log('createSnapshot called with:', snapshot)
       const id = ID.unique()
 
       if (this.isLocal) {
@@ -189,7 +200,7 @@ class DatabaseService {
         metadata: JSON.stringify(snapshot.metadata),
         userId: snapshot.userId,
       })
-      console.log('TheDetailOfSnapshot:-',document)
+      console.log('createSnapshot Appwrite response:', document)
       return this.transformSnapshotDocument(document)
     } catch (error) {
       console.error("Failed to create snapshot:", error)
@@ -199,7 +210,7 @@ class DatabaseService {
 
   async getSnapshots(queryId?: string, userId?: string): Promise<RankingSnapshot[]> {
     try {
-      console.log('2nd Getting Snapshots fro Server')
+      console.log('getSnapshots called with:', { queryId, userId })
       if (this.isLocal) {
         const snapshots = this.loadFromStorage<RankingSnapshot>("snapshots")
         let filtered = snapshots
@@ -212,7 +223,7 @@ class DatabaseService {
       if (queryId) queries.push(Query.equal("queryId", queryId))
       if (userId) queries.push(Query.equal("userId", userId))
         const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries)
-      console.log('Getting DBs Snapshots',response)
+      console.log('getSnapshots Appwrite response:', response)
       return response.documents.map((doc) => this.transformSnapshotDocument(doc))
     } catch (error) {
       console.error("Failed to fetch snapshots:", error)
@@ -306,6 +317,7 @@ class DatabaseService {
           }
         })
         .filter((snap): snap is RankingSnapshot => snap !== null);
+        // console.log('After Snapshot Analytics:-',snapshots)
     }
 
     if (!snapshots || snapshots.length === 0) {
@@ -471,7 +483,7 @@ class DatabaseService {
       id: doc.$id,
       name: doc.name,
       query: doc.query,
-      category: doc.category,
+      category: CATEGORY_MAP_REVERSE[doc.category] || doc.category, // Map back to UI value
       filters: JSON.parse(doc.filters || "{}"),
       schedule: JSON.parse(doc.schedule || "{}"),
       tags: JSON.parse(doc.tags || "[]"),
