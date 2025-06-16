@@ -55,25 +55,13 @@ async function handlePost(request: NextRequest, queryId: string) {
       url: r.url,
       ...r,
     }))
-console.log('mapped result contentType', mappedResults.map(r => r.contentType))
-    const snapshot = await databaseService.createSnapshot({
-      queryId: query.id,
-      userId: user.$id,
-      timestamp: new Date(),
-      results: mappedResults,
-      metadata: {
-        responseTime,
-        totalResults: mappedResults.length,
-      },
-    })
-    console.log("[Snapshot Created]", snapshot)
+    console.log('mapped result contentType', mappedResults.map(r => r.contentType))
     return NextResponse.json({
       success: true,
-      snapshot,
       results: mappedResults,
       responseTime,
       totalResults: mappedResults.length,
-      timestamp: snapshot.timestamp,
+      timestamp: new Date(),
     })
   } catch (err) {
     console.error("[Query Run Error]", err)

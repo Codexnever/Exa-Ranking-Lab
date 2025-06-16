@@ -17,6 +17,7 @@ interface QueriesActions {
   runQuery: (queryId: string) => Promise<any>
   updateQuery: (queryId: string, query: Partial<QueryConfig>) => Promise<void>
   deleteQuery: (queryId: string) => Promise<void>
+  clearQueries: () => void
 }
 
 type QueriesStoreType = QueriesState & QueriesActions
@@ -115,7 +116,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
             error: null
           }))
           
-          toast.success("Query created successfully")
           return newQuery
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to create query"
@@ -244,6 +244,8 @@ export const useQueriesStore = create<QueriesStoreType>()(
           toast.error(`Failed to delete query: ${message}`)
           throw error
         }
+      },      clearQueries: () => {
+        set({ queries: [], error: null })
       },    }),
     {
       name: 'queries-storage',

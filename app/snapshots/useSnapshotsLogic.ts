@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useQueries } from "@/hooks/use-queries"
 import { useAnalytics } from "@/hooks/use-analytics"
@@ -8,7 +8,7 @@ import { useSnapshotsStore, useAnalyticsStore } from "@/store"
 import type { QueryConfig } from "@/lib/types"
 
 export function useSnapshotsLogic() {
-  const { snapshots, isLoading } = useSnapshots()
+  const { snapshots, isLoading, fetchSnapshots } = useSnapshots()
   const { queries } = useQueries()
   const { analytics } = useAnalytics()
   const { user } = useAuth()
@@ -22,6 +22,12 @@ export function useSnapshotsLogic() {
   const [creating, setCreating] = useState(false)
   const snapshotsStore = useSnapshotsStore()
   const analyticsStore = useAnalyticsStore()
+
+  useEffect(() => {
+    if (user?.$id) {
+      fetchSnapshots()
+    }
+  }, [user?.$id])
 
   const snapshotsWithQueries = snapshots.map((snapshot) => {
     const query = queries.find((q: QueryConfig) => q.id === snapshot.queryId)
@@ -140,8 +146,8 @@ export function useSnapshotsLogic() {
           totalResults,
         },
       }
-      snapshotsStore.snapshots = [newSnapshot, ...snapshotsStore.snapshots]
-      analyticsStore.calculateAnalyticsFromSnapshots(snapshotsStore.snapshots)
+      snapshotsStore.setSnapshots([newSnapshot, ...snapshotsStore.snapshots])
+      analyticsStore.calculateAnalyticsFromSnapshots([newSnapshot, ...snapshotsStore.snapshots])
       analyticsStore.fetchAnalytics()
       toast({ title: "Snapshot created!", description: `Snapshot for '${queryConfig.query}' created.` })
     } catch (e: any) {

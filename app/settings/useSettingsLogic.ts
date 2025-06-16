@@ -93,14 +93,13 @@ export function useSettingsLogic() {
 
   const handleClearData = async () => {
     try {
-      toast.loading("Clearing all data...")
+      const load = toast.loading("Clearing all data...")
       const res = await fetch("/api/clear-data", { method: "POST" })
       if (!res.ok) throw new Error("Failed to clear data on server")
-      setQueriesStore.queries = []
-      setQueriesStore.error = null
-      setSnapshotsStore.snapshots = []
-      setSnapshotsStore.error = null
+      setQueriesStore.clearQueries()
+      setSnapshotsStore.clearSnapshots()
       clearAnalytics()
+      toast.dismiss(load)
       toast.success("All data cleared successfully!")
     } catch (error: any) {
       toast.error(error.message || "Failed to clear data")

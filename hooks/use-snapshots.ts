@@ -1,7 +1,10 @@
+import { useAuth } from "@/contexts/auth-context"
 import { useSnapshotsStore } from "@/store"
 
-export const useSnapshots = (userId?: string) => {
+export const useSnapshots = () => {
   const store = useSnapshotsStore()
+  const { user } = useAuth()
+  const userId = user?.$id
   return {
     snapshots: store.snapshots,
     isLoading: store.isLoading,

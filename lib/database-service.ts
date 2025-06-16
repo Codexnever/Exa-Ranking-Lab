@@ -182,7 +182,6 @@ class DatabaseService {
   // Snapshot operations
   async createSnapshot(snapshot: Omit<RankingSnapshot, "id"> & { userId: string }): Promise<RankingSnapshot> {
     try {
-      console.log('createSnapshot called with:', snapshot)
       const id = ID.unique()
 
       if (this.isLocal) {
@@ -200,7 +199,7 @@ class DatabaseService {
         metadata: JSON.stringify(snapshot.metadata),
         userId: snapshot.userId,
       })
-      console.log('createSnapshot Appwrite response:', document)
+      // console.log('createSnapshot Appwrite response:', document)
       return this.transformSnapshotDocument(document)
     } catch (error) {
       console.error("Failed to create snapshot:", error)

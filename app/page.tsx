@@ -16,9 +16,9 @@ import { useAnalyticsStore } from "@/store"
 
 export default function Dashboard() {
   const { user, loading } = useAuth()
-  const { queries, runQuery } = useQueries()
-  const { analytics } = useAnalytics()
-  const { snapshots } = useSnapshots()
+  const { queries, runQuery, fetchQueries } = useQueries()
+  const { analytics, fetchAnalytics } = useAnalytics()
+  const { snapshots, fetchSnapshots } = useSnapshots()
   const [runningQueries, setRunningQueries] = useState<Set<string>>(new Set())
 
   const handleRunQuery = async (queryId: string) => {
@@ -92,6 +92,14 @@ export default function Dashboard() {
       // Optionally: hydrate user context here if needed
     }
     verifySession()
+  }, [user, loading])
+
+  useEffect(() => {
+    if (user && !loading) {
+      fetchQueries()
+      fetchAnalytics()
+      fetchSnapshots()
+    }
   }, [user, loading])
 
   return (

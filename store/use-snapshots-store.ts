@@ -13,6 +13,8 @@ interface SnapshotsActions {
   fetchSnapshots: (queryId?: string, userId?: string) => Promise<void>
   getSnapshot: (id: string) => Promise<RankingSnapshot | undefined>
   compareSnapshots: (snapshotIds: string[]) => Promise<RankingChange[]>
+  setSnapshots: (snapshots: RankingSnapshot[]) => void
+  clearSnapshots: () => void
 }
 
 type SnapshotsStore = SnapshotsState & SnapshotsActions
@@ -69,6 +71,14 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
           toast.error(`Failed to compare snapshots: ${message}`)
           throw error
         }
+      },
+
+      setSnapshots: (snapshots: RankingSnapshot[]) => {
+        set({ snapshots })
+      },
+
+      clearSnapshots: () => {
+        set({ snapshots: [], error: null })
       },
     }),
     {

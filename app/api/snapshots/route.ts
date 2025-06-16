@@ -7,8 +7,9 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const queryId = searchParams.get("queryId")
+    const userId = searchParams.get("userId")
 
-    const snapshots = await databaseService.getSnapshots(queryId || undefined)
+    const snapshots = await databaseService.getSnapshots(queryId || undefined, userId || undefined)
 
     // Sort by newest first
     snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())

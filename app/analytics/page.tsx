@@ -82,8 +82,8 @@ interface CategoryData extends CategoryDistribution {
 
 export default function Analytics() {
   const { analytics, fetchAnalytics } = useAnalytics()
-  const { queries } = useQueries()
-  const { snapshots } = useSnapshots()
+  const { queries, fetchQueries } = useQueries()
+  const { snapshots, fetchSnapshots } = useSnapshots()
   const [timeRange, setTimeRange] = useState("30d")
 
   console.log("Debugg Analytics response frontend:", analytics);
@@ -301,6 +301,12 @@ export default function Analytics() {
       .sort((a, b) => (b.lastPosition ?? 0) - (a.lastPosition ?? 0))
       .slice(0, 5);
   }, [filteredSnapshots, queries]);
+
+  useEffect(() => {
+    fetchQueries()
+    fetchAnalytics()
+    fetchSnapshots()
+  }, [])
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
