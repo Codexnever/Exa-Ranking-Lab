@@ -226,7 +226,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
             isLoading: false,
             error: null
           }))
-          toast.success("Query deleted successfully")
           // Recalculate analytics after delete
           const { fetchSnapshots } = require('./use-snapshots-store')
           const { useAnalyticsStore } = require('./use-analytics-store')

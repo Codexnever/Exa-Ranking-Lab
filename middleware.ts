@@ -13,7 +13,7 @@ const PROTECTED_ROUTES = [
   "/snapshots",
   "/settings",
   "/query-monitor",
-  "/api", // ✅ include API routes if needed
+  "/api",
 ]
 
 export function middleware(request: NextRequest) {

@@ -73,7 +73,7 @@ export function useSettingsLogic() {
 
   const handleExportData = async () => {
     try {
-      toast.loading("Generating data export PDF...")
+      const load = toast.loading("Generating data export PDF...")
       const res = await fetch("/api/export-data?type=all")
       if (!res.ok) throw new Error("Failed to fetch export data")
       const { data } = await res.json()
@@ -85,6 +85,7 @@ export function useSettingsLogic() {
       if (!pdfRes.ok) throw new Error("Failed to generate PDF")
       const blob = await pdfRes.blob()
       saveAs(blob, `Exa-ranking-lab-export-${new Date().toISOString().split("T")[0]}.pdf`)
+      toast.dismiss(load)
       toast.success("Data export downloaded!")
     } catch (error: any) {
       toast.error(error.message || "Failed to export data")

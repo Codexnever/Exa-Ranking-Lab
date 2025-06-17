@@ -432,7 +432,7 @@ class DatabaseService {
 
         // Response Time
         totalResponseTime += snap.metadata.responseTime;
-
+   console.log('Total Response Time:-', totalResponseTime)
         // Success Check
         if (snap.results.length > 0) successCount++;
 
