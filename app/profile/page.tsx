@@ -28,6 +28,11 @@ export default function ProfilePage() {
     getInitials,
   } = useProfileLogic(user, updateProfile, logout)
 
+  const handleProfileFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    handleUpdateProfile(profileData)
+  }
+
   if (!user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -68,7 +73,7 @@ export default function ProfilePage() {
               </p>
             </div>
             <div className="bg-gray-50 p-6">
-              <form onSubmit={handleUpdateProfile} className="space-y-6">
+              <form onSubmit={handleProfileFormSubmit} className="space-y-6">
                 <div className="flex items-center gap-6">
                   <Avatar className="h-16 w-16">
                     <AvatarImage src={profileData.avatar || "/placeholder.svg"} />
