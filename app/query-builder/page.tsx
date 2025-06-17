@@ -77,7 +77,6 @@ export default function QueryBuilder() {
   // Handle deleting a query
   const handleDeleteQuery = async (queryId: string) => {
     try {
-      // You need to implement deleteQuery in your store if not already present
       await useQueriesStore.getState().deleteQuery(queryId)
       toast.success("Query deleted successfully!")
     } catch (error) {
@@ -91,11 +90,6 @@ export default function QueryBuilder() {
     // For now, just log it (replace with your edit logic/UI)
     console.log('Edit query:', query)
     toast.info(`Edit query: ${query.name}`)
-  }
-
-  // Handle filter changes
-  const handleFilterChange = (newFilters: Filters) => {
-    setFilters(newFilters)
   }
 
   return (

@@ -1,11 +1,11 @@
 "use client"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { SettingsApiConfig } from "./SettingsApiConfig"
-import { SettingsNotifications } from "./SettingsNotifications"
-import { SettingsPreferences } from "./SettingsPreferences"
-import { SettingsDataManagement } from "./SettingsDataManagement"
-import { SettingsSecurity } from "./SettingsSecurity"
+import { SettingsApiConfig } from "../../components/settings/SettingsApiConfig"
+import { SettingsNotifications } from "../../components/settings/SettingsNotifications"
+import { SettingsPreferences } from "../../components/settings/SettingsPreferences"
+import { SettingsDataManagement } from "../../components/settings/SettingsDataManagement"
+import { SettingsSecurity } from "../../components/settings/SettingsSecurity"
 
 export default function SettingsPage() {
   return (

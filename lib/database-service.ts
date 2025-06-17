@@ -38,54 +38,54 @@ class DatabaseService {
 
   // Query operations
   async createQuery(query: Omit<QueryConfig, "id" | "createdAt">): Promise<QueryConfig> {
-      try {
-        if (!query.category || !(query.category in CATEGORY_MAP)) {
-          throw new Error(`Invalid or missing category. Received: ${query.category}`)
-        }
-        // Only generate uniqueId for local mode
-        if (this.isLocal) {
-          const uniqueId = ID.unique();
-          const newQuery: QueryConfig = {
-            ...query,
-            id: uniqueId,
-            createdAt: new Date(),
-          };
-          const queries = this.loadFromStorage<QueryConfig>("queries");
-          queries.push(newQuery);
-          this.saveToStorage("queries", queries);
-          return newQuery;
-        }
-        // Generate a new unique ID for each attempt
-        const uniqueId = ID.unique();
-        const document = await databases.createDocument(
-          DATABASE_ID,
-          COLLECTIONS.QUERIES,
-          uniqueId,
-          {
-            ...query,
-            category: CATEGORY_MAP[query.category], // Map to Appwrite-safe value
-            status: (query as any).status || 'active',
-            filters: JSON.stringify(query.filters || {}),
-            schedule: JSON.stringify(query.schedule ), //|| { enabled: false, frequency: "daily" }
-            tags: JSON.stringify(query.tags || []),
-            createdAt: new Date().toISOString(),
-          }
-        );
-        console.log('Creating CreatQuery:-',document)
-        return this.transformQueryDocument(document);
-      } catch (error: any) {
-        // Improved error logging for unique constraint violations
-        if (error?.code === 409) {
-          // Log the entire error object for debugging
-          console.error("Appwrite 409 error full object:", error);
-          if (error?.message) {
-            throw new Error(`Failed to create query: ${error.message}`);
-          }
-        }
-        console.error("Failed to create query:", error);
-        throw new Error("Failed to create query");
+    try {
+      if (!query.category || !(query.category in CATEGORY_MAP)) {
+        throw new Error(`Invalid or missing category. Received: ${query.category}`)
       }
-    
+      // Only generate uniqueId for local mode
+      if (this.isLocal) {
+        const uniqueId = ID.unique();
+        const newQuery: QueryConfig = {
+          ...query,
+          id: uniqueId,
+          createdAt: new Date(),
+        };
+        const queries = this.loadFromStorage<QueryConfig>("queries");
+        queries.push(newQuery);
+        this.saveToStorage("queries", queries);
+        return newQuery;
+      }
+      // Generate a new unique ID for each attempt
+      const uniqueId = ID.unique();
+      const document = await databases.createDocument(
+        DATABASE_ID,
+        COLLECTIONS.QUERIES,
+        uniqueId,
+        {
+          ...query,
+          category: CATEGORY_MAP[query.category], // Map to Appwrite-safe value
+          status: (query as any).status || 'active',
+          filters: JSON.stringify(query.filters || {}),
+          schedule: JSON.stringify(query.schedule), //|| { enabled: false, frequency: "daily" }
+          tags: JSON.stringify(query.tags || []),
+          createdAt: new Date().toISOString(),
+        }
+      );
+      console.log('Creating CreatQuery:-', document)
+      return this.transformQueryDocument(document);
+    } catch (error: any) {
+      // Improved error logging for unique constraint violations
+      if (error?.code === 409) {
+        // Log the entire error object for debugging
+        console.error("Appwrite 409 error full object:", error);
+        if (error?.message) {
+          throw new Error(`Failed to create query: ${error.message}`);
+        }
+      }
+      console.error("Failed to create query:", error);
+      throw new Error("Failed to create query");
+    }
+
     throw new Error("Failed to create query after multiple attempts");
   }
 
@@ -104,7 +104,7 @@ class DatabaseService {
       const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.QUERIES, [
         Query.equal("userId", userId)
       ])
- console.log('Database Service.ts {response}:-',response)
+      console.log('Database Service.ts {response}:-', response)
       return response.documents.map((doc) => this.transformQueryDocument(doc))
     } catch (error) {
       console.error("Failed to fetch queries:", error)
@@ -113,7 +113,7 @@ class DatabaseService {
   }
 
   async getQuery(id: string): Promise<QueryConfig | null> {
-    console.log('getting databasequeryid:-',id)
+    console.log('getting databasequeryid:-', id)
     try {
       if (!id) {
         console.error("No query ID provided")
@@ -161,23 +161,85 @@ class DatabaseService {
     }
   }
 
-  async deleteQuery(id: string): Promise<boolean> {
+  async deleteQuery(id: string, opts?: { userId?: string, ipAddress?: string, userAgent?: any }): Promise<boolean> {
     try {
       if (this.isLocal) {
         const queries = this.loadFromStorage<QueryConfig>("queries")
         const filteredQueries = queries.filter((q) => q.id !== id)
-        if (filteredQueries.length === queries.length) return false
         this.saveToStorage("queries", filteredQueries)
+
+        const snapshots = this.loadFromStorage<RankingSnapshot>("snapshots")
+        const filteredSnapshots = snapshots.filter((s) => s.queryId !== id)
+        this.saveToStorage("snapshots", filteredSnapshots)
+
+        if (opts?.userId) {
+          await this.logAccess(
+            opts.userId,
+            "delete_query",
+            {
+              queryId: id,
+              deletedSnapshots: snapshots.length - filteredSnapshots.length,
+              local: true,
+            },
+            opts.ipAddress ?? "unknown",
+            opts.userAgent ?? {
+              browser: "unknown",
+              version: "",
+              deviceType: "",
+              os: "",
+              isBot: false,
+            }
+          )
+
+
+        }
+
         return true
       }
 
+      const snapshotList = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.SNAPSHOTS,
+        [Query.equal("queryId", id)]
+      )
+
+      await Promise.all(
+        snapshotList.documents.map((snap) =>
+          databases.deleteDocument(DATABASE_ID, COLLECTIONS.SNAPSHOTS, snap.$id)
+        )
+      )
+
       await databases.deleteDocument(DATABASE_ID, COLLECTIONS.QUERIES, id)
+
+      if (opts?.userId) {
+        await this.logAccess(
+          opts.userId,
+          "delete_query",
+          {
+            queryId: id,
+            deletedSnapshots: snapshotList.documents.length,
+            local: false,
+          },
+          opts.ipAddress ?? "unknown",
+          opts.userAgent ?? {
+            browser: "unknown",
+            version: "",
+            deviceType: "",
+            os: "",
+            isBot: false,
+          }
+        )
+
+      }
+
       return true
     } catch (error) {
-      console.error("Failed to delete query:", error)
+      console.error("❌ Failed to delete query:", error)
       return false
     }
   }
+
+
 
   // Snapshot operations
   async createSnapshot(snapshot: Omit<RankingSnapshot, "id"> & { userId: string }): Promise<RankingSnapshot> {
@@ -221,7 +283,7 @@ class DatabaseService {
       const queries = []
       if (queryId) queries.push(Query.equal("queryId", queryId))
       if (userId) queries.push(Query.equal("userId", userId))
-        const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries)
+      const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries)
       console.log('getSnapshots Appwrite response:', response)
       return response.documents.map((doc) => this.transformSnapshotDocument(doc))
     } catch (error) {
@@ -238,7 +300,7 @@ class DatabaseService {
       }
 
       const document = await databases.getDocument(DATABASE_ID, COLLECTIONS.SNAPSHOTS, id)
-      console.log('getting snapshot from Server',document)
+      console.log('getting snapshot from Server', document)
       return this.transformSnapshotDocument(document)
     } catch (error) {
       console.error("Failed to fetch snapshot:", error)
@@ -249,7 +311,7 @@ class DatabaseService {
   // Feedback operations
   async createFeedback(feedback: Omit<UserFeedback, "id" | "createdAt">): Promise<UserFeedback> {
     try {
-      const id =ID.unique()
+      const id = ID.unique()
 
       if (this.isLocal) {
         const newFeedback: UserFeedback = {
@@ -294,32 +356,144 @@ class DatabaseService {
 
   // Analytics operations
   async getAnalytics(userId?: string): Promise<AnalyticsData> {
-  try {
-    console.log('Gettinng Analytics from Server')
-    let snapshots: RankingSnapshot[];
+    try {
+      console.log('Gettinng Analytics from Server')
+      let snapshots: RankingSnapshot[];
 
-    if (this.isLocal) {
-      snapshots = this.loadFromStorage<RankingSnapshot>("snapshots");
-      if (userId) snapshots = snapshots.filter((s) => s.userId === userId);
-    } else {
-      const queries = userId ? [Query.equal("userId", userId)] : [];
-      const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries);
-      console.log('getanalyticsbest log chaking',queries)//get empty
-      // Safely transform and filter out null/undefined
-      snapshots = response.documents
-        .map((doc) => {
-          try {
-            return this.transformSnapshotDocument(doc);
-          } catch (err) {
-            console.warn("Invalid snapshot document skipped:", doc);
-            return null;
-          }
-        })
-        .filter((snap): snap is RankingSnapshot => snap !== null);
+      if (this.isLocal) {
+        snapshots = this.loadFromStorage<RankingSnapshot>("snapshots");
+        if (userId) snapshots = snapshots.filter((s) => s.userId === userId);
+      } else {
+        const queries = userId ? [Query.equal("userId", userId)] : [];
+        const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries);
+        console.log('getanalyticsbest log chaking', queries)//get empty
+        // Safely transform and filter out null/undefined
+        snapshots = response.documents
+          .map((doc) => {
+            try {
+              return this.transformSnapshotDocument(doc);
+            } catch (err) {
+              console.warn("Invalid snapshot document skipped:", doc);
+              return null;
+            }
+          })
+          .filter((snap): snap is RankingSnapshot => snap !== null);
         // console.log('After Snapshot Analytics:-',snapshots)
-    }
+      }
 
-    if (!snapshots || snapshots.length === 0) {
+      if (!snapshots || snapshots.length === 0) {
+        return {
+          rankingStability: 0,
+          volatilityIndex: 0,
+          domainDiversity: 0,
+          avgResponseTime: 0,
+          newContentDiscovery: 0,
+          querySuccessRate: 0,
+        };
+      }
+
+      // Filter out only snapshots with missing userId or missing metadata.responseTime
+      // snapshots = snapshots.filter(snap => snap.userId && snap.metadata && typeof snap.metadata.responseTime === "number")
+      // if (snapshots.length === 0) {
+      //   return {
+      //     rankingStability: 0,
+      //     volatilityIndex: 0,
+      //     domainDiversity: 0,
+      //     avgResponseTime: 0,
+      //     newContentDiscovery: 0,
+      //     querySuccessRate: 0,
+      //   };
+      // }
+
+      const snapshotsByQuery: Record<string, RankingSnapshot[]> = {};
+      const seenUrls = new Set<string>();
+      let totalResponseTime = 0;
+      let successCount = 0;
+      const domainSet = new Set<string>();
+
+      for (const snap of snapshots) {
+        if (!snap.queryId) continue;
+
+        if (!snap.results || !Array.isArray(snap.results)) {
+          console.warn("Skipping snapshot with invalid results:", snap);
+          continue;
+        }
+
+        if (!snap.metadata || typeof snap.metadata.responseTime !== "number") {
+          console.warn("Skipping snapshot with invalid metadata:", snap);
+          continue;
+        }
+
+        // Grouping
+        if (!snapshotsByQuery[snap.queryId]) {
+          snapshotsByQuery[snap.queryId] = [];
+        }
+        snapshotsByQuery[snap.queryId].push(snap);
+
+        // Response Time
+        totalResponseTime += snap.metadata.responseTime;
+
+        // Success Check
+        if (snap.results.length > 0) successCount++;
+
+        // Domain Diversity & Seen URLs
+        for (const result of snap.results) {
+          try {
+            const domain = new URL(result.url).hostname;
+            domainSet.add(domain);
+            seenUrls.add(result.url);
+          } catch (e) {
+            console.warn("Invalid URL in result:", result.url);
+          }
+        }
+      }
+
+      const avgResponseTime = totalResponseTime / snapshots.length;
+      const querySuccessRate = (successCount / snapshots.length) * 100;
+
+      // === RANKING STABILITY & VOLATILITY ===
+      let totalRankChanges = 0;
+      let totalComparisons = 0;
+
+      Object.values(snapshotsByQuery).forEach((snaps) => {
+        snaps.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+        for (let i = 1; i < snaps.length; i++) {
+          const prev = snaps[i - 1].results?.map((r) => r.url) || [];
+          const curr = snaps[i].results?.map((r) => r.url) || [];
+
+          const maxLength = Math.max(prev.length, curr.length);
+          for (let j = 0; j < maxLength; j++) {
+            const prevUrl = prev[j] || null;
+            const currUrl = curr[j] || null;
+
+            if (prevUrl && currUrl) {
+              if (prevUrl !== currUrl) totalRankChanges++;
+            } else {
+              totalRankChanges++;
+            }
+            totalComparisons++;
+          }
+        }
+      });
+
+      const stabilityScore =
+        totalComparisons > 0 ? 100 - (totalRankChanges / totalComparisons) * 100 : 100;
+      const volatilityIndex =
+        totalComparisons > 0 ? (totalRankChanges / totalComparisons) * 10 : 0;
+
+      const averageNewContentPerSnapshot = seenUrls.size / snapshots.length;
+
+      return {
+        rankingStability: parseFloat(stabilityScore.toFixed(2)),
+        volatilityIndex: parseFloat(volatilityIndex.toFixed(2)),
+        domainDiversity: domainSet.size,
+        avgResponseTime: parseFloat(avgResponseTime.toFixed(2)),
+        newContentDiscovery: parseFloat(averageNewContentPerSnapshot.toFixed(2)),
+        querySuccessRate: parseFloat(querySuccessRate.toFixed(2)),
+      };
+    } catch (error) {
+      console.error("Failed to calculate analytics:", error);
       return {
         rankingStability: 0,
         volatilityIndex: 0,
@@ -329,123 +503,23 @@ class DatabaseService {
         querySuccessRate: 0,
       };
     }
-
-    // Filter out only snapshots with missing userId or missing metadata.responseTime
-    // snapshots = snapshots.filter(snap => snap.userId && snap.metadata && typeof snap.metadata.responseTime === "number")
-    // if (snapshots.length === 0) {
-    //   return {
-    //     rankingStability: 0,
-    //     volatilityIndex: 0,
-    //     domainDiversity: 0,
-    //     avgResponseTime: 0,
-    //     newContentDiscovery: 0,
-    //     querySuccessRate: 0,
-    //   };
-    // }
-
-    const snapshotsByQuery: Record<string, RankingSnapshot[]> = {};
-    const seenUrls = new Set<string>();
-    let totalResponseTime = 0;
-    let successCount = 0;
-    const domainSet = new Set<string>();
-
-    for (const snap of snapshots) {
-      if (!snap.queryId) continue;
-
-      if (!snap.results || !Array.isArray(snap.results)) {
-        console.warn("Skipping snapshot with invalid results:", snap);
-        continue;
-      }
-
-      if (!snap.metadata || typeof snap.metadata.responseTime !== "number") {
-        console.warn("Skipping snapshot with invalid metadata:", snap);
-        continue;
-      }
-
-      // Grouping
-      if (!snapshotsByQuery[snap.queryId]) {
-        snapshotsByQuery[snap.queryId] = [];
-      }
-      snapshotsByQuery[snap.queryId].push(snap);
-
-      // Response Time
-      totalResponseTime += snap.metadata.responseTime;
-
-      // Success Check
-      if (snap.results.length > 0) successCount++;
-
-      // Domain Diversity & Seen URLs
-      for (const result of snap.results) {
-        try {
-          const domain = new URL(result.url).hostname;
-          domainSet.add(domain);
-          seenUrls.add(result.url);
-        } catch (e) {
-          console.warn("Invalid URL in result:", result.url);
-        }
-      }
-    }
-
-    const avgResponseTime = totalResponseTime / snapshots.length;
-    const querySuccessRate = (successCount / snapshots.length) * 100;
-
-    // === RANKING STABILITY & VOLATILITY ===
-    let totalRankChanges = 0;
-    let totalComparisons = 0;
-
-    Object.values(snapshotsByQuery).forEach((snaps) => {
-      snaps.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-      for (let i = 1; i < snaps.length; i++) {
-        const prev = snaps[i - 1].results?.map((r) => r.url) || [];
-        const curr = snaps[i].results?.map((r) => r.url) || [];
-
-        const maxLength = Math.max(prev.length, curr.length);
-        for (let j = 0; j < maxLength; j++) {
-          const prevUrl = prev[j] || null;
-          const currUrl = curr[j] || null;
-
-          if (prevUrl && currUrl) {
-            if (prevUrl !== currUrl) totalRankChanges++;
-          } else {
-            totalRankChanges++;
-          }
-          totalComparisons++;
-        }
-      }
-    });
-
-    const stabilityScore =
-      totalComparisons > 0 ? 100 - (totalRankChanges / totalComparisons) * 100 : 100;
-    const volatilityIndex =
-      totalComparisons > 0 ? (totalRankChanges / totalComparisons) * 10 : 0;
-
-    const averageNewContentPerSnapshot = seenUrls.size / snapshots.length;
-
-    return {
-      rankingStability: parseFloat(stabilityScore.toFixed(2)),
-      volatilityIndex: parseFloat(volatilityIndex.toFixed(2)),
-      domainDiversity: domainSet.size,
-      avgResponseTime: parseFloat(avgResponseTime.toFixed(2)),
-      newContentDiscovery: parseFloat(averageNewContentPerSnapshot.toFixed(2)),
-      querySuccessRate: parseFloat(querySuccessRate.toFixed(2)),
-    };
-  } catch (error) {
-    console.error("Failed to calculate analytics:", error);
-    return {
-      rankingStability: 0,
-      volatilityIndex: 0,
-      domainDiversity: 0,
-      avgResponseTime: 0,
-      newContentDiscovery: 0,
-      querySuccessRate: 0,
-    };
   }
-}
 
 
   // Access log operations
-  async logAccess(userId: string, action: string, details: Record<string, any>): Promise<void> {
+  async logAccess(
+    userId: string,
+    action: string,
+    details: Record<string, any>,
+    ipAddress: string,
+    userAgentInfo: {
+      browser: string;
+      version: string;
+      deviceType: string;
+      os: string;
+      isBot: boolean;
+    }
+  ): Promise<void> {
     try {
       if (this.isLocal) {
         const logs = this.loadFromStorage<any>("access_logs")
@@ -454,8 +528,8 @@ class DatabaseService {
           action,
           details,
           timestamp: new Date(),
-          ipAddress: "",
-          userAgent: ""
+          ipAddress,
+          ...userAgentInfo,
         })
         this.saveToStorage("access_logs", logs)
         return
@@ -466,13 +540,19 @@ class DatabaseService {
         action,
         details: JSON.stringify(details),
         timestamp: new Date().toISOString(),
-        ipAddress: "", // Would be populated from request
-        userAgent: "", // Would be populated from request
+        ipAddress,
+        userAgentBrowser: userAgentInfo.browser,
+        userAgentVersion: userAgentInfo.version,
+        userAgentDeviceType: userAgentInfo.deviceType,
+        userAgentOS: userAgentInfo.os,
+        userAgentIsBot: userAgentInfo.isBot,
       })
     } catch (error) {
-      console.error("Failed to log access:", error)
+      console.error("❌ Failed to log access:", error)
     }
   }
+
+
 
   // Helper methods to transform documents
   private transformQueryDocument(doc: any): QueryConfig {

@@ -2,8 +2,6 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,94 +12,21 @@ import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/contexts/auth-context"
 import { toast } from "sonner"
 import { User, Calendar, Activity, Users, Shield } from "lucide-react"
-
-type AccessLog = {
-  action: string;
-  timestamp: string | Date;
-  details?: Record<string, any>;
-};
-
-type TeamMember = {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  avatar: string;
-  lastActive: Date;
-};
+import { useProfileLogic } from "@/logic/profileLogic"
 
 export default function ProfilePage() {
   const { user, updateProfile, logout } = useAuth()
-  const [loading, setLoading] = useState(false)
-  const [profileData, setProfileData] = useState({
-    name: user?.name || "",
-    email: user?.email || "",
-    avatar: "",
-  })
-  // No getAccessLogs in databaseService, so just use empty logs for now
-  const [accessLogs, setAccessLogs] = useState<AccessLog[]>([])
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
-
-  useEffect(() => {
-    if (user) {
-      setAccessLogs([])
-      loadTeamMembers()
-    }
-  }, [user])
-
-  const loadTeamMembers = async () => {
-    setTeamMembers([
-      {
-        id: "1",
-        name: user?.name || "You",
-        email: user?.email || "",
-        role: "Owner",
-        avatar: "",
-        lastActive: new Date(),
-      },
-    ])
-  }
-
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-
-    try {
-      await updateProfile(profileData)
-      toast.success("Profile updated successfully!")
-    } catch (error) {
-      toast.error("Failed to update profile")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleLogout = async () => {
-    try {
-      await logout()
-      toast.success("Logged out successfully")
-    } catch (error) {
-      toast.error("Failed to logout")
-    }
-  }
-
-  const formatDate = (date: string | Date) => {
-    return new Date(date).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  }
-
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-  }
+  const {
+    loading,
+    profileData,
+    setProfileData,
+    accessLogs,
+    teamMembers,
+    handleUpdateProfile,
+    handleLogout,
+    formatDate,
+    getInitials,
+  } = useProfileLogic(user, updateProfile, logout)
 
   if (!user) {
     return (
@@ -135,26 +60,29 @@ export default function ProfilePage() {
         </TabsList>
 
         <TabsContent value="profile" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Personal Information
-              </CardTitle>
-              <CardDescription>Update your personal details and profile information</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <div className="overflow-hidden rounded-lg border">
+            <div className="bg-white p-6">
+              <h2 className="text-lg font-medium">Profile Information</h2>
+              <p className="text-sm text-gray-500">
+                Update your personal details and profile information
+              </p>
+            </div>
+            <div className="bg-gray-50 p-6">
               <form onSubmit={handleUpdateProfile} className="space-y-6">
                 <div className="flex items-center gap-6">
-                  <Avatar className="w-20 h-20">
+                  <Avatar className="h-16 w-16">
                     <AvatarImage src={profileData.avatar || "/placeholder.svg"} />
-                    <AvatarFallback className="text-lg">{getInitials(profileData.name)}</AvatarFallback>
+                    <AvatarFallback className="text-lg">
+                      {getInitials(profileData.name)}
+                    </AvatarFallback>
                   </Avatar>
                   <div>
                     <Button variant="outline" size="sm">
                       Change Avatar
                     </Button>
-                    <p className="text-xs text-gray-500 mt-1">JPG, GIF or PNG. 1MB max.</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      JPG, GIF or PNG. 1MB max.
+                    </p>
                   </div>
                 </div>
 
@@ -164,7 +92,9 @@ export default function ProfilePage() {
                     <Input
                       id="name"
                       value={profileData.name}
-                      onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
+                      onChange={(e) =>
+                        setProfileData({ ...profileData, name: e.target.value })
+                      }
                       required
                     />
                   </div>
@@ -175,11 +105,15 @@ export default function ProfilePage() {
                       id="email"
                       type="email"
                       value={profileData.email}
-                      onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                      onChange={(e) =>
+                        setProfileData({ ...profileData, email: e.target.value })
+                      }
                       required
                       disabled
                     />
-                    <p className="text-xs text-gray-500">Email cannot be changed. Contact support if needed.</p>
+                    <p className="text-xs text-gray-500">
+                      Email cannot be changed. Contact support if needed.
+                    </p>
                   </div>
                 </div>
 
@@ -190,7 +124,9 @@ export default function ProfilePage() {
                       <Calendar className="w-4 h-4 text-gray-400" />
                       <div>
                         <p className="text-sm font-medium">Member Since</p>
-                        <p className="text-xs text-gray-500">{formatDate(new Date(user.$createdAt))}</p>
+                        <p className="text-xs text-gray-500">
+                          {formatDate(new Date(user.$createdAt))}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 p-3 border rounded-lg">
@@ -209,28 +145,34 @@ export default function ProfilePage() {
                   {loading ? "Updating..." : "Update Profile"}
                 </Button>
               </form>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="activity" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="w-5 h-5" />
-                Recent Activity
-              </CardTitle>
-              <CardDescription>Your recent actions and system events</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <div className="overflow-hidden rounded-lg border">
+            <div className="bg-white p-6">
+              <h2 className="text-lg font-medium">Recent Activity</h2>
+              <p className="text-sm text-gray-500">
+                Your recent actions and system events
+              </p>
+            </div>
+            <div className="bg-gray-50 p-6">
               <div className="space-y-4">
                 {accessLogs.length > 0 ? (
                   accessLogs.map((log, index) => (
-                    <div key={index} className="flex items-center gap-4 p-3 border rounded-lg">
+                    <div
+                      key={index}
+                      className="flex items-center gap-4 p-3 border rounded-lg"
+                    >
                       <div className="w-2 h-2 rounded-full bg-blue-500"></div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium">{log.action.replace("_", " ").toUpperCase()}</p>
-                        <p className="text-xs text-gray-500">{formatDate(log.timestamp)}</p>
+                        <p className="text-sm font-medium">
+                          {log.action.replace("_", " ").toUpperCase()}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {formatDate(log.timestamp)}
+                        </p>
                       </div>
                       {log.details && Object.keys(log.details).length > 0 && (
                         <Badge variant="outline" className="text-xs">
@@ -246,23 +188,25 @@ export default function ProfilePage() {
                   </div>
                 )}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="team" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="w-5 h-5" />
-                Team Members
-              </CardTitle>
-              <CardDescription>Manage team access and permissions</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <div className="overflow-hidden rounded-lg border">
+            <div className="bg-white p-6">
+              <h2 className="text-lg font-medium">Team Members</h2>
+              <p className="text-sm text-gray-500">
+                Manage team access and permissions
+              </p>
+            </div>
+            <div className="bg-gray-50 p-6">
               <div className="space-y-4">
                 {teamMembers.map((member) => (
-                  <div key={member.id} className="flex items-center gap-4 p-4 border rounded-lg">
+                  <div
+                    key={member.id}
+                    className="flex items-center gap-4 p-4 border rounded-lg"
+                  >
                     <Avatar>
                       <AvatarImage src={member.avatar || "/placeholder.svg"} />
                       <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
@@ -272,8 +216,16 @@ export default function ProfilePage() {
                       <p className="text-sm text-gray-500">{member.email}</p>
                     </div>
                     <div className="text-right">
-                      <Badge variant={member.role === "Owner" ? "default" : "secondary"}>{member.role}</Badge>
-                      <p className="text-xs text-gray-500 mt-1">Last active: {formatDate(member.lastActive)}</p>
+                      <Badge
+                        variant={
+                          member.role === "Owner" ? "default" : "secondary"
+                        }
+                      >
+                        {member.role}
+                      </Badge>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Last active: {formatDate(member.lastActive)}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -288,28 +240,30 @@ export default function ProfilePage() {
                   <Button>Send Invite</Button>
                 </div>
                 <p className="text-xs text-gray-500">
-                  Team members will have access to all queries and data in this workspace.
+                  Team members will have access to all queries and data in this
+                  workspace.
                 </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="security" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Shield className="w-5 h-5" />
-                Security Settings
-              </CardTitle>
-              <CardDescription>Manage your account security and authentication</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
+          <div className="overflow-hidden rounded-lg border">
+            <div className="bg-white p-6">
+              <h2 className="text-lg font-medium">Security Settings</h2>
+              <p className="text-sm text-gray-500">
+                Manage your account security and authentication
+              </p>
+            </div>
+            <div className="bg-gray-50 p-6">
               <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h3 className="font-medium">Password</h3>
-                    <p className="text-sm text-gray-500">Last changed 30 days ago</p>
+                    <p className="text-sm text-gray-500">
+                      Last changed 30 days ago
+                    </p>
                   </div>
                   <Button variant="outline" size="sm">
                     Change Password
@@ -319,7 +273,9 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h3 className="font-medium">Two-Factor Authentication</h3>
-                    <p className="text-sm text-gray-500">Add an extra layer of security</p>
+                    <p className="text-sm text-gray-500">
+                      Add an extra layer of security
+                    </p>
                   </div>
                   <Button variant="outline" size="sm">
                     Enable 2FA
@@ -329,7 +285,9 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h3 className="font-medium">Active Sessions</h3>
-                    <p className="text-sm text-gray-500">Manage your active login sessions</p>
+                    <p className="text-sm text-gray-500">
+                      Manage your active login sessions
+                    </p>
                   </div>
                   <Button variant="outline" size="sm">
                     View Sessions
@@ -344,15 +302,17 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-between p-4 border border-red-200 rounded-lg">
                   <div>
                     <h4 className="font-medium">Delete Account</h4>
-                    <p className="text-sm text-gray-500">Permanently delete your account and all data</p>
+                    <p className="text-sm text-gray-500">
+                      Permanently delete your account and all data
+                    </p>
                   </div>
                   <Button variant="destructive" size="sm">
                     Delete Account
                   </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

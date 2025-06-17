@@ -1,67 +1,83 @@
-// /api/queries/[id]/route.ts
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/lib/database-service"
 import { getCurrentUser } from "@/lib/auth"
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, context: Promise<{ params: { id: string } }>) {
+  const { params } = await context;
+  const { id } = params;
   const user = await getCurrentUser(request)
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
   try {
-    const query = await databaseService.getQuery(params.id)
-    if (!query) {
-      return NextResponse.json({ error: "Query not found" }, { status: 404 })
+    const query = await databaseService.getQuery(id)
+    if (!query || query.userId !== user.$id) {
+      return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 })
     }
-    if (query.userId !== user.$id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+
     return NextResponse.json(query)
   } catch (error) {
+    console.error("❌ Failed to fetch query:", error)
     return NextResponse.json({ error: "Failed to fetch query" }, { status: 500 })
   }
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, context: Promise<{ params: { id: string } }>) {
+  const { params } = await context;
+  const { id } = params;
   const user = await getCurrentUser(request)
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
   try {
-    const query = await databaseService.getQuery(params.id)
-    if (!query) {
-      return NextResponse.json({ error: "Query not found" }, { status: 404 })
+    const query = await databaseService.getQuery(id)
+    if (!query || query.userId !== user.$id) {
+      return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 })
     }
-    if (query.userId !== user.$id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+
     const body = await request.json()
-    const updated = await databaseService.updateQuery(params.id, body)
+    const updated = await databaseService.updateQuery(id, body)
     return NextResponse.json(updated)
   } catch (error) {
+    console.error("❌ Failed to update query:", error)
     return NextResponse.json({ error: "Failed to update query" }, { status: 500 })
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, context: Promise<{ params: { id: string } }>) {
+  const { params } = await context;
+  const { id: queryId } = params;
   const user = await getCurrentUser(request)
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
   try {
-    const query = await databaseService.getQuery(params.id)
-    if (!query) {
-      return NextResponse.json({ error: "Query not found" }, { status: 404 })
+    const query = await databaseService.getQuery(queryId)
+    if (!query || query.userId !== user.$id) {
+      return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 })
     }
-    if (query.userId !== user.$id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-    const success = await databaseService.deleteQuery(params.id)
+
+    // Extract IP & UA from headers
+    const ip = request.headers.get("x-real-ip") || "unknown"
+    const uaRaw = request.headers.get("x-user-agent") || "{}"
+    const userAgent = JSON.parse(uaRaw)
+
+    const success = await databaseService.deleteQuery(queryId, {
+      userId: user.$id,
+      ipAddress: ip,
+      userAgent,
+    })
+
     if (!success) {
-      return NextResponse.json({ error: "Query not found" }, { status: 404 })
+      return NextResponse.json({ error: "Failed to delete" }, { status: 500 })
     }
+
     return NextResponse.json({ success: true })
   } catch (error) {
+    console.error("❌ Failed to delete query:", error)
     return NextResponse.json({ error: "Failed to delete query" }, { status: 500 })
   }
 }

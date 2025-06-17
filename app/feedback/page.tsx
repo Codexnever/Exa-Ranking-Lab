@@ -1,6 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useFeedbackLogic } from "@/logic/feedbackLogic"
+import { useQueries } from "@/hooks/use-queries"
+import { useSnapshots } from "@/hooks/use-snapshots"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -8,53 +10,31 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Star, MessageSquare, ThumbsUp } from "lucide-react"
-import { useQueries } from "@/hooks/use-queries"
-import { useSnapshots } from "@/hooks/use-snapshots"
-import { toast } from "sonner"
+import type { RankingSnapshot, SearchResult } from "@/lib/types"
+
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
 
 export default function Feedback() {
   const { queries } = useQueries()
   const { snapshots } = useSnapshots()
-  const [selectedQuery, setSelectedQuery] = useState("")
-  const [selectedSnapshot, setSelectedSnapshot] = useState("")
-  const [feedback, setFeedback] = useState({
-    resultUrl: "",
-    feedbackType: "relevance",
-    rating: 5,
-    comment: "",
-    expectedPosition: "",
-  })
-
-  const handleSubmitFeedback = async () => {
-    try {
-      const response = await fetch("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          queryId: selectedQuery,
-          snapshotId: selectedSnapshot,
-          ...feedback,
-          expectedPosition: feedback.expectedPosition ? Number.parseInt(feedback.expectedPosition) : undefined,
-        }),
-      })
-
-      if (!response.ok) throw new Error("Failed to submit feedback")
-
-      toast.success("Feedback submitted successfully!")
-      setFeedback({
-        resultUrl: "",
-        feedbackType: "relevance",
-        rating: 5,
-        comment: "",
-        expectedPosition: "",
-      })
-    } catch (error) {
-      toast.error("Failed to submit feedback")
-    }
-  }
-
-  const filteredSnapshots = snapshots.filter((s) => !selectedQuery || s.queryId === selectedQuery)
-  const selectedSnapshotData = snapshots.find((s) => s.id === selectedSnapshot)
+  const {
+    selectedQuery,
+    setSelectedQuery,
+    selectedSnapshot,
+    setSelectedSnapshot,
+    feedback,
+    setFeedback,
+    filteredSnapshots,
+    selectedSnapshotData,
+    handleSubmitFeedback,
+  } = useFeedbackLogic(queries, snapshots)
 
   return (
     <div className="space-y-6">
@@ -100,9 +80,9 @@ export default function Feedback() {
                     <SelectValue placeholder="Select a snapshot" />
                   </SelectTrigger>
                   <SelectContent>
-                    {filteredSnapshots.map((snapshot) => (
+                    {filteredSnapshots.map((snapshot: RankingSnapshot) => (
                       <SelectItem key={snapshot.id} value={snapshot.id}>
-                        {new Date(snapshot.timestamp).toLocaleDateString()} - {snapshot.results.length} results
+                        {formatDate(snapshot.timestamp.toString())} - {snapshot.results.length} results
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -194,7 +174,7 @@ export default function Feedback() {
           <CardContent>
             {selectedSnapshotData ? (
               <div className="space-y-3 max-h-96 overflow-y-auto">
-                {selectedSnapshotData.results.slice(0, 10).map((result, index) => (
+                {selectedSnapshotData.results.map((result: SearchResult, index: number) => (
                   <div
                     key={result.id}
                     className={`p-3 rounded-lg border cursor-pointer transition-colors ${
