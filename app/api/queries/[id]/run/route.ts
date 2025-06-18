@@ -43,7 +43,7 @@ async function handlePost(request: NextRequest, queryId: string) {
     })
     console.log("[Exa Search Results]", exaResults)
 
-    const responseTime = (Date.now() - start) / 1000
+    const responseTime = (Date.now() - start)
 
     const mappedResults = (exaResults.results || []).map((r: any, idx: number) => ({
       id: r.id || `${query.id}_${idx}`,

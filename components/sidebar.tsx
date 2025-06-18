@@ -11,6 +11,7 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
+  MonitorCog,
   Activity,
   Database,
 } from "lucide-react"
@@ -37,7 +38,7 @@ export default function Sidebar() {
     },
     {
       label: "Query Monitor",
-      icon: Activity,
+      icon: MonitorCog,
       href: "/query-monitor",
     },
     {

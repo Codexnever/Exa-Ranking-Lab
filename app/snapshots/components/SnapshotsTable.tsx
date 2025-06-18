@@ -2,6 +2,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Calendar, Clock } from "lucide-react"
 import type { RankingSnapshot, QueryConfig } from "@/lib/types"
+import { formatResponseTime } from "@/lib/format-response-time"
 
 interface SnapshotsTableProps {
   filteredSnapshots: (RankingSnapshot & { queryInfo: QueryConfig | null })[]
@@ -65,9 +66,7 @@ export function SnapshotsTable({ filteredSnapshots, isLoading, formatDate }: Sna
                 <div className="flex items-center gap-2">
                   <Clock className="w-3 h-3 text-gray-400" />
                   <span className="text-sm">
-                    {snapshot.metadata.responseTime > 0
-                      ? `${snapshot.metadata.responseTime.toFixed(1)}s`
-                      : "—"}
+                    {formatResponseTime(snapshot.metadata.responseTime)}
                   </span>
                 </div>
               </TableCell>

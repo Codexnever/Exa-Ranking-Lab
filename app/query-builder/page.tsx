@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
-import { QueryForm } from "@/components/query-form"
+import { QueryForm } from "@/components/query-form/QueryForm"
 import QueryTable from "@/components/query-table"
 import FilterControls from "@/components/filter-controls"
-import { useQueriesStore } from "@/store"
+import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
 import { toast } from "sonner"
 import type { QueryConfig } from "@/lib/types"
 import { useAuth } from "@/contexts/auth-context"
@@ -22,11 +22,14 @@ export default function QueryBuilder() {
   const createQuery = useQueriesStore((state) => state.createQuery)
   const runQuery = useQueriesStore((state) => state.runQuery)
   const fetchQueries = useQueriesStore((state) => state.fetchQueries)
+  const updateQuery = useQueriesStore((state) => state.updateQuery)
   const { userId } = useAuth()
-  
+  const [editingQuery, setEditingQuery] = useState<QueryConfig | null>(null)
+
+  // On mount, show cached queries instantly. Trigger background fetch for fresh data.
   useEffect(() => {
-    fetchQueries()
-  }, [fetchQueries])
+    fetchQueries(); // Always fetch fresh queries in background
+  }, []);
 
   const [filters, setFilters] = useState<Filters>({
     tags: [],
@@ -77,8 +80,12 @@ export default function QueryBuilder() {
   // Handle deleting a query
   const handleDeleteQuery = async (queryId: string) => {
     try {
-      await useQueriesStore.getState().deleteQuery(queryId)
-      toast.success("Query deleted successfully!")
+      await useQueriesStore.getState().deleteQuery(queryId);
+      await fetchQueries();
+      await useSnapshotsStore.getState().fetchSnapshots();
+      const snapshots = useSnapshotsStore.getState().snapshots;
+      useAnalyticsStore.getState().calculateAnalyticsFromSnapshots(snapshots);
+      toast.success("Query deleted successfully!");
     } catch (error) {
       toast.error("Failed to delete query")
     }
@@ -86,17 +93,34 @@ export default function QueryBuilder() {
 
   // Handle editing a query
   const handleEditQuery = (query: QueryConfig) => {
-    // You can open a modal or set state to edit the query
-    // For now, just log it (replace with your edit logic/UI)
-    console.log('Edit query:', query)
-    toast.info(`Edit query: ${query.name}`)
+    setEditingQuery(query)
+  }
+
+  // Handle update query
+  const handleUpdateQuery = async (id: string, data: Partial<QueryConfig>) => {
+    try {
+      await updateQuery(id, data)
+      await fetchQueries()
+      await useSnapshotsStore.getState().fetchSnapshots()
+      const snapshots = useSnapshotsStore.getState().snapshots
+      useAnalyticsStore.getState().calculateAnalyticsFromSnapshots(snapshots)
+      setEditingQuery(null)
+      toast.success("Query updated successfully!")
+    } catch (error) {
+      toast.error("Failed to update query")
+    }
   }
 
   return (
     <div className="space-y-6">
       <div className="grid gap-6">
         <Card className="p-6">
-          <QueryForm onSubmit={handleAddQuery} />
+          <QueryForm
+            onSubmit={handleAddQuery}
+            editingQuery={editingQuery}
+            onUpdate={handleUpdateQuery}
+            onCancelEdit={() => setEditingQuery(null)}
+          />
         </Card>
 
         <div className="space-y-4">

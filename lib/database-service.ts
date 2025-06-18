@@ -104,7 +104,6 @@ class DatabaseService {
       const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.QUERIES, [
         Query.equal("userId", userId)
       ])
-      console.log('Database Service.ts {response}:-', response)
       return response.documents.map((doc) => this.transformQueryDocument(doc))
     } catch (error) {
       console.error("Failed to fetch queries:", error)
@@ -113,7 +112,6 @@ class DatabaseService {
   }
 
   async getQuery(id: string): Promise<QueryConfig | null> {
-    console.log('getting databasequeryid:-', id)
     try {
       if (!id) {
         console.error("No query ID provided")
@@ -271,7 +269,6 @@ class DatabaseService {
 
   async getSnapshots(queryId?: string, userId?: string): Promise<RankingSnapshot[]> {
     try {
-      console.log('getSnapshots called with:', { queryId, userId })
       if (this.isLocal) {
         const snapshots = this.loadFromStorage<RankingSnapshot>("snapshots")
         let filtered = snapshots
@@ -284,7 +281,7 @@ class DatabaseService {
       if (queryId) queries.push(Query.equal("queryId", queryId))
       if (userId) queries.push(Query.equal("userId", userId))
       const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries)
-      console.log('getSnapshots Appwrite response:', response)
+      // console.log('getSnapshots Appwrite response:', response)
       return response.documents.map((doc) => this.transformSnapshotDocument(doc))
     } catch (error) {
       console.error("Failed to fetch snapshots:", error)
@@ -366,7 +363,7 @@ class DatabaseService {
       } else {
         const queries = userId ? [Query.equal("userId", userId)] : [];
         const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries);
-        console.log('getanalyticsbest log chaking', queries)//get empty
+        // console.log('getanalyticsbest log chaking', queries)//get empty
         // Safely transform and filter out null/undefined
         snapshots = response.documents
           .map((doc) => {
@@ -432,7 +429,6 @@ class DatabaseService {
 
         // Response Time
         totalResponseTime += snap.metadata.responseTime;
-   console.log('Total Response Time:-', totalResponseTime)
         // Success Check
         if (snap.results.length > 0) successCount++;
 

@@ -89,10 +89,10 @@ export default function Analytics() {
   } = useAnalyticsCalculations(queries, snapshots, timeRange)
 
   useEffect(() => {
-    fetchQueries()
-    fetchAnalytics()
-    fetchSnapshots()
-  }, [])
+    fetchQueries();
+    fetchAnalytics();
+    fetchSnapshots();
+  }, []);
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">

@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/auth-context"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import { useAnalyticsStore } from "@/store"
+import { formatResponseTime } from "@/lib/format-response-time"
 
 export default function Dashboard() {
   const { user, loading } = useAuth()
@@ -148,7 +149,7 @@ export default function Dashboard() {
             <Clock className="w-4 h-4 text-violet-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-gray-900">{analytics?.avgResponseTime != null ? analytics.avgResponseTime.toFixed(1) : "0.0"}s</div>
+            <div className="text-2xl font-bold text-gray-900">{formatResponseTime(analytics?.avgResponseTime ?? 0)}</div>
             <p className="text-xs text-emerald-600 flex items-center gap-1">
               <TrendingDown className="w-3 h-3" />
               -200ms improvement
@@ -197,7 +198,7 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="text-sm font-medium text-gray-500">
-                        {snapshot.metadata.responseTime.toFixed(1)}s
+                        {formatResponseTime(snapshot.metadata.responseTime)}
                       </div>
                     </div>
                   )

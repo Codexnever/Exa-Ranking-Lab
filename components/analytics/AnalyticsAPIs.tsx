@@ -1,6 +1,7 @@
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Target, BarChart3, Globe, Clock } from "lucide-react";
+import { formatResponseTime } from "@/lib/format-response-time";
 
 export function AnalyticsAPIs({ analytics }: { analytics: any }) {
   return (
@@ -51,7 +52,7 @@ export function AnalyticsAPIs({ analytics }: { analytics: any }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-gray-900">{analytics?.avgResponseTime?.toFixed(1) ?? 0}s</div>
+          <div className="text-2xl font-bold text-gray-900">{formatResponseTime(analytics?.avgResponseTime)}</div>
           <p className="text-xs text-gray-500 mt-1">API response time</p>
         </CardContent>
       </Card>

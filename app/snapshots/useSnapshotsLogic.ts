@@ -25,7 +25,7 @@ export function useSnapshotsLogic() {
 
   useEffect(() => {
     if (user?.$id) {
-      fetchSnapshots()
+      fetchSnapshots(); // Always fetch fresh snapshots in background
     }
   }, [user?.$id])
 
@@ -78,16 +78,16 @@ export function useSnapshotsLogic() {
   }
 
   const handleCreateSnapshot = async () => {
-    if (!user) {
-      toast({ title: "Authentication required", description: "Please log in to create snapshots.", variant: "destructive" })
-      return
-    }
-    if (!selectedQueryId) {
-      toast({ title: "Select a query", description: "Please select a query to snapshot.", variant: "destructive" })
-      return
-    }
-    setCreating(true)
+    setCreating(true);
     try {
+      if (!user) {
+        toast({ title: "Authentication required", description: "Please log in to create snapshots.", variant: "destructive" })
+        return
+      }
+      if (!selectedQueryId) {
+        toast({ title: "Select a query", description: "Please select a query to snapshot.", variant: "destructive" })
+        return
+      }
       const jwt = getJWTToken()
       if (!jwt) {
         toast({ title: "Authentication error", description: "No valid session found. Please log in again.", variant: "destructive" })
@@ -147,13 +147,13 @@ export function useSnapshotsLogic() {
         },
       }
       snapshotsStore.setSnapshots([newSnapshot, ...snapshotsStore.snapshots])
-      analyticsStore.calculateAnalyticsFromSnapshots([newSnapshot, ...snapshotsStore.snapshots])
-      analyticsStore.fetchAnalytics()
-      toast({ title: "Snapshot created!", description: `Snapshot for '${queryConfig.query}' created.` })
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message || "Failed to create snapshot", variant: "destructive" })
+      await fetchSnapshots();
+      analyticsStore.calculateAnalyticsFromSnapshots(snapshotsStore.snapshots);
+      toast({ title: "Snapshot created!" })
+    } catch (error) {
+      toast({ title: "Failed to create snapshot", variant: "destructive" })
     } finally {
-      setCreating(false)
+      setCreating(false);
     }
   }
 

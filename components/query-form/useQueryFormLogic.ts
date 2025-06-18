@@ -8,13 +8,17 @@ import type { QueryConfig } from "@/lib/types"
 import { useAuth } from "@/contexts/auth-context"
 import { useAnalytics } from "@/hooks/use-analytics"
 
-const { analytics, fetchAnalytics } = useAnalytics()
-
-  useEffect(() => {
-    fetchAnalytics()
-  }, [])
-  
-const QueryCategory = z.enum(["company", "research paper", "news", "pdf", "github", "tweet", "personal site","linkedin profile", "financial report"])
+const QueryCategory = z.enum([
+  "company",
+  "research paper",
+  "news",
+  "pdf",
+  "github",
+  "tweet",
+  "personal site",
+  "linkedin profile",
+  "financial report",
+])
 const QueryFrequency = z.enum(["hourly", "daily", "weekly"])
 
 const formSchema = z.object({
@@ -37,29 +41,44 @@ const formSchema = z.object({
 
 type FormSchema = z.infer<typeof formSchema>
 
-export function useQueryFormLogic(onSubmit: (data: Omit<QueryConfig, "id" | "createdAt" | "userId">) => void) {
+export function useQueryFormLogic(
+  onSubmit: (data: Omit<QueryConfig, "id" | "createdAt" | "userId">) => void,
+  editingQuery?: QueryConfig | null
+) {
   const { userId } = useAuth()
-  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [selectedTags, setSelectedTags] = useState<string[]>(editingQuery?.tags || [])
   const [domainInput, setDomainInput] = useState("")
   const [tagInput, setTagInput] = useState("")
 
+  const { analytics, fetchAnalytics } = useAnalytics()
+  useEffect(() => {
+    fetchAnalytics()
+  }, [])
+
   const form = useForm<FormSchema>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      name: "",
-      query: "",
-      category: "news",
-      filters: {
-        numResults: 10,
-        includeDomains: [],
-        excludeDomains: [],
-      },
-      schedule: {
-        enabled: false,
-        frequency: "daily",
-      },
-      tags: [],
-    },
+    defaultValues: editingQuery
+      ? {
+          ...editingQuery,
+          tags: editingQuery.tags || [],
+          filters: editingQuery.filters || { numResults: 10, includeDomains: [], excludeDomains: [] },
+          schedule: editingQuery.schedule || { enabled: false, frequency: "daily" },
+        }
+      : {
+          name: "",
+          query: "",
+          category: "news",
+          filters: {
+            numResults: 10,
+            includeDomains: [],
+            excludeDomains: [],
+          },
+          schedule: {
+            enabled: false,
+            frequency: "daily",
+          },
+          tags: [],
+        },
   })
 
   const handleDomainAdd = (domain: string, type: "include" | "exclude") => {

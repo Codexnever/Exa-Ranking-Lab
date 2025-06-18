@@ -46,38 +46,41 @@ export async function PUT(request: NextRequest, context: Promise<{ params: { id:
   }
 }
 
-export async function DELETE(request: NextRequest, context: Promise<{ params: { id: string } }>) {
-  const { params } = await context;
-  const { id: queryId } = params;
-  const user = await getCurrentUser(request)
+export async function DELETE(
+  request: NextRequest,
+  context: { params: { id: string } }
+) {
+  const { id: queryId } = context.params; // 💥 No need to await
+  const user = await getCurrentUser(request);
+
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    const query = await databaseService.getQuery(queryId)
+    const query = await databaseService.getQuery(queryId);
     if (!query || query.userId !== user.$id) {
-      return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 })
+      return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 });
     }
 
-    // Extract IP & UA from headers
-    const ip = request.headers.get("x-real-ip") || "unknown"
-    const uaRaw = request.headers.get("x-user-agent") || "{}"
-    const userAgent = JSON.parse(uaRaw)
+    const ip = request.headers.get("x-real-ip") || "unknown";
+    const uaRaw = request.headers.get("x-user-agent") || "{}";
+    const userAgent = JSON.parse(uaRaw);
 
     const success = await databaseService.deleteQuery(queryId, {
       userId: user.$id,
       ipAddress: ip,
       userAgent,
-    })
+    });
 
     if (!success) {
-      return NextResponse.json({ error: "Failed to delete" }, { status: 500 })
+      return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("❌ Failed to delete query:", error)
-    return NextResponse.json({ error: "Failed to delete query" }, { status: 500 })
+    console.error("❌ Failed to delete query:", error);
+    return NextResponse.json({ error: "Failed to delete query" }, { status: 500 });
   }
 }
+
