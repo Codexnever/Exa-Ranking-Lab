@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useQueries } from "@/hooks/use-queries"
-import QueryExecutionStatus from "@/components/query-execution-status"
+import QueryExecutionStatus from "@/components/query-form/query-execution-status"
 import { Play, Pause, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 

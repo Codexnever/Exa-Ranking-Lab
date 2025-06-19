@@ -1,5 +1,3 @@
-"use client"
-
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -17,7 +15,11 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { useState } from "react"
 
@@ -95,11 +97,12 @@ export default function Sidebar() {
             <Link
               key={route.href}
               href={route.href}
+              prefetch
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 pathname === route.href
                   ? "bg-blue-50 text-blue-700 border-r-2 border-blue-600"
-                  : "text-gray-700 hover:bg-gray-50",
+                  : "text-gray-700 hover:bg-gray-50"
               )}
             >
               <route.icon className="h-4 w-4" />
@@ -109,15 +112,28 @@ export default function Sidebar() {
         </div>
 
         <div className="mt-6 space-y-2">
-          <div className="px-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Saved Queries</div>
-          <Collapsible open={queriesOpen} onOpenChange={setQueriesOpen} className="space-y-1">
+          <div className="px-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Saved Queries
+          </div>
+          <Collapsible
+            open={queriesOpen}
+            onOpenChange={setQueriesOpen}
+            className="space-y-1"
+          >
             <CollapsibleTrigger asChild>
-              <Button variant="ghost" className="w-full justify-between px-3 py-2 text-sm font-medium text-gray-700">
+              <Button
+                variant="ghost"
+                className="w-full justify-between px-3 py-2 text-sm font-medium text-gray-700"
+              >
                 <div className="flex items-center gap-3">
                   <Database className="h-4 w-4" />
                   <span>Query Collections</span>
                 </div>
-                {queriesOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                {queriesOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-1">

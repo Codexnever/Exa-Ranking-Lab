@@ -50,7 +50,7 @@ export async function DELETE(
   request: NextRequest,
   context: { params: { id: string } }
 ) {
-  const { id: queryId } = context.params; // 💥 No need to await
+  const { id: queryId } = context.params; 
   const user = await getCurrentUser(request);
 
   if (!user) {

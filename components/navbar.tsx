@@ -1,10 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { usePathname } from "next/navigation"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,44 +11,40 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Bell, ChevronDown, Plus, Search, User, Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 
 export default function Navbar() {
   const pathname = usePathname()
-  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState("")
-
   const { user, loading, logout } = useAuth()
 
   const handleLogout = async () => {
     try {
       await logout()
-      router.push('/auth')
+      window.location.href = "/auth" // force redirect after logout
     } catch (error) {
-      // Error is already handled by the auth context
+      // error already handled in context
     }
   }
 
-  // Get page title based on pathname
   const getPageTitle = () => {
-    if (pathname === "/") return "Dashboard"
-    if (pathname === "/query-builder") return "Query Builder"
-    if (pathname === "/snapshots") return "Snapshots"
-    if (pathname === "/compare") return "Compare Rankings"
-    if (pathname === "/feedback") return "Feedback"
-    if (pathname === "/settings") return "Settings"
-    return "Exa Ranking Lab"
+    switch (pathname) {
+      case "/": return "Dashboard"
+      case "/query-builder": return "Query Builder"
+      case "/snapshots": return "Snapshots"
+      case "/compare": return "Compare Rankings"
+      case "/feedback": return "Feedback"
+      case "/settings": return "Settings"
+      default: return "Exa Ranking Lab"
+    }
   }
 
   const getUserInitials = () => {
     if (!user?.name) return "U"
-    return user.name
-      .split(" ")
-      .map((n: string) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2)
+    return user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
   }
 
   if (loading) {
@@ -107,19 +101,33 @@ export default function Navbar() {
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>{user.name || user.email}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => router.push('/profile')}>
-                    <User className="mr-2 h-4 w-4" />
-                    <span>Profile</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => router.push('/settings')}>Settings</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => router.push('/api-keys')}>API Keys</DropdownMenuItem>
+                  <Link href="/profile" passHref>
+                    <DropdownMenuItem asChild>
+                      <a className="flex items-center gap-2">
+                        <User className="h-4 w-4" />
+                        Profile
+                      </a>
+                    </DropdownMenuItem>
+                  </Link>
+                  <Link href="/settings" passHref>
+                    <DropdownMenuItem asChild>
+                      <a>Settings</a>
+                    </DropdownMenuItem>
+                  </Link>
+                  <Link href="/api-keys" passHref>
+                    <DropdownMenuItem asChild>
+                      <a>API Keys</a>
+                    </DropdownMenuItem>
+                  </Link>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout}>Log out</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </>
           ) : (
-            <Button onClick={() => router.push('/auth')}>Sign In</Button>
+            <Link href="/auth">
+              <Button>Sign In</Button>
+            </Link>
           )}
         </div>
       </div>
