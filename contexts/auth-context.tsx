@@ -80,10 +80,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await account.deleteSession("current")
       } catch (error) {
-        // Ignore errors when deleting session (session might not exist or be expired)
-        console.log("No existing session to delete or session deletion failed")
+        console.error('Error to login:-', error)
       }
-      
+
       await account.createEmailPasswordSession(email, password)
       const jwtRes = await account.createJWT()
       const jwt = jwtRes.jwt
@@ -111,9 +110,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       await account.deleteSession("current")
-    } catch {
-      // Ignore errors when deleting session during logout
-    }
+    } catch (err){
+      toast.error('Error during logout')
+      console.error('Logout error:', err)}
     localStorage.removeItem("appwrite_jwt")
     document.cookie = `appwrite_jwt=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     setUser(null)
@@ -123,7 +122,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const prefs = await account.updatePrefs(data)
       setUser(prev => prev ? { ...prev, prefs } : null)
-      toast.success("Profile updated")
     } catch (err) {
       toast.error("Update failed")
     }

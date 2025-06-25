@@ -1,11 +1,27 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { SettingsApiConfig } from "../../components/settings/SettingsApiConfig"
-import { SettingsNotifications } from "../../components/settings/SettingsNotifications"
-import { SettingsPreferences } from "../../components/settings/SettingsPreferences"
-import { SettingsDataManagement } from "../../components/settings/SettingsDataManagement"
-import { SettingsSecurity } from "../../components/settings/SettingsSecurity"
+const SettingsApiConfig = dynamic(() => import("@/components/settings/SettingsApiConfig").then(mod => mod.SettingsApiConfig), {
+  loading: () => <SettingsApiConfigSkeleton />, ssr: false,
+})
+const SettingsNotifications = dynamic(() => import("@/components/settings/SettingsNotifications").then(mod => mod.SettingsNotifications), {
+  loading: () => <SettingsNotificationsSkeleton />, ssr: false,
+})
+const SettingsPreferences = dynamic(() => import("@/components/settings/SettingsPreferences").then(mod => mod.SettingsPreferences), {
+  loading: () => <SettingsPreferencesSkeleton />, ssr: false,
+})
+const SettingsDataManagement = dynamic(() => import("@/components/settings/SettingsDataManagement").then(mod => mod.SettingsDataManagement), {
+  loading: () => <SettingsDataManagementSkeleton />, ssr: false,
+})
+const SettingsSecurity = dynamic(() => import("@/components/settings/SettingsSecurity").then(mod => mod.SettingsSecurity), {
+  loading: () => <SettingsSecuritySkeleton />, ssr: false,
+})
+import SettingsApiConfigSkeleton from "@/components/loaders/SettingsApiConfigSkeleton"
+import SettingsNotificationsSkeleton from "@/components/loaders/SettingsNotificationsSkeleton"
+import SettingsPreferencesSkeleton from "@/components/loaders/SettingsPreferencesSkeleton"
+import SettingsDataManagementSkeleton from "@/components/loaders/SettingsDataManagementSkeleton"
+import SettingsSecuritySkeleton from "@/components/loaders/SettingsSecuritySkeleton"
 
 export default function SettingsPage() {
   return (

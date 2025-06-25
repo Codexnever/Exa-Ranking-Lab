@@ -1,12 +1,19 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Camera } from "lucide-react"
-import { SnapshotsFilters } from "./components/SnapshotsFilters"
-import { SnapshotsTable } from "./components/SnapshotsTable"
-import { useSnapshotsLogic } from "./useSnapshotsLogic"
+const SnapshotsFilters = dynamic(() => import("@/components/snapshots/SnapshotsFilters").then(mod => mod.SnapshotsFilters), {
+  loading: () => <SnapshotsFiltersSkeleton />, ssr: false,
+})
+const SnapshotsTable = dynamic(() => import("@/components/snapshots/SnapshotsTable").then(mod => mod.SnapshotsTable), {
+  loading: () => <SnapshotsTableSkeleton />, ssr: false,
+})
+import SnapshotsFiltersSkeleton from "@/components/loaders/SnapshotsFiltersSkeleton"
+import SnapshotsTableSkeleton from "@/components/loaders/SnapshotsTableSkeleton"
+import { useSnapshotsLogic } from "../../logic/useSnapshotsLogic"
 
 export default function Snapshots() {
   const {

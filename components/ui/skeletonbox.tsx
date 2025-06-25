@@ -10,7 +10,17 @@ export function SkeletonBox({
 }) {
   return (
     <div
-      className={`rounded-md bg-gray-200 dark:bg-gray-700 animate-shimmer bg-[linear-gradient(90deg,#e5e7eb,25%,#f3f4f6,50%,#e5e7eb,75%)] bg-[length:200%_100%] ${height} ${width} ${className}`}
+      className={`rounded-md bg-gray-100 animate-shimmer bg-gradient-to-r from-gray-100 via-gray-200 to-gray-100 ${height} ${width} ${className}`}
+      style={{
+        backgroundSize: '200% 100%',
+        animation: 'shimmer 1.2s linear infinite',
+      }}
     />
   )
 }
+
+// Add shimmer animation globally (in your CSS):
+// @keyframes shimmer {
+//   0% { background-position: -200% 0; }
+//   100% { background-position: 200% 0; }
+// }

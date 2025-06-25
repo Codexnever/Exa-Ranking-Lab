@@ -10,13 +10,43 @@ import { useQueries } from "@/hooks/use-queries"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useAnalyticsCalculations } from "@/logic/analyticsLogic"
 import { useEffect, useMemo, useState } from "react"
-import { AnalyticsAPIs } from "@/components/analytics/AnalyticsAPIs"
-import { RankingTrendChart } from "@/components/analytics/RankingTrendChart"
-import { CategoryPieChart } from "@/components/analytics/CategoryPieChart"
-import { TopPerformingQueries } from "@/components/analytics/TopPerformingQueries"
-import { RankingBarChart } from "@/components/analytics/RankingBarChart"
-import { PerformanceCharts } from "@/components/analytics/PerformanceCharts"
-import { QueryPerformanceStatsTable } from "@/components/analytics/QueryPerformanceStatsTable"
+import dynamic from "next/dynamic"
+import AnalyticsAPIsSkeleton from "@/components/loaders/AnalyticsAPIsSkeleton"
+import RankingTrendChartSkeleton from "@/components/loaders/RankingTrendChartSkeleton"
+import CategoryPieChartSkeleton from "@/components/loaders/CategoryPieChartSkeleton"
+import TopPerformingQueriesSkeleton from "@/components/loaders/TopPerformingQueriesSkeleton"
+import RankingBarChartSkeleton from "@/components/loaders/RankingBarChartSkeleton"
+import PerformanceChartsSkeleton from "@/components/loaders/PerformanceChartsSkeleton"
+import QueryPerformanceStatsTableSkeleton from "@/components/loaders/QueryPerformanceStatsTableSkeleton"
+
+const AnalyticsAPIs = dynamic(() => import("@/components/analytics/AnalyticsAPIs").then(mod => mod.AnalyticsAPIs), {
+  loading: () => <AnalyticsAPIsSkeleton />,
+  ssr: false,
+})
+const RankingTrendChart = dynamic(() => import("@/components/analytics/RankingTrendChart").then(mod => mod.RankingTrendChart), {
+  loading: () => <RankingTrendChartSkeleton />,
+  ssr: false,
+})
+const CategoryPieChart = dynamic(() => import("@/components/analytics/CategoryPieChart").then(mod => mod.CategoryPieChart), {
+  loading: () => <CategoryPieChartSkeleton />,
+  ssr: false,
+})
+const TopPerformingQueries = dynamic(() => import("@/components/analytics/TopPerformingQueries").then(mod => mod.TopPerformingQueries), {
+  loading: () => <TopPerformingQueriesSkeleton />,
+  ssr: false,
+})
+const RankingBarChart = dynamic(() => import("@/components/analytics/RankingBarChart").then(mod => mod.RankingBarChart), {
+  loading: () => <RankingBarChartSkeleton />,
+  ssr: false,
+})
+const PerformanceCharts = dynamic(() => import("@/components/analytics/PerformanceCharts").then(mod => mod.PerformanceCharts), {
+  loading: () => <PerformanceChartsSkeleton />,
+  ssr: false,
+})
+const QueryPerformanceStatsTable = dynamic(() => import("@/components/analytics/QueryPerformanceStatsTable").then(mod => mod.QueryPerformanceStatsTable), {
+  loading: () => <QueryPerformanceStatsTableSkeleton />,
+  ssr: false,
+})
 
 interface DailyStats {
   totalPosition: number

@@ -8,18 +8,16 @@ import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
 import type { QueryConfig } from "@/lib/types"
 import { useAuth } from "@/contexts/auth-context"
 
-// 🧠 Skeleton loaders
 const QueryFormSkeleton = dynamic(() => import("@/components/loaders/QueryFormSkeleton"))
 const QueryTableSkeleton = dynamic(() => import("@/components/loaders/QueryTableSkeleton"))
 const FilterControlsSkeleton = dynamic(() => import("@/components/loaders/FilterControlsSkeleton"))
 
 
-// 💥 Dynamic heavy components
-const QueryForm = dynamic(() => import("@/components/query-form/query-form"), {
+const QueryForm = dynamic(() => import("@/components/query-form/QueryForm").then(mod => mod.QueryForm), {
   loading: () => <QueryFormSkeleton />,
 })
 
-const QueryTable = dynamic(() => import("@/components/query-form/query-table"), {
+const QueryTable = dynamic(() => import("@/components/query-form/QueryTable"), {
   loading: () => <QueryTableSkeleton />,
 })
 
@@ -127,7 +125,7 @@ export default function QueryBuilder() {
         />
       </Card>
 
-      <FilterControls filters={filters} setFilters={setFilters} />
+      <FilterControls filters={filters} onFilterChange={setFilters} />
 
       <div className="space-y-4">
         <QueryTable
