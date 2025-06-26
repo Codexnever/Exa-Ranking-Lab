@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
     const queryId = searchParams.get("queryId")
     const userId = searchParams.get("userId")
 
-    const snapshots = await databaseService.getSnapshots(queryId || undefined, userId || undefined)
+    const snapshots = await databaseService.snapshotService.getSnapshots(queryId || undefined, userId || undefined)
 
     // Sort by newest first
     snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
 
     // 🛠 Proceed to snapshot creation
     const snapshot = await request.json()
-    const newSnapshot = await databaseService.createSnapshot({
+    const newSnapshot = await databaseService.snapshotService.createSnapshot({
       ...snapshot,
       userId: user.$id, // Attach correct user to snapshot
       timestamp: new Date(),

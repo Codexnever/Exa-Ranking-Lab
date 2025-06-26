@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    const queries = await databaseService.getQueries(user.$id)
+    const queries = await databaseService.queryService.getQueries(user.$id)
     return NextResponse.json(queries)
   } catch (err) {
     console.error("❌ Failed to fetch queries:", err)
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const query = await databaseService.createQuery({ ...body, userId: user.$id })
+    const query = await databaseService.queryService.createQuery({ ...body, userId: user.$id })
     return NextResponse.json(query)
   } catch (err) {
     console.error("❌ Failed to create query:", err)

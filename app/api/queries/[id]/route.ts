@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, context: Promise<{ params: { id:
   }
 
   try {
-    const query = await databaseService.getQuery(id)
+    const query = await databaseService.queryService.getQuery(id)
     if (!query || query.userId !== user.$id) {
       return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 })
     }
@@ -32,13 +32,13 @@ export async function PUT(request: NextRequest, context: Promise<{ params: { id:
   }
 
   try {
-    const query = await databaseService.getQuery(id)
+    const query = await databaseService.queryService.getQuery(id)
     if (!query || query.userId !== user.$id) {
       return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 })
     }
 
     const body = await request.json()
-    const updated = await databaseService.updateQuery(id, body)
+    const updated = await databaseService.queryService.updateQuery(id, body)
     return NextResponse.json(updated)
   } catch (error) {
     console.error("❌ Failed to update query:", error)
@@ -58,7 +58,7 @@ export async function DELETE(
   }
 
   try {
-    const query = await databaseService.getQuery(queryId);
+    const query = await databaseService.queryService.getQuery(queryId);
     if (!query || query.userId !== user.$id) {
       return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 });
     }
@@ -67,7 +67,7 @@ export async function DELETE(
     const uaRaw = request.headers.get("x-user-agent") || "{}";
     const userAgent = JSON.parse(uaRaw);
 
-    const success = await databaseService.deleteQuery(queryId, {
+    const success = await databaseService.queryService.deleteQuery(queryId, {
       userId: user.$id,
       ipAddress: ip,
       userAgent,

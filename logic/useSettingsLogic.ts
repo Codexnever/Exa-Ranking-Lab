@@ -5,7 +5,7 @@ import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
 
 export function useSettingsLogic() {
   // API Key logic
-  const [apiKey, setApiKey] = useState("24147791-a3e7-485c-9203-39b54618c9f0")
+  const [apiKey, setApiKey] = useState('')
   const [apiStatus, setApiStatus] = useState<'connected' | 'disconnected' | 'unknown'>("unknown")
   const [lastTested, setLastTested] = useState<string | null>(null)
 

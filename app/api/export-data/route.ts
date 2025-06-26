@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ error: "Snapshot ID is required" }, { status: 400 })
         }
 
-        data = await databaseService.getSnapshot(id)
+        data = await databaseService.snapshotService.getSnapshot(id)
         if (!data) {
           return NextResponse.json({ error: "Snapshot not found" }, { status: 404 })
         }
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ error: "Query ID is required" }, { status: 400 })
         }
 
-        const query = await databaseService.getQuery(id)
+        const query = await databaseService.queryService.getQuery(id)
         if (!query) {
           return NextResponse.json({ error: "Query not found" }, { status: 404 })
         }
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Fetch all snapshots belonging to this query and user
-        const snapshots = await databaseService.getSnapshots(id, user.$id)
+        const snapshots = await databaseService.snapshotService.getSnapshots(id, user.$id)
 
         data = {
           query,
@@ -63,17 +63,17 @@ export async function GET(request: NextRequest) {
 
       case "analytics": {
         // Export analytics only for the logged-in user
-        data = await databaseService.getAnalytics(user.$id)
+        data = await databaseService.analyticsService.getAnalytics(user.$id)
         break
       }
 
       case "all": {
         // Export all user data for full backup/export
         const [queries, snapshots, feedback, analytics] = await Promise.all([
-          databaseService.getQueries(user.$id),
-          databaseService.getSnapshots(undefined, user.$id),
-          databaseService.getFeedback(),
-          databaseService.getAnalytics(user.$id),
+          databaseService.queryService.getQueries(user.$id),
+          databaseService.snapshotService.getSnapshots(undefined, user.$id),
+          databaseService.feedbackService.getFeedback(),
+          databaseService.analyticsService.getAnalytics(user.$id),
         ])
         data = { queries, snapshots, feedback, analytics }
         break

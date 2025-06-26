@@ -5,11 +5,13 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Bell } from "lucide-react"
 import { useSettingsLogic } from "../../logic/useSettingsLogic"
+import { FeatureComingSoon } from "@/components/ui/FeatureComingSoon"
 
 export function SettingsNotifications() {
   const { notifications, setNotifications, handleSaveNotifications } = useSettingsLogic()
   return (
-    <Card>
+    <Card className="relative overflow-hidden">
+      <FeatureComingSoon label="Notifications" />
       <CardHeader>
         <CardTitle className="text-gray-900 flex items-center gap-2">
           <Bell className="w-5 h-5" />
@@ -27,6 +29,7 @@ export function SettingsNotifications() {
             <Switch
               checked={notifications.queryComplete}
               onCheckedChange={(checked) => setNotifications({ ...notifications, queryComplete: checked })}
+              disabled
             />
           </div>
           <Separator />
@@ -38,6 +41,7 @@ export function SettingsNotifications() {
             <Switch
               checked={notifications.queryFailed}
               onCheckedChange={(checked) => setNotifications({ ...notifications, queryFailed: checked })}
+              disabled
             />
           </div>
           <Separator />
@@ -49,6 +53,7 @@ export function SettingsNotifications() {
             <Switch
               checked={notifications.weeklyReport}
               onCheckedChange={(checked) => setNotifications({ ...notifications, weeklyReport: checked })}
+              disabled
             />
           </div>
           <Separator />
@@ -60,10 +65,13 @@ export function SettingsNotifications() {
             <Switch
               checked={notifications.rankingChanges}
               onCheckedChange={(checked) => setNotifications({ ...notifications, rankingChanges: checked })}
+              disabled
             />
           </div>
         </div>
-        <Button onClick={handleSaveNotifications}>Save Notification Settings</Button>
+        <Button onClick={handleSaveNotifications} disabled>
+          Save Notification Settings
+        </Button>
       </CardContent>
     </Card>
   )

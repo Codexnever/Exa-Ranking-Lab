@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const queryId = searchParams.get("queryId")
 
-    const feedback = await databaseService.getFeedback(queryId || user.$id)
+    const feedback = await databaseService.feedbackService.getFeedback(queryId || user.$id)
     return NextResponse.json(feedback)
   } catch (error) {
     console.error("❌ Failed to fetch feedback:", error)
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
 
-    const feedback = await databaseService.createFeedback({
+    const feedback = await databaseService.feedbackService.createFeedback({
       ...body,
       userId: user.$id,
     })

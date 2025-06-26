@@ -5,11 +5,14 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Settings } from "lucide-react"
 import { useSettingsLogic } from "../../logic/useSettingsLogic"
+import { FeatureComingSoon } from "@/components/ui/FeatureComingSoon"
 
 export function SettingsPreferences() {
   const { preferences, setPreferences, handleSavePreferences } = useSettingsLogic()
   return (
-    <Card>
+    <Card className="relative overflow-hidden">
+      {/* Here we disable all and add disable page here  */}
+      <FeatureComingSoon label="Preferences" />
       <CardHeader>
         <CardTitle className="text-gray-900 flex items-center gap-2">
           <Settings className="w-5 h-5" />
@@ -28,6 +31,7 @@ export function SettingsPreferences() {
               max="100"
               value={preferences.defaultResultCount}
               onChange={(e) => setPreferences({ ...preferences, defaultResultCount: Number.parseInt(e.target.value) })}
+              disabled
             />
           </div>
           <div className="space-y-2">
@@ -39,6 +43,7 @@ export function SettingsPreferences() {
               max="300"
               value={preferences.autoRefreshInterval}
               onChange={(e) => setPreferences({ ...preferences, autoRefreshInterval: Number.parseInt(e.target.value) })}
+              disabled
             />
           </div>
           <div className="space-y-2">
@@ -46,6 +51,7 @@ export function SettingsPreferences() {
             <Select
               value={preferences.theme}
               onValueChange={(value) => setPreferences({ ...preferences, theme: value })}
+              disabled
             >
               <SelectTrigger>
                 <SelectValue />
@@ -62,6 +68,7 @@ export function SettingsPreferences() {
             <Select
               value={preferences.timezone}
               onValueChange={(value) => setPreferences({ ...preferences, timezone: value })}
+              disabled
             >
               <SelectTrigger>
                 <SelectValue />
@@ -76,7 +83,9 @@ export function SettingsPreferences() {
             </Select>
           </div>
         </div>
-        <Button onClick={handleSavePreferences}>Save Preferences</Button>
+        <Button onClick={handleSavePreferences} disabled>
+          Save Preferences
+        </Button>
       </CardContent>
     </Card>
   )

@@ -2,7 +2,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Calendar, Clock } from "lucide-react"
 import type { RankingSnapshot, QueryConfig } from "@/lib/types"
-import { formatResponseTime } from "@/lib/format-response-time"
+import { formatResponseTime } from "@/hooks/format-response-time"
 
 interface SnapshotsTableProps {
   filteredSnapshots: (RankingSnapshot & { queryInfo: QueryConfig | null })[]

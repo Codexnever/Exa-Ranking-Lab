@@ -46,7 +46,7 @@ export class ExaClient {
     summary: true,
 }
 
-console.log('Checking Request numResults from Exa client:', options.numResults)
+// console.log('Checking Request numResults from Exa client:', options.numResults)
 
 const response = await fetch(`${this.baseUrl}/search`, {
     method: "POST",

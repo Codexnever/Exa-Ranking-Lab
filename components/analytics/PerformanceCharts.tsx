@@ -17,7 +17,7 @@ import {
   Bar,
   Legend,
 } from "recharts";
-import { formatResponseTime } from "@/lib/format-response-time";
+import { formatResponseTime } from "@/hooks/format-response-time";
 
 export function PerformanceCharts({
   performanceData,

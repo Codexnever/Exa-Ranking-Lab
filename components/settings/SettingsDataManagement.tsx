@@ -3,9 +3,19 @@ import { Button } from "@/components/ui/button"
 import { Download, Trash2, Database } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { useSettingsLogic } from "../../logic/useSettingsLogic"
+import { useQueries } from "@/hooks/use-queries"
+import { useSnapshots } from "@/hooks/use-snapshots"
+import { useAuth } from "@/contexts/auth-context"
 
 export function SettingsDataManagement() {
   const { handleExportData, handleClearData } = useSettingsLogic()
+  const { user } = useAuth()
+  const { queries } = useQueries()
+  const { snapshots } = useSnapshots()
+  // Only count queries/snapshots for current user if user is present
+  const userQueries = user ? queries.filter(q => q.userId === user.$id) : queries
+  const userSnapshots = user ? snapshots.filter(s => s.userId === user.$id) : snapshots
+
   return (
     <Card>
       <CardHeader>
@@ -43,11 +53,11 @@ export function SettingsDataManagement() {
           <div className="grid gap-2 md:grid-cols-3">
             <div className="p-3 border rounded-lg">
               <div className="text-sm font-medium">Queries</div>
-              <div className="text-lg font-bold">127</div>
+              <div className="text-lg font-bold">{userQueries.length}</div>
             </div>
             <div className="p-3 border rounded-lg">
               <div className="text-sm font-medium">Snapshots</div>
-              <div className="text-lg font-bold">--</div>
+              <div className="text-lg font-bold">{userSnapshots.length}</div>
             </div>
             <div className="p-3 border rounded-lg">
               <div className="text-sm font-medium">Feedback</div>

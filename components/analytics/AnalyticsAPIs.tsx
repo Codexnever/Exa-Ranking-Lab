@@ -1,7 +1,7 @@
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Target, BarChart3, Globe, Clock } from "lucide-react";
-import { formatResponseTime } from "@/lib/format-response-time";
+import { formatResponseTime } from "@/hooks/format-response-time";
 
 export function AnalyticsAPIs({ analytics }: { analytics: any }) {
   return (

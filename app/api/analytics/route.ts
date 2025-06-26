@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const analytics = await databaseService.getAnalytics(user.$id)
+    const analytics = await databaseService.analyticsService.getAnalytics(user.$id)
     return NextResponse.json(analytics)
   } catch (error) {
     console.error("❌ Failed to fetch analytics:", error)

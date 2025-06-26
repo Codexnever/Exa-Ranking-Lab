@@ -7,7 +7,6 @@ export function formatResponseTime(value: number | undefined): string {
     // >= 10s: no decimals
     return `${Math.round(seconds)}s`;
   } else if (seconds >= 1) {
-    // 1s <= value < 10s: two decimals
     return `${seconds.toLocaleString(undefined, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
