@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Bell, ChevronDown, Plus, Search, User, Loader2 } from "lucide-react"
+import { ChevronDown, Plus, Search, User, Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 
 export default function Navbar() {
@@ -26,7 +26,7 @@ export default function Navbar() {
       await logout()
       window.location.href = "/auth" // force redirect after logout
     } catch (error) {
-      // error already handled in context
+      console.error("Failed to log out:", error)
     }
   }
 
@@ -84,10 +84,10 @@ export default function Navbar() {
                 </Button>
               </Link>
 
-              <Button variant="ghost" size="icon" className="rounded-full">
+              {/* <Button variant="ghost" size="icon" className="rounded-full">
                 <Bell className="h-5 w-5" />
                 <span className="sr-only">Notifications</span>
-              </Button>
+              </Button> */}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -114,7 +114,7 @@ export default function Navbar() {
                       <a>Settings</a>
                     </DropdownMenuItem>
                   </Link>
-                  <Link href="/api-keys" passHref>
+                  <Link href="/settings" passHref>
                     <DropdownMenuItem asChild>
                       <a>API Keys</a>
                     </DropdownMenuItem>

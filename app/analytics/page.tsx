@@ -18,6 +18,7 @@ import TopPerformingQueriesSkeleton from "@/components/loaders/TopPerformingQuer
 import RankingBarChartSkeleton from "@/components/loaders/RankingBarChartSkeleton"
 import PerformanceChartsSkeleton from "@/components/loaders/PerformanceChartsSkeleton"
 import QueryPerformanceStatsTableSkeleton from "@/components/loaders/QueryPerformanceStatsTableSkeleton"
+import { useAuth } from "@/contexts/auth-context"
 
 const AnalyticsAPIs = dynamic(() => import("@/components/analytics/AnalyticsAPIs").then(mod => mod.AnalyticsAPIs), {
   loading: () => <AnalyticsAPIsSkeleton />,
@@ -105,11 +106,10 @@ export default function Analytics() {
   const { queries, fetchQueries } = useQueries()
   const { snapshots, fetchSnapshots } = useSnapshots()
   const [timeRange, setTimeRange] = useState("30d")
+  const { user } = useAuth()
 
   // Use extracted analytics logic
   const {
-    timeRangeMs,
-    filteredSnapshots,
     rankingTrendData,
     categoryDistribution,
     successRateByHour,

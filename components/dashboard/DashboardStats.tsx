@@ -3,8 +3,13 @@ import { Progress } from "@/components/ui/progress"
 import { BarChart3, TrendingUp, TrendingDown, Clock, Globe, CheckCircle } from "lucide-react"
 import { formatResponseTime } from "@/hooks/format-response-time"
 import React from "react"
+import { useAvgResponseTimeImprovement } from "@/logic/useAvgResponseTimeImprovement"
+import { useSnapshots } from "@/hooks/use-snapshots"
 
 export default function DashboardStats({ queries, analytics }: { queries: any[]; analytics: any }) {
+  const { snapshots } = useSnapshots()
+  const { improvementMs, prevAvg, currAvg } = useAvgResponseTimeImprovement(snapshots, 5)
+
   return (
     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
       <Card>
@@ -38,9 +43,10 @@ export default function DashboardStats({ queries, analytics }: { queries: any[];
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold text-gray-900">{formatResponseTime(analytics?.avgResponseTime ?? 0)}</div>
-          <p className="text-xs text-emerald-600 flex items-center gap-1">
-            <TrendingDown className="w-3 h-3" />
-            -200ms improvement
+          <p className={`text-xs flex items-center gap-1 mt-1 ${improvementMs > 0 ? 'text-emerald-600' : improvementMs < 0 ? 'text-rose-600' : 'text-gray-400'}`}> 
+            {improvementMs > 0 ? <TrendingDown className="w-3 h-3" /> : improvementMs < 0 ? <TrendingUp className="w-3 h-3" /> : <Clock className="w-3 h-3" />} 
+            {improvementMs > 0 ? `-${Math.abs(Math.round(improvementMs))}ms improvement` : improvementMs < 0 ? `+${Math.abs(Math.round(improvementMs))}ms slower` : 'No change'}
+            <span className="ml-2 text-gray-400">(Prev: {formatResponseTime(prevAvg)}, Now: {formatResponseTime(currAvg)})</span>
           </p>
         </CardContent>
       </Card>

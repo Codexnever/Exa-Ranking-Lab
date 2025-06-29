@@ -9,8 +9,10 @@ import { CompareSetup } from "@/components/compare/CompareSetup"
 import { CompareSummary } from "@/components/compare/CompareSummary"
 import { CompareTable } from "@/components/compare/CompareTable"
 import { useCompareLogic } from "@/logic/compareLogic"
+import { useAuth } from "@/contexts/auth-context"
 
 export default function CompareRankings() {
+  const { user } = useAuth()
   const { queries } = useQueries()
   const { snapshots } = useSnapshots()
   const [selectedQuery, setSelectedQuery] = useState("")

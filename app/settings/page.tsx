@@ -22,8 +22,12 @@ import SettingsNotificationsSkeleton from "@/components/loaders/SettingsNotifica
 import SettingsPreferencesSkeleton from "@/components/loaders/SettingsPreferencesSkeleton"
 import SettingsDataManagementSkeleton from "@/components/loaders/SettingsDataManagementSkeleton"
 import SettingsSecuritySkeleton from "@/components/loaders/SettingsSecuritySkeleton"
+import { useAuth } from "@/contexts/auth-context"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 
 export default function SettingsPage() {
+  const { user } = useAuth()
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">

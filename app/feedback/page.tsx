@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Star, MessageSquare, ThumbsUp } from "lucide-react"
 import type { RankingSnapshot, SearchResult } from "@/lib/types"
+import { useAuth } from "@/contexts/auth-context"
 
 const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleDateString("en-US", {
@@ -22,6 +23,8 @@ const formatDate = (dateString: string) => {
 }
 
 export default function Feedback() {
+  const { user } = useAuth()
+
   const { queries } = useQueries()
   const { snapshots } = useSnapshots()
   const {

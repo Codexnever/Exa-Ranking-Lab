@@ -44,6 +44,15 @@ export function middleware(request: NextRequest) {
   response.headers.set("x-real-ip", ip)
   response.headers.set("x-user-agent", JSON.stringify(userAgentInfo))
 
+  // Auth check: look for appwrite_jwt cookie (or change to your session cookie name)
+  const jwt = request.cookies.get("appwrite_jwt")?.value
+  // Allow access to /auth and static files
+  if (!jwt && !pathname.startsWith("/auth") && !pathname.startsWith("/api/verify-session")) {
+    const loginUrl = new URL("/auth", request.url)
+    loginUrl.searchParams.set("returnTo", pathname)
+    return NextResponse.redirect(loginUrl)
+  }
+
   return response
 }
 

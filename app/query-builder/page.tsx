@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import dynamic from "next/dynamic"
 import { toast } from "sonner"
 import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
@@ -33,6 +33,8 @@ interface Filters {
 }
 
 export default function QueryBuilder() {
+  const { userId: user } = useAuth()
+
   const queries = useQueriesStore((state) => state.queries)
   const createQuery = useQueriesStore((state) => state.createQuery)
   const runQuery = useQueriesStore((state) => state.runQuery)
