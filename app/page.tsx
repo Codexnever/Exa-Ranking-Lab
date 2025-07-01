@@ -59,20 +59,8 @@ export default function Dashboard() {
   useEffect(() => {
     if (loading) return
     const verifySession = async () => {
-      let jwt = ''
-      if (typeof window !== 'undefined') {
-        jwt = localStorage.getItem('appwrite_jwt') || ''
-        if (!jwt && typeof document !== 'undefined') {
-          const match = document.cookie.match(/(?:^|; )appwrite_jwt=([^;]*)/)
-          if (match) jwt = match[1]
-        }
-      }
-      if (!jwt) {
-        window.location.href = '/auth'
-        return
-      }
       const res = await fetch('/api/verify-session', {
-        headers: { Authorization: `Bearer ${jwt}` },
+        credentials: 'include',
       })
       if (!res.ok) {
         window.location.href = '/auth'

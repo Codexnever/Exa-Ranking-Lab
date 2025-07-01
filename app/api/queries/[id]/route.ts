@@ -23,11 +23,12 @@ export async function GET(request: NextRequest, context: Promise<{ params: { id:
   }
 }
 
-export async function PUT(request: NextRequest, context: Promise<{ params: { id: string } }>) {
+export async function PATCH(request: NextRequest, context: Promise<{ params: { id: string } }>) {
   const { params } = await context;
   const { id } = params;
   const user = await getCurrentUser(request)
   if (!user) {
+    console.warn("[PATCH] Unauthorized: No user found from JWT cookie.");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 

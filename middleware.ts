@@ -19,6 +19,17 @@ const PROTECTED_ROUTES = [
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // Always skip auth for these API routes
+  const skipApiAuth = [
+    "/api/login",
+    "/api/register",
+    "/api/logout",
+    "/api/verify-session",
+  ]
+  if (skipApiAuth.some((api) => pathname === api)) {
+    return NextResponse.next()
+  }
+
   const isProtected = PROTECTED_ROUTES.some((route) =>
     pathname.startsWith(route)
   )
@@ -47,7 +58,7 @@ export function middleware(request: NextRequest) {
   // Auth check: look for appwrite_jwt cookie (or change to your session cookie name)
   const jwt = request.cookies.get("appwrite_jwt")?.value
   // Allow access to /auth and static files
-  if (!jwt && !pathname.startsWith("/auth") && !pathname.startsWith("/api/verify-session")) {
+  if (!jwt && !pathname.startsWith("/auth")) {
     const loginUrl = new URL("/auth", request.url)
     loginUrl.searchParams.set("returnTo", pathname)
     return NextResponse.redirect(loginUrl)
@@ -60,6 +71,6 @@ export const config = {
   matcher: [
     "/",
     "/(analytics|profile|compare|feedback|query-builder|export-data|clear-data|snapshots|settings|query-monitor)(.*)?",
-    "/api/(.*)", // optional: protect all APIs too
+    "/api/:path*",
   ],
 }

@@ -64,19 +64,6 @@ export function useSnapshotsLogic() {
     }
   }
 
-  // Helper function to get JWT token
-  const getJWTToken = () => {
-    if (typeof window !== 'undefined') {
-      let jwt = localStorage.getItem('appwrite_jwt')
-      if (jwt) return jwt
-      if (typeof document !== 'undefined') {
-        const match = document.cookie.match(/(?:^|; )appwrite_jwt=([^;]*)/)
-        if (match) return match[1]
-      }
-    }
-    return null
-  }
-
   const handleCreateSnapshot = async () => {
     setCreating(true);
     try {
@@ -88,19 +75,14 @@ export function useSnapshotsLogic() {
         toast({ title: "Select a query", description: "Please select a query to snapshot.", variant: "destructive" })
         return
       }
-      const jwt = getJWTToken()
-      if (!jwt) {
-        toast({ title: "Authentication error", description: "No valid session found. Please log in again.", variant: "destructive" })
-        return
-      }
       const queryConfig = queries.find((q: QueryConfig) => q.id === selectedQueryId)
       if (!queryConfig) throw new Error("Query not found")
       const runRes = await fetch(`/api/queries/${selectedQueryId}/run`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${jwt}`,
           "Content-Type": "application/json",
         },
+        credentials: 'include',
       })
       if (!runRes.ok) {
         if (runRes.status === 401) {
@@ -114,8 +96,8 @@ export function useSnapshotsLogic() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${jwt}`,
         },
+        credentials: 'include',
         body: JSON.stringify({
           queryId: selectedQueryId,
           timestamp: new Date(),

@@ -2,7 +2,6 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { toast } from "sonner"
 import type { QueryConfig } from "@/lib/types"
-import { account } from "@/lib/appwrite"
 import { StoreApi } from 'zustand'
 
 interface QueriesState {
@@ -23,32 +22,8 @@ interface QueriesActions {
 type QueriesStoreType = QueriesState & QueriesActions
 
 const getAuthHeaders = async () => {
-  try {
-    let jwt = ''
-    const user = await account.get()
-
-    // Try to get JWT from cookie or localStorage
-    if (typeof window !== 'undefined') {
-      jwt = localStorage.getItem('appwrite_jwt') || ''
-      // console.log('🔐 JWT from localsss', jwt) //JWT is correctly getting Here..
-      if (!jwt && typeof document !== 'undefined') {
-        const match = document.cookie.match(/(?:^|; )appwrite_jwt=([^;]*)/)
-        if (match) jwt = match[1]
-      }
-    }
-
-    if (!jwt) {
-      throw new Error("Missing JWT token. Please log in again.")
-    }
-
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${jwt}`,
-      'X-User-Id': user.$id
-    }
-  } catch (error) {
-    console.error("❌ Error getting auth headers:", error)
-    throw new Error("Failed to get session or JWT")
+  return {
+    'Content-Type': 'application/json'
   }
 }
 
@@ -70,7 +45,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const headers = await getAuthHeaders()
           let url = "/api/queries"
           if (userId) url += `?userId=${encodeURIComponent(userId)}`
-          const response = await fetch(url, { headers })
+          const response = await fetch(url, { headers, credentials: "include" })
           if (response.status === 401) {
             set({ queries: [] })
             throw new Error("Please log in to access your queries")
@@ -97,6 +72,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const response = await fetch("/api/queries", {
             method: "POST",
             headers,
+            credentials: "include",
             body: JSON.stringify(query),
           })
           
@@ -139,6 +115,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const response = await fetch(`/api/queries/${encodeURIComponent(queryId)}/run`, {
             method: "POST",
             headers,
+            credentials: "include",
             body: JSON.stringify(localQuery) // Send query data to ensure server has latest version
           })
 
@@ -188,6 +165,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const response = await fetch(`/api/queries/${queryId}`, {
             method: "PATCH",
             headers,
+            credentials: "include",
             body: JSON.stringify(query),
           })
           if (!response.ok) throw new Error("Failed to update query")
@@ -211,7 +189,8 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const headers = await getAuthHeaders()
           const response = await fetch(`/api/queries/${queryId}`, {
             method: "DELETE",
-            headers
+            headers,
+            credentials: "include"
           })
           if (response.status === 401) {
             toast.error("Please log in to delete queries")

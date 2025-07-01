@@ -25,10 +25,3 @@ export const COLLECTIONS = {
 }
 
 export { client }
-
-export function getJWT() {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('appwrite_jwt') || '';
-  }
-  return '';
-}
