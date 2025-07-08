@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -49,6 +49,7 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit }: Qu
     QueryCategory,
     QueryFrequency,
   } = useQueryFormLogic(onSubmit, editingQuery);
+
 
   React.useEffect(() => {
     if (editingQuery) {

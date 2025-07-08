@@ -10,12 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/contexts/auth-context"
-import { toast } from "sonner"
-import { User, Calendar, Activity, Users, Shield } from "lucide-react"
+import { Calendar, Activity } from "lucide-react"
 import { useProfileLogic } from "@/logic/profileLogic"
 
 export default function ProfilePage() {
-  const { user, updateProfile, logout } = useAuth()
+  const { user, logout } = useAuth()
   const {
     loading,
     profileData,
@@ -26,7 +25,7 @@ export default function ProfilePage() {
     handleLogout,
     formatDate,
     getInitials,
-  } = useProfileLogic(user, updateProfile, logout)
+  } = useProfileLogic(user, logout)
 
   const handleProfileFormSubmit = (e: React.FormEvent) => {
     e.preventDefault()

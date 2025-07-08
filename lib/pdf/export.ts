@@ -1,11 +1,3 @@
-// IMPORTANT: Only pass user-specific data to this function!
-// This PDF export function does NOT perform any user filtering.
-// The calling API route MUST ensure that only the current user's data is provided.
-// 
-// Example: The /api/export-data/pdf route fetches data filtered by userId and passes it here.
-// 
-// Never pass unfiltered or multi-user data to this function.
-
 import PDFDocument from "pdfkit"
 import { PassThrough } from "stream"
 import path from "path"

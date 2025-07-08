@@ -1,3 +1,5 @@
+import type { Models } from "appwrite"
+
 export interface QueryConfig {
   id: string
   name: string
@@ -18,7 +20,7 @@ export interface QueryConfig {
   tags: string[]
   createdAt: Date
   lastRun?: Date
-  userId: string // now required
+  userId: string 
 }
 
 export interface RankingSnapshot {
@@ -88,4 +90,49 @@ export interface QueriesStore {
   runQuery: (queryId: string) => Promise<any>
   updateQuery: (queryId: string, query: Partial<QueryConfig>) => Promise<void>
   deleteQuery: (queryId: string) => Promise<void>
+}
+
+export interface AuthContextType {
+  user: Models.User<Models.Preferences> | null
+  userId: string | null
+  loading: boolean
+  login: (email: string, password: string) => Promise<void>
+  register: (email: string, password: string, name: string) => Promise<void>
+  logout: () => Promise<void>
+}
+
+export interface EmailOptions {
+  to: string
+  subject: string
+  html: string
+  attachments?: Array<{
+    filename: string
+    content: Buffer
+    contentType: string
+  }>
+}
+
+export interface ExaSearchOptions {
+  query: string
+  category?: "company" | "research paper" | "news" | "pdf" | "github" | "tweet" | "personal site" | "linkedin profile" | "financial report"
+  includeDomains?: string[]
+  excludeDomains?: string[]
+  startDate?: string
+  endDate?: string
+  numResults?: number
+}
+
+export interface ExaSearchResult {
+  title: string
+  url: string
+  snippet: string
+  score: number
+  publishedDate?: string
+  author?: string
+}
+
+export interface ExaSearchResponse {
+  results: ExaSearchResult[]
+  totalResults: number
+  responseTime: number
 }

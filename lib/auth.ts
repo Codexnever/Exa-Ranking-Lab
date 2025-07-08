@@ -1,38 +1,36 @@
-// lib/auth.ts
-import { users } from "@/lib/appwrite-server"
-import { jwtDecode } from "jwt-decode"
-import { NextRequest } from "next/server"
+import { users } from "@/lib/appwrite-server";
+import { jwtDecode } from "jwt-decode";
+import { cookies } from "next/headers";
 
-export async function getCurrentUser(request: NextRequest) {
+export async function getCurrentUser() {
   try {
-    const cookieHeader = request.headers.get("cookie") || ""
-    if (!cookieHeader) return null
+    // Get all cookies using Next.js App Router API (must await cookies())
+    const cookieStore = await cookies();
 
-    const cookies = Object.fromEntries(
-      cookieHeader.split(";").map((c) => {
-        const [key, ...v] = c.trim().split("=")
-        return [key, decodeURIComponent(v.join("="))]
-      })
-    )
+    // Find the "appwrite_jwt" cookie
+  const jwtCookie = cookieStore.get('appwrite_jwt')
+    if (!jwtCookie || !jwtCookie.value) return null;
 
-    const jwt = cookies["appwrite_jwt"]
-    if (!jwt) return null
+    const jwt = jwtCookie.value;
 
-    const decoded: any = jwtDecode(jwt)
+    // Decode JWT
+    const decoded: any = jwtDecode(jwt);
 
     // Optional: check expiry
     if (!decoded.exp || Date.now() / 1000 > decoded.exp) {
-      console.warn("[getCurrentUser] JWT expired or invalid.")
-      return null
+      console.warn("[getCurrentUser] JWT expired or invalid.");
+      return null;
     }
 
-    const userId = decoded.userId || decoded.user_id || decoded.uid
-    if (!userId) return null
+    // Find user ID in JWT payload
+    const userId = decoded.userId || decoded.user_id || decoded.uid;
+    if (!userId) return null;
 
-    const user = await users.get(userId)
-    return user
+    // Fetch user from Appwrite server SDK
+    const user = await users.get(userId);
+    return user;
   } catch (err) {
-    console.error("[getCurrentUser] Failed:", err)
-    return null
+    console.error("[getCurrentUser] Failed:", err);
+    return null;
   }
 }

@@ -4,10 +4,25 @@ import { saveAs } from "file-saver"
 import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
 
 export function useSettingsLogic() {
-  // API Key logic
+  
   const [apiKey, setApiKey] = useState('')
   const [apiStatus, setApiStatus] = useState<'connected' | 'disconnected' | 'unknown'>("unknown")
   const [lastTested, setLastTested] = useState<string | null>(null)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/settings", { credentials: "include" })
+        if (!res.ok) throw new Error("Failed to load settings")
+        const data = await res.json()
+        setApiKey(data.apiKey || "")
+        setApiStatus(data.apiStatus || "unknown")
+        setLastTested(data.lastTested || null)
+      } catch (err) {
+        throw new Error("Failed to load settings: " + (err instanceof Error ? err.message : "Unknown error"))
+      }
+    })()
+  }, [])
 
   const testApiConnection = async () => {
     if (!apiKey.trim()) {
@@ -21,9 +36,8 @@ export function useSettingsLogic() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: apiKey.trim() }),
       })
-      
       const data = await response.json()
-      
+      console.log('API connection test response:', data)
       if (response.ok && data.success) {
         toast.success(`API connection successful! Found ${data.resultsCount} result(s)`, { id: loadingId })
         setApiStatus("connected")
@@ -31,28 +45,47 @@ export function useSettingsLogic() {
         toast.error(data.message || "API connection failed!", { id: loadingId })
         setApiStatus("disconnected")
       }
-      setLastTested(new Date().toLocaleTimeString())
-      
+      const now = new Date().toLocaleTimeString()
+      setLastTested(now)
+      // Save to DB
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ apiKey, apiStatus: response.ok && data.success ? "connected" : "disconnected", lastTested: now })
+      })
     } catch (error) {
       console.error('Test connection error:', error)
       toast.error("Failed to test API connection", { id: loadingId })
       setApiStatus("disconnected")
-      setLastTested(new Date().toLocaleTimeString())
+      const now = new Date().toLocaleTimeString()
+      setLastTested(now)
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ apiKey, apiStatus: "disconnected", lastTested: now })
+      })
     }
   }
-  const handleSaveApiKey = () => {
-    toast.success("API key updated successfully!")
-  }
-
-  // Notifications logic
-  const [notifications, setNotifications] = useState({
-    queryComplete: true,
-    queryFailed: true,
-    weeklyReport: true,
-    rankingChanges: false,
-  })
-  const handleSaveNotifications = () => {
-    toast.success("Notification preferences saved!")
+  const handleSaveApiKey = async () => {
+    console.log('handlesaveapikey triggered') 
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ apiKey, apiStatus, lastTested })
+      })
+      console.log('handlesaveapikey', { apiKey, apiStatus, lastTested })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to update API key")
+      }
+      toast.success("API key updated successfully!")
+    } catch (err) {
+      toast.error("Failed to update API key: " + (err instanceof Error ? err.message : "Unknown error"))
+    }
   }
 
   // Preferences logic
@@ -110,7 +143,6 @@ export function useSettingsLogic() {
   return {
     apiKey, setApiKey, testApiConnection, handleSaveApiKey,
     apiStatus, lastTested, 
-    notifications, setNotifications, handleSaveNotifications,
     preferences, setPreferences, handleSavePreferences,
     handleExportData, handleClearData
   }

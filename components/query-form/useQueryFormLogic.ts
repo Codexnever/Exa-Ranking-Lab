@@ -120,22 +120,7 @@ export function useQueryFormLogic(
     onSubmit(queryData)
   }
 
-  const tagSuggestions = [
-    "JavaScript",
-    "TypeScript",
-    "React",
-    "Next.js",
-    "Vue",
-    "Angular",
-    "Svelte",
-    "Node.js",
-    "Express",
-    "Frontend",
-    "Backend",
-    "CSS",
-  ].filter(
-    (tag) => tag.toLowerCase().includes(tagInput.toLowerCase()) && !selectedTags.includes(tag)
-  )
+
 
   return {
     form,
@@ -150,7 +135,6 @@ export function useQueryFormLogic(
     handleTagSelect,
     handleTagRemove,
     onFormSubmit,
-    tagSuggestions,
     QueryCategory,
     QueryFrequency,
   }

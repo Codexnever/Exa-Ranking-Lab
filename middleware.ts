@@ -21,7 +21,6 @@ export function middleware(request: NextRequest) {
 
   // Always skip auth for these API routes
   const skipApiAuth = [
-    "/api/login",
     "/api/register",
     "/api/logout",
     "/api/verify-session",
@@ -39,7 +38,6 @@ export function middleware(request: NextRequest) {
   // Extract IP from standard header
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-
   // Use Next.js userAgent helper
   const ua = userAgent(request)
   const userAgentInfo = {

@@ -1,14 +1,9 @@
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 
 export async function POST() {
-  // Remove the appwrite_jwt cookie
-  const res = NextResponse.json({ success: true })
-  res.cookies.set("appwrite_jwt", "", {
-    httpOnly: true,
-    secure: true,
-    path: "/",
-    maxAge: 0,
-    sameSite: "strict",
-  })
-  return res
+  // Use NextResponse to delete the cookie
+  const response = NextResponse.json({ success: true });
+  response.cookies.delete("appwrite_jwt");
+  return response;
 }

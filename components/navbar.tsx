@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +18,10 @@ import { useAuth } from "@/contexts/auth-context"
 
 export default function Navbar() {
   const pathname = usePathname()
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [showDropdown, setShowDropdown] = useState(false)
   const { user, loading, logout } = useAuth()
 
   const handleLogout = async () => {
@@ -47,6 +50,39 @@ export default function Navbar() {
     return user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
   }
 
+  // Define all searchable routes and queries (can be extended)
+  const routes = [
+    { label: "Dashboard", href: "/" },
+    { label: "Query Builder", href: "/query-builder" },
+    { label: "Query Monitor", href: "/query-monitor" },
+    { label: "Analytics", href: "/analytics" },
+    { label: "Snapshots", href: "/snapshots" },
+    { label: "Compare Rankings", href: "/compare" },
+    { label: "Feedback", href: "/feedback" },
+    { label: "Settings", href: "/settings" },
+    { label: "Profile", href: "/profile" },
+  ]
+
+  // Search logic: fuzzy match against routes
+  const handleSearch = (value: string) => {
+    setSearchQuery(value)
+    if (!value.trim()) {
+      setSearchResults([])
+      setShowDropdown(false)
+      return
+    }
+    const q = value.toLowerCase()
+    const routeMatches = routes.filter(r => r.label.toLowerCase().includes(q))
+    setSearchResults([...routeMatches])
+    setShowDropdown(true)
+  }
+
+  const handleResultClick = (href: string) => {
+    setShowDropdown(false)
+    setSearchQuery("")
+    router.push(href)
+  }
+
   if (loading) {
     return (
       <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-white px-6">
@@ -71,8 +107,24 @@ export default function Navbar() {
               placeholder="Search..."
               className="w-full pl-9"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => handleSearch(e.target.value)}
+              onFocus={() => searchQuery && setShowDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+              autoComplete="off"
             />
+            {showDropdown && searchResults.length > 0 && (
+              <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-50 max-h-60 overflow-y-auto animate-fade-in">
+                {searchResults.map((result, idx) => (
+                  <button
+                    key={result.href + idx}
+                    className="w-full text-left px-4 py-2 hover:bg-blue-50 focus:bg-blue-100 text-gray-700 text-sm"
+                    onMouseDown={() => handleResultClick(result.href)}
+                  >
+                    {result.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {user ? (
@@ -83,11 +135,6 @@ export default function Navbar() {
                   New Query
                 </Button>
               </Link>
-
-              {/* <Button variant="ghost" size="icon" className="rounded-full">
-                <Bell className="h-5 w-5" />
-                <span className="sr-only">Notifications</span>
-              </Button> */}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

@@ -3,7 +3,7 @@ import { databaseService } from "@/lib/database-service"
 import { getCurrentUser} from "@/lib/auth"
 
 export async function GET(request: NextRequest) {
-  const user = await getCurrentUser(request)
+  const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser(request)
+  const user = await getCurrentUser()
   console.log("[POST /api/queries] User:", user)
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 

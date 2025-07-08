@@ -54,7 +54,6 @@ export class QueryService {
       console.error("Failed to create query:", error);
       throw new Error("Failed to create query");
     }
-    throw new Error("Failed to create query after multiple attempts");
   }
 
   async getQueries(userId?: string): Promise<QueryConfig[]> {

@@ -1,9 +1,8 @@
 import { useState, useMemo } from "react"
 import { toast } from "sonner"
-import type { QueryConfig, RankingSnapshot } from "@/lib/types"
+import type { RankingSnapshot } from "@/lib/types"
 
 export function useFeedbackLogic(
-  queries: QueryConfig[],
   snapshots: RankingSnapshot[]
 ) {
   const [selectedQuery, setSelectedQuery] = useState("")

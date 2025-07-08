@@ -14,13 +14,11 @@ export function useAccessLogsLogic() {
     setLoading(true)
     setError(null)
     try {
-        console.log("COLLECTIONS.ACCESS_LOGS:", COLLECTIONS.ACCESS_LOGS)
       const response = await databases.listDocuments(
         DATABASE_ID,
         COLLECTIONS.ACCESS_LOGS,
         [Query.equal("userId", user.$id)]
       )
-      console.log('Response', response)
       setLogs(response.documents)
     } catch (err: any) {
       setError(err.message || "Failed to fetch access logs")

@@ -65,10 +65,6 @@ export function SnapshotsFilters({ filters, setFilters, queries }: SnapshotsFilt
           <SelectItem value="processing">Processing</SelectItem>
         </SelectContent>
       </Select>
-      <Button variant="outline" size="sm">
-        <Filter className="w-4 h-4 mr-2" />
-        More Filters
-      </Button>
     </div>
   )
 }

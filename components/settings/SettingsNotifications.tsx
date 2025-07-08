@@ -8,7 +8,6 @@ import { useSettingsLogic } from "../../logic/useSettingsLogic"
 import { FeatureComingSoon } from "@/components/ui/FeatureComingSoon"
 
 export function SettingsNotifications() {
-  const { notifications, setNotifications, handleSaveNotifications } = useSettingsLogic()
   return (
     <Card className="relative overflow-hidden">
       <FeatureComingSoon label="Notifications" />
@@ -26,11 +25,11 @@ export function SettingsNotifications() {
               <Label>Query Completion</Label>
               <p className="text-sm text-gray-500">Get notified when queries finish running</p>
             </div>
-            <Switch
+            {/* <Switch
               checked={notifications.queryComplete}
               onCheckedChange={(checked) => setNotifications({ ...notifications, queryComplete: checked })}
               disabled
-            />
+            /> */}
           </div>
           <Separator />
           <div className="flex items-center justify-between">
@@ -38,11 +37,11 @@ export function SettingsNotifications() {
               <Label>Query Failures</Label>
               <p className="text-sm text-gray-500">Get notified when queries fail</p>
             </div>
-            <Switch
+            {/* <Switch
               checked={notifications.queryFailed}
               onCheckedChange={(checked) => setNotifications({ ...notifications, queryFailed: checked })}
               disabled
-            />
+            /> */}
           </div>
           <Separator />
           <div className="flex items-center justify-between">
@@ -50,11 +49,11 @@ export function SettingsNotifications() {
               <Label>Weekly Reports</Label>
               <p className="text-sm text-gray-500">Receive weekly ranking performance summaries</p>
             </div>
-            <Switch
+            {/* <Switch
               checked={notifications.weeklyReport}
               onCheckedChange={(checked) => setNotifications({ ...notifications, weeklyReport: checked })}
               disabled
-            />
+            /> */}
           </div>
           <Separator />
           <div className="flex items-center justify-between">
@@ -62,16 +61,16 @@ export function SettingsNotifications() {
               <Label>Ranking Changes</Label>
               <p className="text-sm text-gray-500">Get notified of significant ranking movements</p>
             </div>
-            <Switch
+            {/* <Switch
               checked={notifications.rankingChanges}
               onCheckedChange={(checked) => setNotifications({ ...notifications, rankingChanges: checked })}
               disabled
-            />
+            /> */}
           </div>
         </div>
-        <Button onClick={handleSaveNotifications} disabled>
+        {/* <Button onClick={handleSaveNotifications} disabled>
           Save Notification Settings
-        </Button>
+        </Button> */}
       </CardContent>
     </Card>
   )

@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/auth"
 
 export async function GET(request: NextRequest) {
   // Authenticate user via JWT
-  const user = await getCurrentUser(request)
+  const user = await getCurrentUser()
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }

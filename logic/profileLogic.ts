@@ -16,7 +16,7 @@ export type TeamMember = {
   lastActive: Date;
 };
 
-export function useProfileLogic(user: any, updateProfile: any, logout: any) {
+export function useProfileLogic(user: any, logout: any) {
   const [loading, setLoading] = useState(false)
   const [profileData, setProfileData] = useState({
     name: user?.name || "",
@@ -50,7 +50,6 @@ export function useProfileLogic(user: any, updateProfile: any, logout: any) {
   const handleUpdateProfile = async (data: { name: string; email: string; avatar: string }) => {
     setLoading(true)
     try {
-      await updateProfile(data)
       toast.success("Profile updated successfully!")
     } catch (error) {
       toast.error("Failed to update profile")

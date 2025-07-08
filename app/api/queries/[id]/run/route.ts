@@ -2,6 +2,9 @@ import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/lib/database-service"
 import { ExaClient } from "@/lib/exa-client"
 import { getCurrentUser } from "@/lib/auth"
+import { DATABASE_ID, COLLECTIONS } from "@/lib/appwrite"
+import { databases } from "@/lib/appwrite-server"
+import { Query } from "appwrite"
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const params = await context.params
@@ -11,7 +14,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
 async function handlePost(request: NextRequest, queryId: string) {
   // Use getCurrentUser to verify JWT and get user
-  const user = await getCurrentUser(request)
+  const user = await getCurrentUser()
   if (!user) {
     return NextResponse.json({ error: "Unauthorized - JWT verification failed" }, { status: 401 })
   }
@@ -26,8 +29,23 @@ async function handlePost(request: NextRequest, queryId: string) {
   }
 
   try {
-    const apiKey = process.env.EXA_API_KEY
-    if (!apiKey) throw new Error("Missing EXA_API_KEY")
+    // Fetch user's API key from settings
+    const settingsRes = await databases.listDocuments(
+      DATABASE_ID,
+      COLLECTIONS.SETTINGS,
+      [
+        // @ts-ignore
+        Query.equal("userId", user.$id)
+      ]
+    )
+    const settingsDoc = settingsRes.documents[0]
+    const apiKey = settingsDoc?.apiKey
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "Missing API key. Please add your API key in settings before running queries." },
+        { status: 400 }
+      )
+    }
 
     const exaClient = new ExaClient(apiKey)
     const start = Date.now()

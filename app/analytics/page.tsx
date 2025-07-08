@@ -18,6 +18,7 @@ import TopPerformingQueriesSkeleton from "@/components/loaders/TopPerformingQuer
 import RankingBarChartSkeleton from "@/components/loaders/RankingBarChartSkeleton"
 import PerformanceChartsSkeleton from "@/components/loaders/PerformanceChartsSkeleton"
 import QueryPerformanceStatsTableSkeleton from "@/components/loaders/QueryPerformanceStatsTableSkeleton"
+import DomainAnalysisSkeleton from "@/components/loaders/DomainAnalysisSkeleton"
 import { useAuth } from "@/contexts/auth-context"
 
 const AnalyticsAPIs = dynamic(() => import("@/components/analytics/AnalyticsAPIs").then(mod => mod.AnalyticsAPIs), {
@@ -46,6 +47,10 @@ const PerformanceCharts = dynamic(() => import("@/components/analytics/Performan
 })
 const QueryPerformanceStatsTable = dynamic(() => import("@/components/analytics/QueryPerformanceStatsTable").then(mod => mod.QueryPerformanceStatsTable), {
   loading: () => <QueryPerformanceStatsTableSkeleton />,
+  ssr: false,
+})
+const DomainAnalysis = dynamic(() => import("@/components/analytics/DomainAnalysis").then(mod => mod.DomainAnalysis), {
+  loading: () => <DomainAnalysisSkeleton />,
   ssr: false,
 })
 
@@ -172,23 +177,7 @@ export default function Analytics() {
           <QueryPerformanceStatsTable stats={queryPerformanceStats} />
         </TabsContent>
         <TabsContent value="domains" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-gray-900">Domain Analysis</CardTitle>
-              <CardDescription>Domain authority tracking and ranking distribution</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-96 flex items-center justify-center border-2 border-dashed border-gray-200 rounded-lg">
-                <div className="text-center">
-                  <LucidePieChart className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <p className="text-lg font-medium text-gray-600">Domain Distribution</p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Analysis of domain authority, ranking patterns, and content diversity
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <DomainAnalysis snapshots={snapshots} />
         </TabsContent>
       </Tabs>
     </div>

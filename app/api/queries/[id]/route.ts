@@ -2,10 +2,9 @@ import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/lib/database-service"
 import { getCurrentUser } from "@/lib/auth"
 
-export async function GET(request: NextRequest, context: Promise<{ params: { id: string } }>) {
-  const { params } = await context;
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const { id } = params;
-  const user = await getCurrentUser(request)
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
@@ -23,10 +22,9 @@ export async function GET(request: NextRequest, context: Promise<{ params: { id:
   }
 }
 
-export async function PATCH(request: NextRequest, context: Promise<{ params: { id: string } }>) {
-  const { params } = await context;
+export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   const { id } = params;
-  const user = await getCurrentUser(request)
+  const user = await getCurrentUser();
   if (!user) {
     console.warn("[PATCH] Unauthorized: No user found from JWT cookie.");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -49,10 +47,10 @@ export async function PATCH(request: NextRequest, context: Promise<{ params: { i
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
-  const { id: queryId } = context.params; 
-  const user = await getCurrentUser(request);
+  const { id: queryId } = params;
+  const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -67,7 +65,6 @@ export async function DELETE(
     const ip = request.headers.get("x-real-ip") || "unknown";
     const uaRaw = request.headers.get("x-user-agent") || "{}";
     const userAgent = JSON.parse(uaRaw);
-
     const success = await databaseService.queryService.deleteQuery(queryId, {
       userId: user.$id,
       ipAddress: ip,

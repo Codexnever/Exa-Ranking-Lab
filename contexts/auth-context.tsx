@@ -2,18 +2,11 @@
 
 import { createContext, useContext, useEffect, useState } from "react"
 import { toast } from "sonner"
+import type { AuthContextType } from "@/lib/types"
 import { useRouter } from "next/navigation"
 import type { Models } from "appwrite"
-import { account } from "@/lib/appwrite"
+import { account } from "@/lib/appwrite" // ✅ Server-side SDK
 
-interface AuthContextType {
-  user: Models.User<Models.Preferences> | null
-  userId: string | null
-  loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, name: string) => Promise<void>
-  logout: () => Promise<void>
-}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
@@ -22,21 +15,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-const fetchUser = async () => {
-  try {
-    const res = await fetch("/api/verify-session", {
-      credentials: "include", // 👈 super important
-    })
-    if (!res.ok) throw new Error("Unauthenticated")
-    const data = await res.json()
-    setUser(data)
-  } catch {
-    setUser(null)
-  } finally {
-    setLoading(false)
+  const fetchUser = async () => {
+    try {
+      const res = await fetch("/api/verify-session", {
+        credentials: "include",
+      })
+      if (!res.ok) throw new Error("Unauthenticated")
+      const data = await res.json()
+      setUser(data)
+    } catch {
+      setUser(null)
+    } finally {
+      setLoading(false)
+    }
   }
-}
-
 
   useEffect(() => {
     fetchUser()
@@ -44,18 +36,19 @@ const fetchUser = async () => {
 
   const login = async (email: string, password: string) => {
     try {
-      const res = await fetch("/api/login", {
+      await account.createEmailPasswordSession(email, password)
+      const { jwt } = await account.createJWT()
+
+      await fetch("/api/set-cookie", {
         method: "POST",
-        credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ jwt }),
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
       })
-      console.log("Login response:", res)
-      if (!res.ok) throw new Error("Invalid login")
+
       toast.success("Logged in!")
       await fetchUser()
-
-      window.location.href = "/query-builder" 
+      window.location.href = "/query-builder"
     } catch (err) {
       toast.error("Login failed")
       throw err
@@ -64,18 +57,31 @@ const fetchUser = async () => {
 
   const register = async (email: string, password: string, name: string) => {
     try {
-      const res = await fetch("/api/register", {
+      // 1. Create account on Appwrite
+      await account.create("unique()", email, password, name)
+
+      // 2. Create session (login the user)
+      await account.createEmailPasswordSession(email, password)
+
+      // 3. Generate JWT
+      const { jwt } = await account.createJWT()
+
+      // 4. Set JWT in HttpOnly cookie via API route
+      await fetch("/api/set-cookie", {
         method: "POST",
-        credentials: "include",
-        body: JSON.stringify({ email, password, name }),
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ jwt }),
       })
-      if (!res.ok) throw new Error("Registration failed")
-      toast.success("Account created!")
+
+      // 5. Fetch user from /api/verify-session
       await fetchUser()
-      router.replace("/query-builder")
+
+      // 6. Redirect
+      window.location.href = "/query-builder"
     } catch (err) {
       toast.error("Registration failed")
+      console.error("Register error:", err)
       throw err
     }
   }
@@ -83,7 +89,7 @@ const fetchUser = async () => {
   const logout = async () => {
     try {
       await fetch("/api/logout", { method: "POST", credentials: "include" })
-    } catch {}
+    } catch { }
     setUser(null)
     router.replace("/auth")
   }

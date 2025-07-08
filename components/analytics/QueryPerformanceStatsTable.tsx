@@ -1,5 +1,4 @@
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
 
 export function QueryPerformanceStatsTable({ stats }: { stats: any[] }) {
   return (
