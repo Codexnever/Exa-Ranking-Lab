@@ -4,10 +4,10 @@ import dynamic from "next/dynamic"
 import { useQueries } from "@/hooks/use-queries"
 import { useAnalytics } from "@/hooks/use-analytics"
 import { useSnapshots } from "@/hooks/use-snapshots"
-import { useAuth } from "@/contexts/auth-context"
+import { useAuth } from "@/lib/contexts/auth-context"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
-import { useAnalyticsStore } from "@/store"
+import { useAnalyticsStore } from "@/app/store"
 
 const DashboardStats = dynamic(() => import("@/components/dashboard/DashboardStats"), { ssr: false })
 const RecentQueryActivity = dynamic(() => import("@/components/dashboard/RecentQueryActivity"), { ssr: false })

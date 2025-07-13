@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, userAgent } from "next/server"
+import { cookies } from "next/headers";
 
 // Define which routes require auth and logging
 const PROTECTED_ROUTES = [
@@ -16,7 +17,7 @@ const PROTECTED_ROUTES = [
   "/api",
 ]
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Always skip auth for these API routes
@@ -52,9 +53,9 @@ export function middleware(request: NextRequest) {
   const response = NextResponse.next()
   response.headers.set("x-real-ip", ip)
   response.headers.set("x-user-agent", JSON.stringify(userAgentInfo))
-
+  const cookieStore = await cookies();
   // Auth check: look for appwrite_jwt cookie (or change to your session cookie name)
-  const jwt = request.cookies.get("appwrite_jwt")?.value
+  const jwt = cookieStore.get('appwrite_jwt')
   // Allow access to /auth and static files
   if (!jwt && !pathname.startsWith("/auth")) {
     const loginUrl = new URL("/auth", request.url)

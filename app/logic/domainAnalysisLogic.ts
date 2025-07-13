@@ -1,7 +1,7 @@
 // Domain Analysis Logic for Analytics Page
 // Computes domain authority, ranking distribution, and content diversity from snapshots
 import { useMemo } from "react"
-import type { RankingSnapshot, SearchResult } from "@/lib/types"
+import type { RankingSnapshot, SearchResult } from "@/lib/type"
 
 export interface DomainStats {
   domain: string

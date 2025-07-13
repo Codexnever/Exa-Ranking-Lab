@@ -1,6 +1,6 @@
 // app/api/verify-session/route.ts
 import { NextRequest, NextResponse } from "next/server"
-import { getCurrentUser } from "@/lib/auth"
+import { getCurrentUser } from "@/lib/server/auth"
 
 export const dynamic = "force-dynamic"
 

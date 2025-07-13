@@ -1,8 +1,8 @@
 // All analytics-related calculation hooks and logic for the analytics page
 import { useMemo } from "react"
-import type { QueryConfig, RankingSnapshot, SearchResult } from "@/lib/types"
+import type { QueryConfig, RankingSnapshot, SearchResult } from "@/lib/type"
 
-export function useAnalyticsCalculations(queries: QueryConfig[], snapshots: RankingSnapshot[], timeRange: string) {
+ export function useAnalyticsCalculations(queries: QueryConfig[], snapshots: RankingSnapshot[], timeRange: string) {
   // Calculate time range based on selection
   const timeRangeMs = useMemo(() => {
     const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : timeRange === "90d" ? 90 : 365

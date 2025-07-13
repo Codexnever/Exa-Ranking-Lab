@@ -1,6 +1,6 @@
 "use client"
 
-import { useFeedbackLogic } from "@/logic/feedbackLogic"
+import { useFeedbackLogic } from "@/app/logic/feedbackLogic"
 import { useQueries } from "@/hooks/use-queries"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Star, MessageSquare, ThumbsUp } from "lucide-react"
-import type { RankingSnapshot, SearchResult } from "@/lib/types"
-import { useAuth } from "@/contexts/auth-context"
+import type { RankingSnapshot, SearchResult } from "@/lib/type"
+import { useAuth } from "@/lib/contexts/auth-context"
 
 const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleDateString("en-US", {

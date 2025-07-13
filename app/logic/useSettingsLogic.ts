@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import { saveAs } from "file-saver"
-import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
+import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store"
 
 export function useSettingsLogic() {
   

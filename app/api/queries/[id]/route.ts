@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { databaseService } from "@/lib/database-service"
-import { getCurrentUser } from "@/lib/auth"
+import { databaseService } from "@/app/services/database-service"
+import { getCurrentUser } from "@/lib/server/auth"
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const { id } = params;

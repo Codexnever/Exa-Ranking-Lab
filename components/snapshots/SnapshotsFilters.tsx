@@ -2,7 +2,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Filter } from "lucide-react"
-import type { QueryConfig } from "@/lib/types"
+import type { QueryConfig } from "@/lib/type"
 import { Dispatch, SetStateAction } from "react"
 
 interface SnapshotsFiltersProps {

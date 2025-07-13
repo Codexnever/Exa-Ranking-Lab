@@ -1,4 +1,4 @@
-import type { ExaSearchOptions, ExaSearchResult, ExaSearchResponse } from "./types"
+import type { ExaSearchOptions, ExaSearchResult, ExaSearchResponse } from "../type"
 
 export class ExaClient {
   private apiKey: string

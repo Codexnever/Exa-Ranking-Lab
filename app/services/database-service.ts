@@ -1,8 +1,8 @@
-import { QueryService } from "../services/query-service"
-import { SnapshotService } from "../services/snapshot-service"
-import { FeedbackService } from "../services/feedback-service"
-import { AnalyticsService } from "../services/analytics-service"
-import { AccessLogService } from "../services/access-log-service"
+import { QueryService } from "./query-service"
+import { SnapshotService } from "./snapshot-service"
+import { FeedbackService } from "./feedback-service"
+import { AnalyticsService } from "./analytics-service"
+import { AccessLogService } from "./access-log-service"
 
 // Compose the modular services into a single DatabaseService
 class DatabaseService {

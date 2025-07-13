@@ -2,10 +2,10 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button"
 import { Download, Trash2, Database } from "lucide-react"
 import { Label } from "@/components/ui/label"
-import { useSettingsLogic } from "../../logic/useSettingsLogic"
+import { useSettingsLogic } from "../../app/logic/useSettingsLogic"
 import { useQueries } from "@/hooks/use-queries"
 import { useSnapshots } from "@/hooks/use-snapshots"
-import { useAuth } from "@/contexts/auth-context"
+import { useAuth } from "@/lib/contexts/auth-context"
 
 export function SettingsDataManagement() {
   const { handleExportData, handleClearData } = useSettingsLogic()

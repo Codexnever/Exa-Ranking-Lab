@@ -4,7 +4,7 @@ import { Inter, JetBrains_Mono } from "next/font/google"
 import "../styles/globals.css"
 import Sidebar from "@/components/sidebar"
 import Navbar from "@/components/navbar"
-import { AuthProvider } from "@/contexts/auth-context"
+import { AuthProvider } from "@/lib/contexts/auth-context"
 import { Toaster } from "sonner"
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" })

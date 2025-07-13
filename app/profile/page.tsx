@@ -9,9 +9,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { useAuth } from "@/contexts/auth-context"
+import { useAuth } from "@/lib/contexts/auth-context"
 import { Calendar, Activity } from "lucide-react"
-import { useProfileLogic } from "@/logic/profileLogic"
+import { useProfileLogic } from "@/app/logic/profileLogic"
 
 export default function ProfilePage() {
   const { user, logout } = useAuth()

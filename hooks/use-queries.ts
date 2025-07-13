@@ -1,4 +1,4 @@
-import { useQueriesStore } from "@/store"
+import { useQueriesStore } from "@/app/store"
 
 export const useQueries = () => {
   const store = useQueriesStore()

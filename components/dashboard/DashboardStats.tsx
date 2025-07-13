@@ -3,7 +3,7 @@ import { Progress } from "@/components/ui/progress"
 import { BarChart3, TrendingUp, TrendingDown, Clock, Globe, CheckCircle } from "lucide-react"
 import { formatResponseTime } from "@/hooks/format-response-time"
 import React from "react"
-import { useAvgResponseTimeImprovement } from "@/logic/useAvgResponseTimeImprovement"
+import { useAvgResponseTimeImprovement } from "@/app/logic/useAvgResponseTimeImprovement"
 import { useSnapshots } from "@/hooks/use-snapshots"
 
 export default function DashboardStats({ queries, analytics }: { queries: any[]; analytics: any }) {

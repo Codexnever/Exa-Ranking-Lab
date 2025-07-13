@@ -13,7 +13,7 @@ const SnapshotsTable = dynamic(() => import("@/components/snapshots/SnapshotsTab
 })
 import SnapshotsFiltersSkeleton from "@/components/loaders/SnapshotsFiltersSkeleton"
 import SnapshotsTableSkeleton from "@/components/loaders/SnapshotsTableSkeleton"
-import { useSnapshotsLogic } from "../../logic/useSnapshotsLogic"
+import { useSnapshotsLogic } from "../logic/useSnapshotsLogic"
 
 export default function Snapshots() {
   const {

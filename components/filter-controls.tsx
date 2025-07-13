@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Filter, X } from "lucide-react"
-import type { QueryConfig } from "@/lib/types"
+import type { QueryConfig } from "@/lib/type"
 
 type QueryFrequency = QueryConfig["schedule"]["frequency"]
 

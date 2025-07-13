@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { toast } from "sonner"
-import type { AnalyticsData } from "@/lib/types"
+import type { AnalyticsData } from "@/lib/type"
 
 interface AnalyticsState {
   analytics: AnalyticsData | null
@@ -44,7 +44,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
       },
 
       // NEW: Calculate analytics from local snapshots for instant UI update
-      calculateAnalyticsFromSnapshots: (snapshots: import("@/lib/types").RankingSnapshot[]) => {
+      calculateAnalyticsFromSnapshots: (snapshots: import("@/lib/type").RankingSnapshot[]) => {
         if (!snapshots || snapshots.length === 0) {
           set({ analytics: {
             rankingStability: 0,
@@ -56,7 +56,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
           } })
           return
         }
-        const snapshotsByQuery: Record<string, import("@/lib/types").RankingSnapshot[]> = {};
+        const snapshotsByQuery: Record<string, import("@/lib/type").RankingSnapshot[]> = {};
         const seenUrls = new Set<string>();
         let totalResponseTime = 0;
         let successCount = 0;
@@ -82,7 +82,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
         let totalRankChanges = 0;
         let totalComparisons = 0;
         Object.values(snapshotsByQuery).forEach((snaps) => {
-          (snaps as import("@/lib/types").RankingSnapshot[]).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          (snaps as import("@/lib/type").RankingSnapshot[]).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
           for (let i = 1; i < snaps.length; i++) {
             const prev = snaps[i - 1].results?.map((r: any) => r.url) || [];
             const curr = snaps[i].results?.map((r: any) => r.url) || [];

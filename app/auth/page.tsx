@@ -1,6 +1,6 @@
 "use client"
 
-import { AuthProvider } from "@/contexts/auth-context"
+import { AuthProvider } from "@/lib/contexts/auth-context"
 import dynamic from "next/dynamic"
 
 const AuthForm = dynamic(() => import("./AuthForm"), {

@@ -8,8 +8,8 @@ import { useSnapshots } from "@/hooks/use-snapshots"
 import { CompareSetup } from "@/components/compare/CompareSetup"
 import { CompareSummary } from "@/components/compare/CompareSummary"
 import { CompareTable } from "@/components/compare/CompareTable"
-import { useCompareLogic } from "@/logic/compareLogic"
-import { useAuth } from "@/contexts/auth-context"
+import { useCompareLogic } from "@/app/logic/compareLogic"
+import { useAuth } from "@/lib/contexts/auth-context"
 
 export default function CompareRankings() {
   const { user } = useAuth()

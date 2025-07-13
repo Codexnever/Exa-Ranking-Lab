@@ -2,10 +2,10 @@ import { useEffect, useState } from "react"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useQueries } from "@/hooks/use-queries"
 import { useAnalytics } from "@/hooks/use-analytics"
-import { useAuth } from "@/contexts/auth-context"
+import { useAuth } from "@/lib/contexts/auth-context"
 import { useToast } from "@/components/ui/use-toast"
-import { useSnapshotsStore, useAnalyticsStore } from "@/store"
-import type { QueryConfig } from "@/lib/types"
+import { useSnapshotsStore, useAnalyticsStore } from "@/app/store"
+import type { QueryConfig } from "@/lib/type"
 
 export function useSnapshotsLogic() {
   const { snapshots, isLoading, fetchSnapshots } = useSnapshots()

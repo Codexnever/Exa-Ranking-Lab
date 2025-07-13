@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { useSettingsLogic } from "../../logic/useSettingsLogic"
+import { useSettingsLogic } from "../../app/logic/useSettingsLogic"
 import { Key } from "lucide-react"
 
 export function SettingsApiConfig() {

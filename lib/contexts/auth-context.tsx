@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import type { AuthContextType } from "@/lib/type"
 import { useRouter } from "next/navigation"
 import type { Models } from "appwrite"
-import { account } from "@/lib/server/appwrite" // ✅ Server-side SDK
+import { account } from "@/lib/server/appwrite"
 
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -36,10 +36,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      console.log('Starting login')
+      await logout()
       await account.createEmailPasswordSession(email, password)
       const { jwt } = await account.createJWT()
-console.log('Done JWT ',jwt)
+
       await fetch("/api/set-cookie", {
         method: "POST",
         body: JSON.stringify({ jwt }),
@@ -49,7 +49,7 @@ console.log('Done JWT ',jwt)
 
       toast.success("Logged in!")
       await fetchUser()
-      window.location.href = "/query-builder"
+      window.location.href = "/settings"
     } catch (err) {
       toast.error("Login failed")
       throw err
@@ -58,6 +58,8 @@ console.log('Done JWT ',jwt)
 
   const register = async (email: string, password: string, name: string) => {
     try {
+      await logout()
+
       // 1. Create account on Appwrite
       await account.create("unique()", email, password, name)
 

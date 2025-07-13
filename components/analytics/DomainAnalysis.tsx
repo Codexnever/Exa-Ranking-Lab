@@ -3,8 +3,8 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { LucidePieChart } from "lucide-react"
-import { useDomainAnalysis } from "@/logic/domainAnalysisLogic"
-import type { RankingSnapshot } from "@/lib/types"
+import { useDomainAnalysis } from "@/app/logic/domainAnalysisLogic"
+import type { RankingSnapshot } from "@/lib/type"
 
 interface DomainAnalysisProps {
   snapshots: RankingSnapshot[]

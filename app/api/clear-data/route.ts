@@ -1,9 +1,9 @@
 // app/api/clear-data/route.ts
 
 import { type NextRequest, NextResponse } from "next/server"
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
 import { Query } from "appwrite"
-import { getCurrentUser } from "@/lib/auth"
+import { getCurrentUser } from "@/lib/server/auth"
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser()

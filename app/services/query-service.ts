@@ -1,7 +1,7 @@
 // QueryService handles all query-related operations
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
 import { ID, Query } from "appwrite"
-import type { QueryConfig } from "@/lib/types"
+import type { QueryConfig } from "@/lib/type"
 import { CATEGORY_MAP } from "@/lib/category-map"
 import { loadFromStorage, saveToStorage, transformQueryDocument } from "./db-utils"
 

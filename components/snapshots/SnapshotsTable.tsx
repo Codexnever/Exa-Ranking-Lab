@@ -1,7 +1,7 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, Clock } from "lucide-react"
-import type { RankingSnapshot, QueryConfig } from "@/lib/types"
+import type { RankingSnapshot, QueryConfig } from "@/lib/type"
 import { formatResponseTime } from "@/hooks/format-response-time"
 
 interface SnapshotsTableProps {

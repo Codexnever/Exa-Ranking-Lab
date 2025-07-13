@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Edit, MoreHorizontal, Play, Trash2, Calendar, Clock } from "lucide-react"
-import type { QueryConfig } from "@/lib/types"
+import type { QueryConfig } from "@/lib/type"
 import { useState } from "react"
 
 interface QueryTableProps {

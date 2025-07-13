@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { toast } from "sonner"
-import type { QueryConfig } from "@/lib/types"
+import type { QueryConfig } from "@/lib/type"
 import { StoreApi } from 'zustand'
 
 interface QueriesState {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { generateDataExportPDF } from "@/lib/pdf/export"
+import { generateDataExportPDF } from "@/components/pdf/export"
 
 export const runtime = "nodejs"
 

@@ -7,7 +7,7 @@ import { useQueries } from "@/hooks/use-queries"
 import QueryExecutionStatus from "@/components/query-form/QueryExecutionStatus"
 import { Play, Pause, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
-import { useAuth } from "@/contexts/auth-context"
+import { useAuth } from "@/lib/contexts/auth-context"
 
 export default function QueryMonitor() {
   const { user } = useAuth()

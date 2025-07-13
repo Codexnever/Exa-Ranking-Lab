@@ -1,12 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import dynamic from "next/dynamic"
 import { toast } from "sonner"
-import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/store"
-import type { QueryConfig } from "@/lib/types"
-import { useAuth } from "@/contexts/auth-context"
+import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store"
+import type { QueryConfig } from "@/lib/type"
+import { useAuth } from "@/lib/contexts/auth-context"
 
 const QueryFormSkeleton = dynamic(() => import("@/components/loaders/QueryFormSkeleton"))
 const QueryTableSkeleton = dynamic(() => import("@/components/loaders/QueryTableSkeleton"))

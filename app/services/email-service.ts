@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer"
-import type { EmailOptions } from "@/lib/types"
+import type { EmailOptions } from "@/lib/type"
 
 class EmailService {
   private transporter: nodemailer.Transporter

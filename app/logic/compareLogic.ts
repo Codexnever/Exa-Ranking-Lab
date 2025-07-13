@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import type { RankingChange, RankingSnapshot } from "@/lib/types"
+import type { RankingChange, RankingSnapshot } from "@/lib/type"
 
 export function useCompareLogic(snapshots: RankingSnapshot[], selectedQuery: string, snapshot1: string, snapshot2: string) {
   const filteredSnapshots = useMemo(() => snapshots.filter((s) => !selectedQuery || s.queryId === selectedQuery), [snapshots, selectedQuery])

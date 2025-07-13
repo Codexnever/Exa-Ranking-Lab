@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { toast } from "sonner"
-import type { RankingSnapshot, RankingChange } from "@/lib/types"
+import type { RankingSnapshot, RankingChange } from "@/lib/type"
 
 interface SnapshotsState {
   snapshots: RankingSnapshot[]

@@ -1,6 +1,6 @@
 // Utility functions for storage and document transformation
 import { CATEGORY_MAP, CATEGORY_MAP_REVERSE } from "@/lib/category-map"
-import type { QueryConfig, RankingSnapshot, UserFeedback } from "@/lib/types"
+import type { QueryConfig, RankingSnapshot, UserFeedback } from "@/lib/type"
 
 export function getStorageKey(type: string): string {
   return `exa_ranking_lab_${type}`

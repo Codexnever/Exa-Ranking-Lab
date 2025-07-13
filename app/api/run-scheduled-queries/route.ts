@@ -1,8 +1,8 @@
 // File: app/api/run-scheduled-queries/route.ts
 
 import { NextResponse } from "next/server"
-import { QueryService } from "@/services/query-service"
-import { QueryConfig } from "@/lib/types"
+import { QueryService } from "@/app/services/query-service"
+import { QueryConfig } from "@/lib/type"
 
 // instantiate QueryService in non-local (Appwrite) mode
 const queryService = new QueryService(false)

@@ -1,10 +1,9 @@
-import { users } from "@/lib/appwrite-server";
+import { users } from "@/lib/server/appwrite-server";
 import { jwtDecode } from "jwt-decode";
 import { cookies } from "next/headers";
 
 export async function getCurrentUser() {
   try {
-    // Get all cookies using Next.js App Router API (must await cookies())
     const cookieStore = await cookies();
 
     // Find the "appwrite_jwt" cookie

@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Shield, ChevronDown, ChevronUp } from "lucide-react"
 import { useState } from "react"
-import { useAccessLogsLogic } from "@/logic/useAccessLogsLogic"
+import { useAccessLogsLogic } from "@/app/logic/useAccessLogsLogic"
 
 export function SettingsSecurity() {
   const [showLogs, setShowLogs] = useState(false)

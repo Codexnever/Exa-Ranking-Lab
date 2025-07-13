@@ -22,8 +22,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
-import type { QueryConfig } from "@/lib/types";
-import { useQueryFormLogic } from "./useQueryFormLogic";
+import type { QueryConfig } from "@/lib/type";
+import { useQueryFormLogic } from "../../app/logic/useQueryFormLogic";
 
 interface QueryFormProps {
   onSubmit: (data: Omit<QueryConfig, "id" | "createdAt" | "userId">) => void;

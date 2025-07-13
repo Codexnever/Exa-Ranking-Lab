@@ -1,5 +1,5 @@
-import { useAuth } from "@/contexts/auth-context"
-import { useAnalyticsStore } from "@/store"
+import { useAuth } from "@/lib/contexts/auth-context"
+import { useAnalyticsStore } from "@/app/store"
 
 export const useAnalytics = () => {
   const store = useAnalyticsStore()

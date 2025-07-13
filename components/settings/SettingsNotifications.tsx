@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Bell } from "lucide-react"
-import { useSettingsLogic } from "../../logic/useSettingsLogic"
+import { useSettingsLogic } from "../../app/logic/useSettingsLogic"
 import { FeatureComingSoon } from "@/components/ui/FeatureComingSoon"
 
 export function SettingsNotifications() {

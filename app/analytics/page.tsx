@@ -8,7 +8,7 @@ import { LucidePieChart, Download } from "lucide-react"
 import { useAnalytics } from "@/hooks/use-analytics"
 import { useQueries } from "@/hooks/use-queries"
 import { useSnapshots } from "@/hooks/use-snapshots"
-import { useAnalyticsCalculations } from "@/logic/analyticsLogic"
+import { useAnalyticsCalculations } from "@/app/logic/analyticsLogic"
 import { useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
 import AnalyticsAPIsSkeleton from "@/components/loaders/AnalyticsAPIsSkeleton"
@@ -19,7 +19,7 @@ import RankingBarChartSkeleton from "@/components/loaders/RankingBarChartSkeleto
 import PerformanceChartsSkeleton from "@/components/loaders/PerformanceChartsSkeleton"
 import QueryPerformanceStatsTableSkeleton from "@/components/loaders/QueryPerformanceStatsTableSkeleton"
 import DomainAnalysisSkeleton from "@/components/loaders/DomainAnalysisSkeleton"
-import { useAuth } from "@/contexts/auth-context"
+import { useAuth } from "@/lib/contexts/auth-context"
 
 const AnalyticsAPIs = dynamic(() => import("@/components/analytics/AnalyticsAPIs").then(mod => mod.AnalyticsAPIs), {
   loading: () => <AnalyticsAPIsSkeleton />,

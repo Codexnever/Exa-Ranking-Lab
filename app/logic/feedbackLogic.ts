@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react"
 import { toast } from "sonner"
-import type { RankingSnapshot } from "@/lib/types"
+import type { RankingSnapshot } from "@/lib/type"
 
 export function useFeedbackLogic(
   snapshots: RankingSnapshot[]

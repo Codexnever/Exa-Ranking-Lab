@@ -1,7 +1,7 @@
 // AnalyticsService handles all analytics-related operations
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
 import { Query } from "appwrite"
-import type { AnalyticsData, RankingSnapshot } from "@/lib/types"
+import type { AnalyticsData, RankingSnapshot } from "@/lib/type"
 import { loadFromStorage, transformSnapshotDocument } from "./db-utils"
 
 export class AnalyticsService {

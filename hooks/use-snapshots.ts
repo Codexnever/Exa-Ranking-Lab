@@ -1,5 +1,5 @@
-import { useAuth } from "@/contexts/auth-context"
-import { useSnapshotsStore } from "@/store"
+import { useAuth } from "@/lib/contexts/auth-context"
+import { useSnapshotsStore } from "@/app/store"
 
 export const useSnapshots = () => {
   const store = useSnapshotsStore()

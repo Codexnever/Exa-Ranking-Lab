@@ -1,6 +1,6 @@
 "use client"
 
-import { useAuth } from "@/contexts/auth-context"
+import { useAuth } from "@/lib/contexts/auth-context"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
@@ -31,6 +31,7 @@ export default function AuthForm() {
         await register(formData.email, formData.password, formData.name)
         toast.success("Account created! Redirecting...")
       } else {
+        console.log('formdata', formData)
         if (!formData.email || !formData.password) {
           toast.error("Email and password are required")
           return
