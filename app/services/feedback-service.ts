@@ -1,5 +1,5 @@
 // FeedbackService handles all feedback-related operations
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { ID, Query } from "appwrite"
 import type { UserFeedback } from "@/lib/type"
 import { loadFromStorage, saveToStorage, transformFeedbackDocument } from "./db-utils"

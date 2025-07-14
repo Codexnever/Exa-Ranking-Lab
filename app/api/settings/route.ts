@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
-import { databases } from "@/lib/server/appwrite"
-import { getCurrentUser } from "@/lib/server/auth"
+import { DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
+import { databases } from "@/app/server/appwrite"
+import { getCurrentUser } from "@/app/server/auth"
 import { ID, Query } from "appwrite"
 
 // GET: Get current user's settings (API key, status, lastTested)

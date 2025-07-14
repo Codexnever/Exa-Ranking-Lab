@@ -5,8 +5,7 @@ import { toast } from "sonner"
 import type { AuthContextType } from "@/lib/type"
 import { useRouter } from "next/navigation"
 import type { Models } from "appwrite"
-import { account } from "@/lib/server/appwrite"
-
+import { account, client } from "@/app/server/appwrite"
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
@@ -22,6 +21,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (!res.ok) throw new Error("Unauthenticated")
       const data = await res.json()
+    console.log('Checking verfiy session:-',data)
       setUser(data)
     } catch {
       setUser(null)
@@ -36,30 +36,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      await logout()
+      await account.deleteSession('current') // Ensure no previous session exists
       await account.createEmailPasswordSession(email, password)
-      const { jwt } = await account.createJWT()
-
-      await fetch("/api/set-cookie", {
-        method: "POST",
-        body: JSON.stringify({ jwt }),
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      })
-
+      let jwt
+      try {
+        const jwtRes = await account.createJWT()
+        jwt = jwtRes.jwt
+        if (!jwt) throw new Error('JWT not generated')
+        client.setJWT(jwt)
+        console.log('JWT created:', jwt)
+      } catch (jwtErr) {
+        toast.error("Failed to generate JWT. Please try again.")
+        console.error("JWT generation error:", jwtErr)
+        throw jwtErr
+      }
+      try {
+        const res = await fetch("/api/set-cookie", {
+          method: "POST",
+          body: JSON.stringify({ jwt }),
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        })
+        if (!res.ok) {
+          const errText = await res.text()
+          throw new Error(`Failed to set cookie: ${errText}`)
+        }
+      } catch (cookieErr) {
+        toast.error("Failed to set session cookie. Please try again.")
+        console.error("Set-cookie error:", cookieErr)
+        throw cookieErr
+      }
       toast.success("Logged in!")
       await fetchUser()
-      window.location.href = "/settings"
     } catch (err) {
       toast.error("Login failed")
+      console.error("Login error:", err)
       throw err
     }
   }
 
   const register = async (email: string, password: string, name: string) => {
     try {
-      await logout()
-
+      console.log('Registering with email:', email)
       // 1. Create account on Appwrite
       await account.create("unique()", email, password, name)
 
@@ -67,21 +85,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await account.createEmailPasswordSession(email, password)
 
       // 3. Generate JWT
-      const { jwt } = await account.createJWT()
+      let jwt
+      try {
+        const jwtRes = await account.createJWT()
+        jwt = jwtRes.jwt
+        if (!jwt) throw new Error('JWT not generated')
+      } catch (jwtErr) {
+        toast.error("Failed to generate JWT. Please try again.")
+        console.error("JWT generation error:", jwtErr)
+        throw jwtErr
+      }
 
       // 4. Set JWT in HttpOnly cookie via API route
-      await fetch("/api/set-cookie", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ jwt }),
-      })
+      try {
+        const res = await fetch("/api/set-cookie", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ jwt }),
+        })
+        if (!res.ok) {
+          const errText = await res.text()
+          throw new Error(`Failed to set cookie: ${errText}`)
+        }
+      } catch (cookieErr) {
+        toast.error("Failed to set session cookie. Please try again.")
+        console.error("Set-cookie error:", cookieErr)
+        throw cookieErr
+      }
 
       // 5. Fetch user from /api/verify-session
       await fetchUser()
-
-      // 6. Redirect
-      window.location.href = "/settings"
     } catch (err) {
       toast.error("Registration failed")
       console.error("Register error:", err)

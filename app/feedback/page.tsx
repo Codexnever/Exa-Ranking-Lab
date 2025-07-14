@@ -37,7 +37,7 @@ export default function Feedback() {
     filteredSnapshots,
     selectedSnapshotData,
     handleSubmitFeedback,
-  } = useFeedbackLogic(queries, snapshots)
+  } = useFeedbackLogic(snapshots)
 
   return (
     <div className="space-y-6">
@@ -215,37 +215,14 @@ export default function Feedback() {
           <CardDescription>Overview of feedback trends and insights</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-6 md:grid-cols-3">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900">4.2</div>
-              <p className="text-sm text-gray-600">Average Rating</p>
-              <div className="flex justify-center mt-2">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <Star
-                    key={star}
-                    className={`w-4 h-4 ${star <= 4 ? "text-yellow-500 fill-current" : "text-gray-300"}`}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900">127</div>
-              <p className="text-sm text-gray-600">Total Feedback</p>
-              <div className="flex justify-center gap-2 mt-2">
-                <ThumbsUp className="w-4 h-4 text-emerald-500" />
-                <span className="text-xs text-gray-600">89% positive</span>
-              </div>
-            </div>
-
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900">23</div>
-              <p className="text-sm text-gray-600">Improvement Suggestions</p>
-              <div className="flex justify-center gap-2 mt-2">
-                <Badge variant="outline" className="text-xs">
-                  Position Changes
-                </Badge>
-              </div>
+          <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+            <MessageSquare className="w-12 h-12 mb-4 text-gray-300" />
+            <p className="text-lg font-semibold mb-2">No feedback data yet</p>
+            <p className="text-sm text-gray-500 mb-4 text-center max-w-md">
+              Once users start submitting feedback, you'll see summary statistics and insights here. Encourage your team to try the feedback form above!
+            </p>
+            <div className="flex gap-2 mt-2">
+              <Badge variant="outline" className="text-xs">Get started by submitting feedback</Badge>
             </div>
           </div>
         </CardContent>

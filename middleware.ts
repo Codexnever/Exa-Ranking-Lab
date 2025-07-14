@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse, userAgent } from "next/server"
-import { cookies } from "next/headers";
+import { cookies } from "next/headers"
 
-// Define which routes require auth and logging
 const PROTECTED_ROUTES = [
   "/",
   "/analytics",
@@ -14,32 +13,27 @@ const PROTECTED_ROUTES = [
   "/snapshots",
   "/settings",
   "/query-monitor",
-  "/api",
+]
+
+const PUBLIC_API_ROUTES = [
+  "/api/register",
+  "/api/logout",
+  "/api/verify-session",
+  "/api/set-cookie",
 ]
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Always skip auth for these API routes
-  const skipApiAuth = [
-    "/api/register",
-    "/api/logout",
-    "/api/verify-session",
-  ]
-  if (skipApiAuth.some((api) => pathname === api)) {
+  if (PUBLIC_API_ROUTES.includes(pathname)) {
     return NextResponse.next()
   }
 
-  const isProtected = PROTECTED_ROUTES.some((route) =>
-    pathname.startsWith(route)
-  )
+  const isProtected = PROTECTED_ROUTES.some(route => pathname.startsWith(route))
 
   if (!isProtected) return NextResponse.next()
 
-  // Extract IP from standard header
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-  // Use Next.js userAgent helper
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
   const ua = userAgent(request)
   const userAgentInfo = {
     browser: ua.browser?.name || "unknown",
@@ -49,14 +43,13 @@ export async function middleware(request: NextRequest) {
     isBot: ua.isBot,
   }
 
-  // Forward values as headers to downstream API routes
   const response = NextResponse.next()
   response.headers.set("x-real-ip", ip)
   response.headers.set("x-user-agent", JSON.stringify(userAgentInfo))
-  const cookieStore = await cookies();
-  // Auth check: look for appwrite_jwt cookie (or change to your session cookie name)
-  const jwt = cookieStore.get('appwrite_jwt')
-  // Allow access to /auth and static files
+
+  const cookieStore = await cookies()
+  const jwt = cookieStore.get("appwrite_jwt")
+
   if (!jwt && !pathname.startsWith("/auth")) {
     const loginUrl = new URL("/auth", request.url)
     loginUrl.searchParams.set("returnTo", pathname)
@@ -71,5 +64,5 @@ export const config = {
     "/",
     "/(analytics|profile|compare|feedback|query-builder|export-data|clear-data|snapshots|settings|query-monitor)(.*)?",
     "/api/:path*",
-  ],
+  ]
 }

@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database-service"
-import { ExaClient } from "@/lib/server/exa-client"
-import { getCurrentUser } from "@/lib/server/auth"
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
+import { ExaClient } from "@/app/server/exa-client"
+import { getCurrentUser } from "@/app/server/auth"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { Query } from "appwrite"
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {

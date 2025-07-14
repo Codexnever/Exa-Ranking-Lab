@@ -1,5 +1,5 @@
 // AccessLogService handles all access log operations
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { ID } from "appwrite"
 import { loadFromStorage, saveToStorage } from "./db-utils"
 

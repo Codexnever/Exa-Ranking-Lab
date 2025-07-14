@@ -1,5 +1,5 @@
 // SnapshotService handles all snapshot-related operations
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { ID, Query } from "appwrite"
 import type { RankingSnapshot } from "@/lib/type"
 import { loadFromStorage, saveToStorage, transformSnapshotDocument } from "./db-utils"

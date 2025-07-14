@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database-service"
-import { users } from "@/lib/server/appwrite-server"
-import { getCurrentUser } from "@/lib/server/auth"
+import { users } from "@/app/server/appwrite-server"
+import { getCurrentUser } from "@/app/server/auth"
 
 export async function GET(request: NextRequest) {
   try {

@@ -1,25 +1,18 @@
 "use client"
 
 import { useAuth } from "@/lib/contexts/auth-context"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
+import { AuthRedirect } from "./AuthRedirect"
 
 export default function AuthForm() {
   const { user, login, register, loading: authLoading } = useAuth()
   const router = useRouter()
-  const searchParams = useSearchParams()
 
   const [formData, setFormData] = useState({ email: "", password: "", name: "" })
   const [isSignUp, setIsSignUp] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
-
-  useEffect(() => {
-    if (!authLoading && user) {
-      const returnTo = searchParams.get("returnTo") || "/query-builder"
-      router.replace(returnTo)
-    }
-  }, [user, authLoading])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,6 +42,8 @@ export default function AuthForm() {
   if (authLoading) return <div className="p-4">Loading...</div>
 
   return (
+  <>
+    <AuthRedirect />
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="w-full max-w-md p-8 bg-white rounded-2xl shadow-2xl border border-gray-100">
         <div className="flex flex-col items-center mb-6">
@@ -60,6 +55,7 @@ export default function AuthForm() {
               : "Welcome back! Log in to your dashboard."}
           </p>
         </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           {isSignUp && (
             <input
@@ -95,6 +91,7 @@ export default function AuthForm() {
             {formLoading ? "Please wait..." : isSignUp ? "Sign Up" : "Login"}
           </button>
         </form>
+
         <div className="text-sm mt-6 text-center text-gray-600">
           {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
           <button
@@ -107,5 +104,6 @@ export default function AuthForm() {
         </div>
       </div>
     </div>
-  )
+  </>
+)
 }

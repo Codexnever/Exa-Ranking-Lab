@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useAuth } from "@/lib/contexts/auth-context"
-import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/server/appwrite"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { Query } from "appwrite"
 
 export function useAccessLogsLogic() {
