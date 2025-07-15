@@ -37,7 +37,6 @@ export function useFeedbackLogic(
           expectedPosition: feedback.expectedPosition ? Number.parseInt(feedback.expectedPosition) : undefined,
         }),
       })
-      console.log('FeedBack:-',response)
       if (!response.ok) throw new Error("Failed to submit feedback")
       toast.success("Feedback submitted successfully!")
       setFeedback({

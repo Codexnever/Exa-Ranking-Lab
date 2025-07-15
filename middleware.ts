@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse, userAgent } from "next/server"
-import { cookies } from "next/headers"
 
 const PROTECTED_ROUTES = [
   "/",
@@ -24,15 +23,21 @@ const PUBLIC_API_ROUTES = [
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const jwt = request.cookies.get("appwrite_jwt")?.value
 
   if (PUBLIC_API_ROUTES.includes(pathname)) {
     return NextResponse.next()
   }
 
-  const isProtected = PROTECTED_ROUTES.some(route => pathname.startsWith(route))
+  // ✅ Prevent logged-in users from seeing auth page
+  if (pathname.startsWith("/auth") && jwt) {
+    return NextResponse.redirect(new URL("/query-builder", request.url))
+  }
 
+  const isProtected = PROTECTED_ROUTES.some(route => pathname.startsWith(route))
   if (!isProtected) return NextResponse.next()
 
+  // ✅ Extract IP and User-Agent
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
   const ua = userAgent(request)
   const userAgentInfo = {
@@ -47,14 +52,15 @@ export async function middleware(request: NextRequest) {
   response.headers.set("x-real-ip", ip)
   response.headers.set("x-user-agent", JSON.stringify(userAgentInfo))
 
-  const cookieStore = await cookies()
-  const jwt = cookieStore.get("appwrite_jwt")
-
   if (!jwt && !pathname.startsWith("/auth")) {
     const loginUrl = new URL("/auth", request.url)
     loginUrl.searchParams.set("returnTo", pathname)
     return NextResponse.redirect(loginUrl)
   }
+  
+  if (userAgentInfo.isBot) {
+  return new NextResponse("Bots not allowed", { status: 403 })
+}
 
   return response
 }
@@ -64,5 +70,5 @@ export const config = {
     "/",
     "/(analytics|profile|compare|feedback|query-builder|export-data|clear-data|snapshots|settings|query-monitor)(.*)?",
     "/api/:path*",
-  ]
+  ],
 }

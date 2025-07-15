@@ -12,6 +12,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Models.User<Models.Preferences> | null>(null)
   const [loading, setLoading] = useState(true)
+
   const router = useRouter()
 
   const fetchUser = async () => {
@@ -21,7 +22,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (!res.ok) throw new Error("Unauthenticated")
       const data = await res.json()
-    console.log('Checking verfiy session:-',data)
+      console.log("Fetched user", data)
+
       setUser(data)
     } catch {
       setUser(null)
@@ -29,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
     }
   }
+
 
   useEffect(() => {
     fetchUser()
@@ -44,7 +47,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         jwt = jwtRes.jwt
         if (!jwt) throw new Error('JWT not generated')
         client.setJWT(jwt)
-        console.log('JWT created:', jwt)
       } catch (jwtErr) {
         toast.error("Failed to generate JWT. Please try again.")
         console.error("JWT generation error:", jwtErr)
@@ -68,6 +70,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       toast.success("Logged in!")
       await fetchUser()
+
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo") || "/"
+      window.location.href = returnTo
     } catch (err) {
       toast.error("Login failed")
       console.error("Login error:", err)
@@ -77,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (email: string, password: string, name: string) => {
     try {
-      console.log('Registering with email:', email)
+      await account.deleteSession('current')
       // 1. Create account on Appwrite
       await account.create("unique()", email, password, name)
 
@@ -116,6 +121,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // 5. Fetch user from /api/verify-session
       await fetchUser()
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo") || "/"
+      window.location.href = returnTo
+
     } catch (err) {
       toast.error("Registration failed")
       console.error("Register error:", err)

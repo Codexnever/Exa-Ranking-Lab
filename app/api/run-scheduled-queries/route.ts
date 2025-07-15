@@ -10,7 +10,6 @@ const queryService = new QueryService(false)
 // Helper to check if the query should run based on lastRun and frequency
 function shouldRunQuery(query: QueryConfig): boolean {
   if (!query.schedule.enabled) return false
-console.log("Checking if query should run:", query.id)
   const now = new Date()
   const lastRun = query.lastRun ? new Date(query.lastRun) : null
   const freq = query.schedule.frequency

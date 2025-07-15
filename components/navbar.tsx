@@ -22,11 +22,12 @@ export default function Navbar() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
-  const { user, loading, logout } = useAuth()
+  const { user, loading } = useAuth()
 
+ 
   const handleLogout = async () => {
     try {
-      await logout()
+    await logout()
       window.location.href = "/auth" // force redirect after logout
     } catch (error) {
       console.error("Failed to log out:", error)
@@ -181,3 +182,8 @@ export default function Navbar() {
     </header>
   )
 }
+
+async function logout() {
+await fetch("/api/logout", { method: "POST", credentials: "include" })
+}
+

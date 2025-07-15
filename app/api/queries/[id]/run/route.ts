@@ -58,7 +58,6 @@ async function handlePost(request: NextRequest, queryId: string) {
       endDate: query.filters?.endDate,
       numResults: query.filters?.numResults,
     })
-    // console.log("[Exa Search Results]", exaResults)
 
     const responseTime = (Date.now() - start)
 
@@ -72,7 +71,6 @@ async function handlePost(request: NextRequest, queryId: string) {
       url: r.url,
       ...r,
     }))
-    // console.log('mapped result contentType', mappedResults.map(r => r.contentType))
     return NextResponse.json({
       success: true,
       results: mappedResults,

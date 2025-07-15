@@ -1,15 +1,15 @@
 "use client"
 
 import { useAuth } from "@/lib/contexts/auth-context"
-import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { AuthRedirect } from "./AuthRedirect"
 
 export default function AuthForm() {
   const { user, login, register, loading: authLoading } = useAuth()
   const router = useRouter()
-
+  const searchParams = useSearchParams()
   const [formData, setFormData] = useState({ email: "", password: "", name: "" })
   const [isSignUp, setIsSignUp] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
@@ -24,13 +24,13 @@ export default function AuthForm() {
         await register(formData.email, formData.password, formData.name)
         toast.success("Account created! Redirecting...")
       } else {
-        console.log('formdata', formData)
         if (!formData.email || !formData.password) {
           toast.error("Email and password are required")
           return
         }
         await login(formData.email, formData.password)
-        toast.success("Logged in! Redirecting...")
+           const returnTo = searchParams.get("returnTo") || "/query-builder"
+    router.replace(returnTo)
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Authentication failed")

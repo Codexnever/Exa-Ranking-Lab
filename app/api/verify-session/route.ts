@@ -19,7 +19,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(user)
   } catch (err) {
-    console.error("[verify-session] Error:", err)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 }

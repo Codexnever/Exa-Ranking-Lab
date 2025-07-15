@@ -56,7 +56,7 @@ export default function Dashboard() {
     useAnalyticsStore.getState().calculateAnalyticsFromSnapshots(snapshots)
   }, [])
 
-  useEffect(() => {
+  useEffect(() => { //[ Check THis also when this component mount this will trigger check in DEV mode is it this working after removing ]
     if (loading) return
     const verifySession = async () => {
       const res = await fetch('/api/verify-session', {

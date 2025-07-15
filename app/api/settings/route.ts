@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
         Query.equal("userId", user.$id)
       ]
     )
+    console.log("Checking Documents:", res.documents)
     let doc = res.documents[0]
     if (doc) {
       await databases.updateDocument(

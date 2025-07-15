@@ -67,7 +67,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
         set({ isLoading: true, error: null })
         try {
           const headers = await getAuthHeaders()
-          console.log('🔐 Creating query with validated session')
           
           const response = await fetch("/api/queries", {
             method: "POST",
@@ -77,7 +76,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
           })
           
           if (response.status === 401) {
-            console.log('❌ Server rejected auth token')
             throw new Error("Session expired. Please log in again")
           }
           
@@ -85,7 +83,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
             const error = await response.json()
             throw new Error(error.details || "Failed to create query")
           }          const newQuery = await response.json() as QueryConfig
-          console.log('✅ Query created successfully')
             set((state: QueriesStoreType): QueriesState => ({
             queries: [...state.queries, newQuery],
             isLoading: false,
@@ -105,12 +102,10 @@ export const useQueriesStore = create<QueriesStoreType>()(
           // First check if query exists in local store
           const localQuery = useQueriesStore.getState().queries.find((q: QueryConfig) => q.id === queryId)
           if (!localQuery) {
-            console.log('❌ Query not found in local store:', queryId)
             throw new Error("Query not found")
           }
 
           const headers = await getAuthHeaders()
-          console.log('🔍 Running query:', queryId)
 
           const response = await fetch(`/api/queries/${encodeURIComponent(queryId)}/run`, {
             method: "POST",
@@ -120,12 +115,10 @@ export const useQueriesStore = create<QueriesStoreType>()(
           })
 
           if (response.status === 401) {
-            console.log('❌ Authentication failed')
             throw new Error("Please log in to run queries")
           }
           
           if (response.status === 404) {
-            console.log('❌ Query not found:', queryId)
             // Remove from local store if it doesn't exist on server
             set((state: QueriesStoreType): QueriesState => ({
               queries: state.queries.filter((q: QueryConfig) => q.id !== queryId),
@@ -139,7 +132,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
             const error = await response.json()
             throw new Error(error.details || "Failed to run query")
           }          const result = await response.json()
-          console.log('✅ Query executed successfully')
           
           // Update the lastRun timestamp for the query
           set((state: QueriesStoreType): QueriesState => ({

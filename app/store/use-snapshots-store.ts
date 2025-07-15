@@ -36,10 +36,8 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
           if (params.length > 0) url += `?${params.join("&")}`
 
           const response = await fetch(url)
-          console.log('Fetching Snapshot from use snapshot store',url)
           if (!response.ok) throw new Error("Failed to fetch snapshots")
           const snapshots = await response.json()
-          console.log('Fetching Snapshot from use snapshot store',snapshots)
           set({ snapshots, isLoading: false, error: null })
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to fetch snapshots"

@@ -4,7 +4,7 @@ import { saveAs } from "file-saver"
 import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store"
 
 export function useSettingsLogic() {
-  
+
   const [apiKey, setApiKey] = useState('')
   const [apiStatus, setApiStatus] = useState<'connected' | 'disconnected' | 'unknown'>("unknown")
   const [lastTested, setLastTested] = useState<string | null>(null)
@@ -37,7 +37,6 @@ export function useSettingsLogic() {
         body: JSON.stringify({ apiKey: apiKey.trim() }),
       })
       const data = await response.json()
-      console.log('API connection test response:', data)
       if (response.ok && data.success) {
         toast.success(`API connection successful! Found ${data.resultsCount} result(s)`, { id: loadingId })
         setApiStatus("connected")
@@ -69,7 +68,6 @@ export function useSettingsLogic() {
     }
   }
   const handleSaveApiKey = async () => {
-    console.log('handlesaveapikey triggered') 
     try {
       const res = await fetch("/api/settings", {
         method: "POST",
@@ -77,7 +75,6 @@ export function useSettingsLogic() {
         credentials: "include",
         body: JSON.stringify({ apiKey, apiStatus, lastTested })
       })
-      console.log('handlesaveapikey', { apiKey, apiStatus, lastTested })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || "Failed to update API key")
@@ -142,7 +139,7 @@ export function useSettingsLogic() {
 
   return {
     apiKey, setApiKey, testApiConnection, handleSaveApiKey,
-    apiStatus, lastTested, 
+    apiStatus, lastTested,
     preferences, setPreferences, handleSavePreferences,
     handleExportData, handleClearData
   }

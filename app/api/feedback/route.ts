@@ -6,7 +6,6 @@ import { getCurrentUser } from "@/app/server/auth"
 
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser()
-  console.log("User in GET feedback:", user)
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
