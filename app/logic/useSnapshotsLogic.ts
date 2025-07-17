@@ -52,8 +52,13 @@ export function useSnapshotsLogic() {
     const now = new Date()
     const diffMs = now.getTime() - parsedDate.getTime()
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-    if (diffHours < 24) {
+    const diffMin = Math.floor(diffMs / (1000 * 60))
+
+    if (diffMin < 60) {
+      return `${diffMin}m ago`
+    } else if(diffHours < 24){
       return `${diffHours}h ago`
+      
     } else {
       return parsedDate.toLocaleDateString("en-US", {
         month: "short",

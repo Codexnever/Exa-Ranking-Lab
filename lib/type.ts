@@ -36,6 +36,7 @@ export interface RankingSnapshot {
   }
 }
 
+
 export interface SearchResult {
   id: string
   title: string
@@ -135,4 +136,34 @@ export interface ExaSearchResponse {
   results: ExaSearchResult[]
   totalResults: number
   responseTime: number
+}
+
+export interface DriftAnalysisResult {
+  queryId: string
+  queryName: string
+  driftTimeline: DriftTimelinePoint[]
+  averageDrift: number
+  maxDrift: number
+  latestDrift: number
+  stability: "stable" | "medium" | "volatile"
+  driftTrend: "improving" | "worsening" | "stable"
+}
+
+export interface DriftTimelinePoint {
+  timestamp: Date
+  snapshotId: string
+  previousSnapshotId: string | null
+  driftScore: number
+  rankChanges: RankChange[]
+  newResults: number
+  droppedResults: number
+}
+
+export interface RankChange {
+  url: string
+  title: string
+  previousPosition: number
+  currentPosition: number
+  positionDelta: number
+  similarityScore: number
 }

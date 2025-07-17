@@ -14,6 +14,7 @@ import {
   MonitorCog,
   Activity,
   Database,
+  Radar,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -49,6 +50,11 @@ export default function Sidebar() {
       label: "Analytics",
       icon: Activity,
       href: "/analytics",
+    },
+    {
+      label: "Drift Radar",
+      icon: Radar,
+      href: "/drift",
     },
     {
       label: "Snapshots",

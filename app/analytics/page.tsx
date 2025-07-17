@@ -1,6 +1,4 @@
 "use client"
-
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, MemoizedSelectTrigger as SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -9,7 +7,7 @@ import { useAnalytics } from "@/hooks/use-analytics"
 import { useQueries } from "@/hooks/use-queries"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useAnalyticsCalculations } from "@/app/logic/analyticsLogic"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import dynamic from "next/dynamic"
 import AnalyticsAPIsSkeleton from "@/components/loaders/AnalyticsAPIsSkeleton"
 import RankingTrendChartSkeleton from "@/components/loaders/RankingTrendChartSkeleton"
@@ -111,7 +109,6 @@ export default function Analytics() {
   const { queries, fetchQueries } = useQueries()
   const { snapshots, fetchSnapshots } = useSnapshots()
   const [timeRange, setTimeRange] = useState("30d")
-  const { user } = useAuth()
 
   // Use extracted analytics logic
   const {

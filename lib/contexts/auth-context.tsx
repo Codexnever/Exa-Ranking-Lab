@@ -22,8 +22,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (!res.ok) throw new Error("Unauthenticated")
       const data = await res.json()
-      console.log("Fetched user", data)
-
       setUser(data)
     } catch {
       setUser(null)

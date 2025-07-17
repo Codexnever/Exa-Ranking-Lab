@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,34 +15,35 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, Plus, Search, User, Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/contexts/auth-context"
+import { usePathname } from "next/navigation"
 
 export default function Navbar() {
-  const pathname = usePathname()
   const router = useRouter()
+  const pathname = usePathname()
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
-  const { user, loading } = useAuth()
+  const { user, loading, logout } = useAuth()
+  const getPageTitle = () => {
+     const pathname = usePathname()
+      switch (pathname) {
+        case "/": return "Dashboard"
+        case "/query-builder": return "Query Builder"
+        case "/snapshots": return "Snapshots"
+        case "/compare": return "Compare Rankings"
+        case "/feedback": return "Feedback"
+        case "/settings": return "Settings"
+        default: return "Exa Ranking Lab"
+      }
+    }
 
  
   const handleLogout = async () => {
     try {
     await logout()
-      window.location.href = "/auth" // force redirect after logout
+      // window.location.href = "/auth" // force redirect after logout
     } catch (error) {
       console.error("Failed to log out:", error)
-    }
-  }
-
-  const getPageTitle = () => {
-    switch (pathname) {
-      case "/": return "Dashboard"
-      case "/query-builder": return "Query Builder"
-      case "/snapshots": return "Snapshots"
-      case "/compare": return "Compare Rankings"
-      case "/feedback": return "Feedback"
-      case "/settings": return "Settings"
-      default: return "Exa Ranking Lab"
     }
   }
 
@@ -181,9 +182,5 @@ export default function Navbar() {
       </div>
     </header>
   )
-}
-
-async function logout() {
-await fetch("/api/logout", { method: "POST", credentials: "include" })
 }
 

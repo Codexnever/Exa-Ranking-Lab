@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, cache } from "react"
 import { toast } from "sonner"
 import { saveAs } from "file-saver"
 import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store"
@@ -10,7 +10,7 @@ export function useSettingsLogic() {
   const [lastTested, setLastTested] = useState<string | null>(null)
 
   useEffect(() => {
-    (async () => {
+    cache((async () => {
       try {
         const res = await fetch("/api/settings", { credentials: "include" })
         if (!res.ok) throw new Error("Failed to load settings")
@@ -21,10 +21,10 @@ export function useSettingsLogic() {
       } catch (err) {
         throw new Error("Failed to load settings: " + (err instanceof Error ? err.message : "Unknown error"))
       }
-    })()
+    }))()
   }, [])
 
-  const testApiConnection = async () => {
+  const testApiConnection = cache(async () => {
     if (!apiKey.trim()) {
       toast.error("Please enter an API key first")
       return
@@ -66,7 +66,7 @@ export function useSettingsLogic() {
         body: JSON.stringify({ apiKey, apiStatus: "disconnected", lastTested: now })
       })
     }
-  }
+  })
   const handleSaveApiKey = async () => {
     try {
       const res = await fetch("/api/settings", {
