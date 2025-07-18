@@ -1,27 +1,94 @@
-import { Client, Account, Databases, Storage, Functions } from "appwrite"
+// app/server/appwrite.ts
+import { Client, Account, Databases, Storage, Functions } from "appwrite";
 
-const client = new Client()
+const client = new Client();
 
-client.setEndpoint(process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT!).setProject(process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID!).setDevKey('e2b8d7534a8cd041b6967612e0442c80ed1724d884a6a67a76fb4606929296d1bb2640e8db47a2b268a4051881503649595fa817083b056309b2c3b9d9196121c926760e68410eeaf1707cae96be3907cc3c251b19f6dfdb85f9184fd4a26dd2ed73f3349d5e96e50e99f5582c14efc22c2a0b3bfaab2980978fcf78f1766793')
+client
+  .setEndpoint(process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT!)
+  .setProject(process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID!);
+// Removed setDevKey - insecure for client; use sessions
 
-export const account = new Account(client)
-export const databases = new Databases(client)
-export const storage = new Storage(client)
-export const functions = new Functions(client)
+export const account = new Account(client);
+export const databases = new Databases(client);
+export const storage = new Storage(client);
+export const functions = new Functions(client);
 
-export const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!
+export const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!;
 
-// Collection IDs
+// Collection IDs (unchanged)
 export const COLLECTIONS = {
-  USERS:process.env.COLLECTION_USERS!,
-  QUERIES:process.env.COLLECTION_QUERIES!,
-  SNAPSHOTS:process.env.COLLECTION_SNAPSHOTS!,
-  FEEDBACK:process.env.COLLECTION_FEEDBACK!,
-  ANALYTICS:process.env.COLLECTION_ANALYTICS!,
-  NOTIFICATIONS:process.env.COLLECTION_NOTIFICATIONS!,
+  USERS: process.env.COLLECTION_USERS!,
+  QUERIES: process.env.COLLECTION_QUERIES!,
+  SNAPSHOTS: process.env.COLLECTION_SNAPSHOTS!,
+  FEEDBACK: process.env.COLLECTION_FEEDBACK!,
+  ANALYTICS: process.env.COLLECTION_ANALYTICS!,
+  NOTIFICATIONS: process.env.COLLECTION_NOTIFICATIONS!,
   ACCESS_LOGS: process.env.NEXT_PUBLIC_COLLECTION_ACCESS_LOGS!,
-  API_USAGE:process.env.COLLECTION_API_USAGE!,
-  SETTINGS:process.env.NEXT_PUBLIC_COLLECTION_SETTINGS!,
+  API_USAGE: process.env.COLLECTION_API_USAGE!,
+  SETTINGS: process.env.NEXT_PUBLIC_COLLECTION_SETTINGS!,
+};
+
+// Login function (fixed: create session first, then JWT)
+export async function login(email: string, password: string) {
+  try {
+    // Delete any existing session
+    await account.deleteSession('current').catch(() => {}); // Ignore if none
+
+    // Create session (this grants scope)
+    const session = await account.createEmailPasswordSession(email, password);
+
+    // Generate JWT from session
+    const jwtRes = await account.createJWT();
+    const jwt = jwtRes.jwt;
+    if (!jwt) throw new Error('JWT not generated');
+
+    // Set JWT in cookie via API route
+    const res = await fetch("/api/set-cookie", {
+      method: "POST",
+      body: JSON.stringify({ jwt }),
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error('Failed to set cookie');
+
+    console.log("Login successful. Session:", session);
+    return session;
+  } catch (error) {
+    console.error("Login error:", error);
+    throw error;
+  }
 }
 
-export { client }
+// Register function (fixed similarly)
+export async function register(email: string, password: string, name: string) {
+  try {
+    await account.deleteSession('current').catch(() => {});
+    await account.create("unique()", email, password, name);
+    return await login(email, password); // Auto-login
+  } catch (error) {
+    console.error("Register error:", error);
+    throw error;
+  }
+}
+
+
+// Logout function
+export async function logout() {
+  try {
+    await account.deleteSession('current');
+    console.log("Logged out successfully");
+  } catch (error) {
+    console.error("Logout error:", error);
+  }
+}
+
+// Get current account (client-side check)
+export async function getCurrentAccount() {
+  try {
+    return await account.get();
+  } catch (error) {
+    return null;
+  }
+}
+
+export { client };

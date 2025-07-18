@@ -2,7 +2,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { databaseService } from "@/app/services/database-service";
 import { analyzeDrift } from "@/app/logic/driftAnalyzer";
-import { getCurrentUser } from "@/app/server/auth";
+import { getCurrentUser } from "@/app/server/auth"; 
+
 
 export async function GET(request: NextRequest, { params }: { params: { queryid: string } }) {
   try {

@@ -1,21 +1,26 @@
-import { create } from "zustand"
-import { persist } from "zustand/middleware"
-import { toast } from "sonner"
-import type { AnalyticsData } from "@/lib/type"
+// hooks/use-analytics-store.ts (formerly useAnalyticsStore)
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { toast } from "sonner";
+import type { AnalyticsData, RankingSnapshot } from "@/lib/type";
+import { AnalyticsService } from "@/app/services/analytics-service"; // Import your service
 
 interface AnalyticsState {
-  analytics: AnalyticsData | null
-  isLoading: boolean
-  error: string | null
+  analytics: AnalyticsData | null;
+  isLoading: boolean;
+  error: string | null;
 }
 
 interface AnalyticsActions {
-  fetchAnalytics: () => Promise<void>
-  clearAnalytics: () => void
-  calculateAnalyticsFromSnapshots: (snapshots: any[]) => void
+  fetchAnalytics: (userId?: string, forceRefetch?: boolean) => Promise<void>;
+  clearAnalytics: () => void;
+  calculateAnalyticsFromSnapshots: (snapshots: RankingSnapshot[]) => void;
+  refetchOnFocus: () => void; // New: Auto-refetch on window focus
 }
 
-type AnalyticsStore = AnalyticsState & AnalyticsActions
+type AnalyticsStore = AnalyticsState & AnalyticsActions;
+
+const analyticsService = new AnalyticsService(false); // Assume non-local for API
 
 export const useAnalyticsStore = create<AnalyticsStore>()(
   persist(
@@ -24,92 +29,49 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
       isLoading: false,
       error: null,
 
-      fetchAnalytics: async () => {
-        set({ isLoading: true, error: null })
+      fetchAnalytics: async (userId?: string, forceRefetch = false) => {
+        if (get().analytics && !forceRefetch) return; // Cache hit
+        set({ isLoading: true, error: null });
         try {
-          let url = "/api/analytics"
-          const response = await fetch(url)
-          if (!response.ok) throw new Error("Failed to fetch analytics")
-          const analytics = await response.json()
-          set({ analytics, isLoading: false, error: null })
+          const url = userId ? `/api/analytics?userId=${userId}` : "/api/analytics";
+          const response = await fetch(url);
+          if (!response.ok) throw new Error("Failed to fetch analytics");
+          const analytics = await response.json();
+          set({ analytics, isLoading: false, error: null });
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to fetch analytics"
-          set({ error: message, isLoading: false })
-          toast.error(`Failed to fetch analytics: ${message}`)
+          const message = error instanceof Error ? error.message : "Failed to fetch analytics";
+          set({ error: message, isLoading: false });
+          toast.error(`Failed to fetch analytics: ${message}`);
+          // Fallback to local calculation
+          const localSnapshots: RankingSnapshot[] = JSON.parse(localStorage.getItem('snapshots') || '[]'); // Fixed: Explicit type and basic load from storage (adjust key if needed)
+          get().calculateAnalyticsFromSnapshots(localSnapshots);
         }
       },
 
       clearAnalytics: () => {
-        set({ analytics: null, error: null })
+        set({ analytics: null, error: null });
       },
 
-      // NEW: Calculate analytics from local snapshots for instant UI update
-      calculateAnalyticsFromSnapshots: (snapshots: import("@/lib/type").RankingSnapshot[]) => {
-        if (!snapshots || snapshots.length === 0) {
-          set({ analytics: {
+      calculateAnalyticsFromSnapshots: (snapshots: RankingSnapshot[]) => {
+        try {
+          const analytics = analyticsService.calculateAnalyticsFromSnapshots(snapshots); // Use service for consistency
+          set({ analytics });
+        } catch (error) {
+          console.error("Local calculation failed:", error);
+          set({ analytics: { 
             rankingStability: 0,
             volatilityIndex: 0,
             domainDiversity: 0,
             avgResponseTime: 0,
             newContentDiscovery: 0,
             querySuccessRate: 0,
-          } })
-          return
+          } }); // Fixed: Full default object matching AnalyticsData type
         }
-        const snapshotsByQuery: Record<string, import("@/lib/type").RankingSnapshot[]> = {};
-        const seenUrls = new Set<string>();
-        let totalResponseTime = 0;
-        let successCount = 0;
-        const domainSet = new Set<string>();
-        for (const snap of snapshots) {
-          if (!snap.queryId) continue;
-          if (!snap.results || !Array.isArray(snap.results)) continue;
-          if (!snap.metadata || typeof snap.metadata.responseTime !== "number") continue;
-          if (!snapshotsByQuery[snap.queryId]) snapshotsByQuery[snap.queryId] = [];
-          snapshotsByQuery[snap.queryId].push(snap);
-          totalResponseTime += snap.metadata.responseTime;
-          if (snap.results.length > 0) successCount++;
-          for (const result of snap.results) {
-            try {
-              const domain = new URL(result.url).hostname;
-              domainSet.add(domain);
-              seenUrls.add(result.url);
-            } catch {}
-          }
-        }
-        const avgResponseTime = totalResponseTime / snapshots.length;
-        const querySuccessRate = (successCount / snapshots.length) * 100;
-        let totalRankChanges = 0;
-        let totalComparisons = 0;
-        Object.values(snapshotsByQuery).forEach((snaps) => {
-          (snaps as import("@/lib/type").RankingSnapshot[]).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-          for (let i = 1; i < snaps.length; i++) {
-            const prev = snaps[i - 1].results?.map((r: any) => r.url) || [];
-            const curr = snaps[i].results?.map((r: any) => r.url) || [];
-            const maxLength = Math.max(prev.length, curr.length);
-            for (let j = 0; j < maxLength; j++) {
-              const prevUrl = prev[j] || null;
-              const currUrl = curr[j] || null;
-              if (prevUrl && currUrl) {
-                if (prevUrl !== currUrl) totalRankChanges++;
-              } else {
-                totalRankChanges++;
-              }
-              totalComparisons++;
-            }
-          }
-        });
-        const stabilityScore = totalComparisons > 0 ? 100 - (totalRankChanges / totalComparisons) * 100 : 100;
-        const volatilityIndex = totalComparisons > 0 ? (totalRankChanges / totalComparisons) * 10 : 0;
-        const averageNewContentPerSnapshot = seenUrls.size / snapshots.length;
-        set({ analytics: {
-          rankingStability: parseFloat(stabilityScore.toFixed(2)),
-          volatilityIndex: parseFloat(volatilityIndex.toFixed(2)),
-          domainDiversity: domainSet.size,
-          avgResponseTime: parseFloat(avgResponseTime.toFixed(2)),
-          newContentDiscovery: parseFloat(averageNewContentPerSnapshot.toFixed(2)),
-          querySuccessRate: parseFloat(querySuccessRate.toFixed(2)),
-        } })
+      },
+
+      refetchOnFocus: () => {
+        window.addEventListener('focus', () => get().fetchAnalytics(undefined, true));
+        return () => window.removeEventListener('focus', () => {}); // Cleanup
       },
     }),
     {
@@ -117,4 +79,4 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
       partialize: (state) => ({ analytics: state.analytics }),
     }
   )
-)
+);

@@ -2,7 +2,8 @@
 
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database-service"
-import { getCurrentUser } from "@/app/server/auth"
+import { getCurrentUser } from "@/app/server/auth"; 
+
 
 export async function GET(request: NextRequest) {
   // Authenticate user via JWT

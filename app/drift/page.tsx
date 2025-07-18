@@ -20,6 +20,7 @@ export default function DriftPage() {
           throw new Error("Failed to fetch drift data")
         }
         const data = await response.json()
+        console.log('Setting drift result in Store')
         setDriftResults(data)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error")

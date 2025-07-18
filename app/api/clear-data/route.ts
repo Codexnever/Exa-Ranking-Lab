@@ -3,7 +3,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { Query } from "appwrite"
-import { getCurrentUser } from "@/app/server/auth"
+import { getCurrentUser } from "@/app/server/auth"; 
+
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser()

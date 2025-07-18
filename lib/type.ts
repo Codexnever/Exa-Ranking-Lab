@@ -29,6 +29,7 @@ export interface RankingSnapshot {
   queryId: string
   timestamp: Date
   results: SearchResult[]
+  queryType?: string;
   metadata: {
     totalResults: number
     responseTime: number
@@ -74,13 +75,17 @@ export interface UserFeedback {
 }
 
 export interface AnalyticsData {
-  rankingStability: number
-  volatilityIndex: number
-  domainDiversity: number
-  avgResponseTime: number
-  newContentDiscovery: number
-  querySuccessRate: number
+  rankingStability: number;
+  volatilityIndex: number;
+  domainDiversity: number;
+  avgResponseTime: number;
+  newContentDiscovery: number;
+  querySuccessRate: number;
+  trendSlope?: number;
+  predictedPosition?: number;
+  isAnomaly?: boolean;
 }
+
 
 export interface QueriesStore {
   queries: QueryConfig[]
@@ -166,4 +171,12 @@ export interface RankChange {
   currentPosition: number
   positionDelta: number
   similarityScore: number
+}
+export interface TrendPoint {
+  date: string;
+  avgPosition: number;
+  volatility: number;
+  count: number;
+  predictedPosition: number;
+  isAnomaly: boolean;
 }

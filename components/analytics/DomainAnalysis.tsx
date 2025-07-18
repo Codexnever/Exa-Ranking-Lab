@@ -1,18 +1,16 @@
-"use client"
-
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { LucidePieChart } from "lucide-react"
-import { useDomainAnalysis } from "@/app/logic/domainAnalysisLogic"
-import type { RankingSnapshot } from "@/lib/type"
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { LucidePieChart } from "lucide-react";
+import { useDomainAnalysis } from "@/app/logic/domainAnalysisLogic";
+import type { RankingSnapshot } from "@/lib/type";
 
 interface DomainAnalysisProps {
-  snapshots: RankingSnapshot[]
+  snapshots: RankingSnapshot[];
 }
 
 export function DomainAnalysis({ snapshots }: DomainAnalysisProps) {
-  const domainStats = useDomainAnalysis(snapshots)
-  const topDomains = domainStats.slice(0, 10)
+  const domainStats = useDomainAnalysis(snapshots);
+  const topDomains = domainStats.slice(0, 10);
   return (
     <Card>
       <CardHeader>
@@ -66,5 +64,5 @@ export function DomainAnalysis({ snapshots }: DomainAnalysisProps) {
         )}
       </CardContent>
     </Card>
-  )
+  );
 }

@@ -1,91 +1,100 @@
-"use client"
-import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, MemoizedSelectTrigger as SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { LucidePieChart, Download } from "lucide-react"
-import { useAnalytics } from "@/hooks/use-analytics"
-import { useQueries } from "@/hooks/use-queries"
-import { useSnapshots } from "@/hooks/use-snapshots"
-import { useAnalyticsCalculations } from "@/app/logic/analyticsLogic"
-import { useEffect, useState } from "react"
-import dynamic from "next/dynamic"
-import AnalyticsAPIsSkeleton from "@/components/loaders/AnalyticsAPIsSkeleton"
-import RankingTrendChartSkeleton from "@/components/loaders/RankingTrendChartSkeleton"
-import CategoryPieChartSkeleton from "@/components/loaders/CategoryPieChartSkeleton"
-import TopPerformingQueriesSkeleton from "@/components/loaders/TopPerformingQueriesSkeleton"
-import RankingBarChartSkeleton from "@/components/loaders/RankingBarChartSkeleton"
-import PerformanceChartsSkeleton from "@/components/loaders/PerformanceChartsSkeleton"
-import QueryPerformanceStatsTableSkeleton from "@/components/loaders/QueryPerformanceStatsTableSkeleton"
-import DomainAnalysisSkeleton from "@/components/loaders/DomainAnalysisSkeleton"
-import { useAuth } from "@/lib/contexts/auth-context"
+"use client";
 
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Download } from "lucide-react";
+import { useAnalytics } from "@/hooks/use-analytics";
+import { useQueries } from "@/hooks/use-queries";
+import { useSnapshots } from "@/hooks/use-snapshots";
+import { useAnalyticsCalculations } from "@/app/logic/analyticsLogic"; // Your strengthened logic hook
+import dynamic from "next/dynamic";
+import AnalyticsAPIsSkeleton from "@/components/loaders/AnalyticsAPIsSkeleton";
+import RankingTrendChartSkeleton from "@/components/loaders/RankingTrendChartSkeleton";
+import CategoryPieChartSkeleton from "@/components/loaders/CategoryPieChartSkeleton";
+import TopPerformingQueriesSkeleton from "@/components/loaders/TopPerformingQueriesSkeleton";
+import RankingBarChartSkeleton from "@/components/loaders/RankingBarChartSkeleton";
+import PerformanceChartsSkeleton from "@/components/loaders/PerformanceChartsSkeleton";
+import QueryPerformanceStatsTableSkeleton from "@/components/loaders/QueryPerformanceStatsTableSkeleton";
+import DomainAnalysisSkeleton from "@/components/loaders/DomainAnalysisSkeleton";
+import { useAuth } from "@/lib/contexts/auth-context";
+
+// Dynamic imports for components (as in your code)
 const AnalyticsAPIs = dynamic(() => import("@/components/analytics/AnalyticsAPIs").then(mod => mod.AnalyticsAPIs), {
   loading: () => <AnalyticsAPIsSkeleton />,
   ssr: false,
-})
+});
 const RankingTrendChart = dynamic(() => import("@/components/analytics/RankingTrendChart").then(mod => mod.RankingTrendChart), {
   loading: () => <RankingTrendChartSkeleton />,
   ssr: false,
-})
+});
 const CategoryPieChart = dynamic(() => import("@/components/analytics/CategoryPieChart").then(mod => mod.CategoryPieChart), {
   loading: () => <CategoryPieChartSkeleton />,
   ssr: false,
-})
+});
 const TopPerformingQueries = dynamic(() => import("@/components/analytics/TopPerformingQueries").then(mod => mod.TopPerformingQueries), {
   loading: () => <TopPerformingQueriesSkeleton />,
   ssr: false,
-})
+});
 const RankingBarChart = dynamic(() => import("@/components/analytics/RankingBarChart").then(mod => mod.RankingBarChart), {
   loading: () => <RankingBarChartSkeleton />,
   ssr: false,
-})
+});
 const PerformanceCharts = dynamic(() => import("@/components/analytics/PerformanceCharts").then(mod => mod.PerformanceCharts), {
   loading: () => <PerformanceChartsSkeleton />,
   ssr: false,
-})
+});
 const QueryPerformanceStatsTable = dynamic(() => import("@/components/analytics/QueryPerformanceStatsTable").then(mod => mod.QueryPerformanceStatsTable), {
   loading: () => <QueryPerformanceStatsTableSkeleton />,
   ssr: false,
-})
+});
 const DomainAnalysis = dynamic(() => import("@/components/analytics/DomainAnalysis").then(mod => mod.DomainAnalysis), {
   loading: () => <DomainAnalysisSkeleton />,
   ssr: false,
-})
+});
 
+// Type definitions (consolidated from your code)
 interface DailyStats {
-  totalPosition: number
-  count: number
-  volatility: number
+  totalPosition: number;
+  count: number;
+  volatility: number;
 }
 
 interface HourlyStats {
-  totalTime: number
-  successCount: number
-  totalCount: number
+  totalTime: number;
+  successCount: number;
+  totalCount: number;
 }
 
 interface QueryStats {
-  name: string
-  positions: number[]
-  lastPosition: number | null
+  name: string;
+  positions: number[];
+  lastPosition: number | null;
 }
 
 interface RankingTrendDataPoint {
-  date: string
-  avgPosition: number
-  volatility: number
+  date: string;
+  avgPosition: number;
+  volatility: number;
 }
 
 interface CategoryDistribution {
-  name: string
-  value: number
-  percent: number
+  name: string;
+  value: number;
+  percent: number;
 }
 
 interface SuccessRateDataPoint {
-  hour: number
-  successRate: number
-  avgTime: number
+  hour: number;
+  successRate: number;
+  avgTime: number;
 }
 
 interface HourlyData {
@@ -105,26 +114,40 @@ interface CategoryData extends CategoryDistribution {
 }
 
 export default function Analytics() {
-  const { analytics, fetchAnalytics } = useAnalytics()
-  const { queries, fetchQueries } = useQueries()
-  const { snapshots, fetchSnapshots } = useSnapshots()
-  const [timeRange, setTimeRange] = useState("30d")
+  const { analytics, fetchAnalytics } = useAnalytics();
+  const { queries, fetchQueries } = useQueries();
+  const { snapshots, fetchSnapshots } = useSnapshots();
+  const [timeRange, setTimeRange] = useState("30d");
 
-  // Use extracted analytics logic
+  // Use the strengthened analytics logic
   const {
     rankingTrendData,
     categoryDistribution,
     successRateByHour,
     performanceData,
     topPerformingQueries,
-    queryPerformanceStats
-  } = useAnalyticsCalculations(queries, snapshots, timeRange)
+    queryPerformanceStats,
+  } = useAnalyticsCalculations(queries, snapshots, timeRange);
 
   useEffect(() => {
     fetchQueries();
     fetchAnalytics();
     fetchSnapshots();
   }, []);
+
+  // Example export function (downloads as CSV)
+  const handleExport = () => {
+    const csvContent = "data:text/csv;charset=utf-8," + 
+      "Date,Avg Position,Volatility\n" + 
+      rankingTrendData.map(row => `${row.date},${row.avgPosition},${row.volatility}`).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "Analytics_Data.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -145,7 +168,7 @@ export default function Analytics() {
               <SelectItem value="1y">Last year</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="w-4 h-4 mr-2" />
             Export
           </Button>
@@ -178,5 +201,5 @@ export default function Analytics() {
         </TabsContent>
       </Tabs>
     </div>
-  )
+  );
 }

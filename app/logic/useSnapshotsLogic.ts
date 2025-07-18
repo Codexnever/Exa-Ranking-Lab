@@ -133,6 +133,7 @@ export function useSnapshotsLogic() {
           totalResults,
         },
       }
+      console.log('Setting snapshotin store')
       snapshotsStore.setSnapshots([newSnapshot, ...snapshotsStore.snapshots])
       await fetchSnapshots();
       analyticsStore.calculateAnalyticsFromSnapshots(snapshotsStore.snapshots);
