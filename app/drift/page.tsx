@@ -4,7 +4,6 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { DriftTable } from "@/components/driftAnalyzer/drift-table"
 import { useDriftStore } from "@/app/store"
-import type { DriftAnalysisResult } from "@/lib/type"
 import { Loader2, AlertTriangle, Activity } from "lucide-react"
 
 export default function DriftPage() {

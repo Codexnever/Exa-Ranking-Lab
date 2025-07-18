@@ -1,58 +1,30 @@
 // lib/drift-analyzer.ts
 import type { RankingSnapshot, DriftAnalysisResult, DriftTimelinePoint, RankChange, SearchResult } from "@/lib/type";
+import { pipeline, cos_sim } from '@xenova/transformers'; // Import from @xenova/transformers
+
+// Global cache for the pipeline to avoid reloading the model on every call
+let embedder: any = null;
+
+async function getEmbedder() {
+  if (!embedder) {
+    embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+  }
+  return embedder;
+}
 
 /**
- * Calculate cosine similarity between two strings
- * This is a simple implementation - in production, you might use a more sophisticated approach
- * or a library like natural or string-similarity
+ * Calculate cosine similarity between two strings using transformer embeddings
+ * This uses @xenova/transformers for semantic similarity
  */
-function calculateSimilarity(text1: string, text2: string): number {
-  // Simple implementation - tokenize and calculate cosine similarity
-  const tokenize = (text: string) => {
-    return text.toLowerCase().split(/\W+/).filter(Boolean);
-  };
+async function calculateSimilarity(text1: string, text2: string): Promise<number> {
+  const embedder = await getEmbedder();
 
-  const tokens1 = tokenize(text1);
-  const tokens2 = tokenize(text2);
+  // Generate embeddings (vectors) for both texts
+  const embedding1 = await embedder(text1, { pooling: 'mean', normalize: true });
+  const embedding2 = await embedder(text2, { pooling: 'mean', normalize: true });
 
-  // Create term frequency maps
-  const freqMap1: Record<string, number> = {};
-  const freqMap2: Record<string, number> = {};
-
-  tokens1.forEach((token) => {
-    freqMap1[token] = (freqMap1[token] || 0) + 1;
-  });
-
-  tokens2.forEach((token) => {
-    freqMap2[token] = (freqMap2[token] || 0) + 1;
-  });
-
-  // Get all unique tokens
-  const allTokens = new Set([...tokens1, ...tokens2]);
-
-  // Calculate dot product and magnitudes
-  let dotProduct = 0;
-  let magnitude1 = 0;
-  let magnitude2 = 0;
-
-  allTokens.forEach((token) => {
-    const freq1 = freqMap1[token] || 0;
-    const freq2 = freqMap2[token] || 0;
-
-    dotProduct += freq1 * freq2;
-    magnitude1 += freq1 * freq1;
-    magnitude2 += freq2 * freq2;
-  });
-
-  magnitude1 = Math.sqrt(magnitude1);
-  magnitude2 = Math.sqrt(magnitude2);
-
-  // Avoid division by zero
-  if (magnitude1 === 0 || magnitude2 === 0) {
-    return 0;
-  }
-
-  return dotProduct / (magnitude1 * magnitude2);
+  // Compute cosine similarity between the vectors
+  return cos_sim(embedding1.data, embedding2.data);
 }
 
 /**
@@ -63,13 +35,13 @@ function getCombinedText(result: SearchResult): string {
 }
 
 /**
- * Calculate drift score between two snapshots
+ * Calculate drift score between two snapshots (now async due to similarity)
  */
-export function calculateDriftScore(
+export async function calculateDriftScore(
   previousSnapshot: RankingSnapshot,
   currentSnapshot: RankingSnapshot,
   topN = 10,
-): { driftScore: number; rankChanges: RankChange[]; newResults: number; droppedResults: number } {
+): Promise<{ driftScore: number; rankChanges: RankChange[]; newResults: number; droppedResults: number }> {
   // Limit to top N results
   const prevResults = previousSnapshot.results.slice(0, topN);
   const currResults = currentSnapshot.results.slice(0, topN);
@@ -86,18 +58,17 @@ export function calculateDriftScore(
   let matchCount = 0;
   let newResults = 0;
 
-  // Calculate position changes and similarities
-  currResults.forEach((currResult, currIndex) => {
+  // Calculate position changes and similarities (now async)
+  for (const [currIndex, currResult] of currResults.entries()) {
     const prevResult = prevUrlMap.get(currResult.url);
 
     if (prevResult) {
       // Found a match - calculate position change and similarity
       const prevIndex = prevResults.findIndex((r) => r.url === currResult.url);
       const positionDelta = prevIndex - currIndex;
-      const similarityScore = calculateSimilarity(getCombinedText(prevResult), getCombinedText(currResult));
+      const similarityScore = await calculateSimilarity(getCombinedText(prevResult), getCombinedText(currResult));
 
       // Weight by position and similarity
-      // Higher positions (lower index) have more weight
       const positionWeight = 1 - currIndex / topN;
       const similarityDecay = 1 - similarityScore; // Lower similarity means higher drift
       const weightedDrift = Math.abs(positionDelta) * positionWeight * (1 + similarityDecay);
@@ -108,19 +79,19 @@ export function calculateDriftScore(
       rankChanges.push({
         url: currResult.url,
         title: currResult.title,
-        previousPosition: prevIndex + 1, // 1-based position for display
-        currentPosition: currIndex + 1, // 1-based position for display
+        previousPosition: prevIndex + 1,
+        currentPosition: currIndex + 1,
         positionDelta,
         similarityScore,
       });
     } else {
       // New result - higher penalty
       newResults++;
-      totalDrift += 5 * (1 - currIndex / topN); // New results have higher drift, weighted by position
+      totalDrift += 5 * (1 - currIndex / topN);
     }
-  });
+  }
 
-  // Count dropped results (in previous but not in current)
+  // Count dropped results
   const droppedResults = prevResults.filter(
     (prevResult) => !currResults.some((currResult) => currResult.url === prevResult.url),
   ).length;
@@ -129,8 +100,7 @@ export function calculateDriftScore(
   totalDrift += droppedResults * 3;
 
   // Normalize score between 0 and 100
-  // Higher score means more drift
-  const maxPossibleDrift = topN * 10; // Theoretical maximum drift
+  const maxPossibleDrift = topN * 10;
   const normalizedDrift = Math.min(100, (totalDrift / maxPossibleDrift) * 100);
 
   return {
@@ -142,10 +112,9 @@ export function calculateDriftScore(
 }
 
 /**
- * Analyze drift for a query across all its snapshots
+ * Analyze drift for a query across all its snapshots (now async)
  */
-export function analyzeDrift(queryId: string, queryName: string, snapshots: RankingSnapshot[]): DriftAnalysisResult {
-  // Sort snapshots by timestamp
+export async function analyzeDrift(queryId: string, queryName: string, snapshots: RankingSnapshot[]): Promise<DriftAnalysisResult> {
   const sortedSnapshots = [...snapshots].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   );
@@ -154,12 +123,11 @@ export function analyzeDrift(queryId: string, queryName: string, snapshots: Rank
   let totalDrift = 0;
   let maxDrift = 0;
 
-  // Compare consecutive snapshots
   for (let i = 1; i < sortedSnapshots.length; i++) {
     const prevSnapshot = sortedSnapshots[i - 1];
     const currSnapshot = sortedSnapshots[i];
 
-    const { driftScore, rankChanges, newResults, droppedResults } = calculateDriftScore(prevSnapshot, currSnapshot);
+    const { driftScore, rankChanges, newResults, droppedResults } = await calculateDriftScore(prevSnapshot, currSnapshot);
 
     driftTimeline.push({
       timestamp: new Date(currSnapshot.timestamp),
@@ -178,27 +146,13 @@ export function analyzeDrift(queryId: string, queryName: string, snapshots: Rank
   const averageDrift = driftTimeline.length > 0 ? totalDrift / driftTimeline.length : 0;
   const latestDrift = driftTimeline.length > 0 ? driftTimeline[driftTimeline.length - 1].driftScore : 0;
 
-  // Determine stability category
-  let stability: "stable" | "medium" | "volatile";
-  if (averageDrift < 20) {
-    stability = "stable";
-  } else if (averageDrift < 50) {
-    stability = "medium";
-  } else {
-    stability = "volatile";
-  }
+  let stability: "stable" | "medium" | "volatile" = averageDrift < 20 ? "stable" : averageDrift < 50 ? "medium" : "volatile";
 
-  // Determine drift trend
   let driftTrend: "improving" | "worsening" | "stable" = "stable";
   if (driftTimeline.length >= 3) {
     const recentDrifts = driftTimeline.slice(-3).map((point) => point.driftScore);
     const driftSlope = (recentDrifts[2] - recentDrifts[0]) / 2;
-
-    if (driftSlope < -5) {
-      driftTrend = "improving"; // Drift is decreasing (more stable)
-    } else if (driftSlope > 5) {
-      driftTrend = "worsening"; // Drift is increasing (less stable)
-    }
+    driftTrend = driftSlope < -5 ? "improving" : driftSlope > 5 ? "worsening" : "stable";
   }
 
   return {
@@ -214,18 +168,17 @@ export function analyzeDrift(queryId: string, queryName: string, snapshots: Rank
 }
 
 /**
- * Analyze drift for multiple queries
+ * Analyze drift for multiple queries (now async)
  */
-export function analyzeDriftForQueries(
+export async function analyzeDriftForQueries(
   queries: { id: string; name: string }[],
   allSnapshots: RankingSnapshot[],
-): DriftAnalysisResult[] {
-  return queries
-    .map((query) => {
+): Promise<DriftAnalysisResult[]> {
+  const results = await Promise.all(
+    queries.map(async (query) => {
       const querySnapshots = allSnapshots.filter((snapshot) => snapshot.queryId === query.id);
 
       if (querySnapshots.length < 2) {
-        // Need at least 2 snapshots to calculate drift
         return {
           queryId: query.id,
           queryName: query.name,
@@ -238,7 +191,9 @@ export function analyzeDriftForQueries(
         };
       }
 
-      return analyzeDrift(query.id, query.name, querySnapshots);
+      return await analyzeDrift(query.id, query.name, querySnapshots);
     })
-    .filter((result) => result.driftTimeline.length > 0); // Only return queries with drift data
-  }
+  );
+
+  return results.filter((result) => result.driftTimeline.length > 0);
+}

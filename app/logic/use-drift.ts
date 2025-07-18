@@ -1,4 +1,3 @@
-// hooks/use-drift.ts
 import { useState, useEffect } from "react";
 import type { DriftAnalysisResult } from "@/lib/type";
 
