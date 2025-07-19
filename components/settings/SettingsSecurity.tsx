@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Shield, ChevronDown, ChevronUp } from "lucide-react"
 import { useState } from "react"
 import { useAccessLogsLogic } from "@/app/logic/useAccessLogsLogic"
+import { toast } from "sonner"
 
 export function SettingsSecurity() {
   const [showLogs, setShowLogs] = useState(false)
@@ -16,8 +17,7 @@ export function SettingsSecurity() {
       }
       setShowLogs((prev) => !prev)
     } catch (err) {
-      // fallback error
-      alert('Failed to load logs. Please try again later.')
+      toast.error('Failed to load logs. Please try again later.')
     }
   }
 

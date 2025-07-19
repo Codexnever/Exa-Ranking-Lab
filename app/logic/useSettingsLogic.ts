@@ -1,28 +1,28 @@
-import { useState, useEffect, cache } from "react"
+import { cache, useEffect } from "react"
 import { toast } from "sonner"
 import { saveAs } from "file-saver"
 import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store"
+import { useSettingsStore } from "@/app/store"
 
 export function useSettingsLogic() {
-
-  const [apiKey, setApiKey] = useState('')
-  const [apiStatus, setApiStatus] = useState<'connected' | 'disconnected' | 'unknown'>("unknown")
-  const [lastTested, setLastTested] = useState<string | null>(null)
+  const { apiKey, apiStatus, lastTested, setSettings } = useSettingsStore()
 
   useEffect(() => {
-    cache((async () => {
+    cache(async () => {
       try {
         const res = await fetch("/api/settings", { credentials: "include" })
         if (!res.ok) throw new Error("Failed to load settings")
         const data = await res.json()
-        setApiKey(data.apiKey || "")
-        setApiStatus(data.apiStatus || "unknown")
-        setLastTested(data.lastTested || null)
+        setSettings({
+          apiKey: data.apiKey || "",
+          apiStatus: data.apiStatus || "unknown",
+          lastTested: data.lastTested || null,
+        })
       } catch (err) {
-        throw new Error("Failed to load settings: " + (err instanceof Error ? err.message : "Unknown error"))
+        console.error("Failed to load settings:", err)
       }
-    }))()
-  }, [])
+    })()
+  }, [setSettings])
 
   const testApiConnection = cache(async () => {
     if (!apiKey.trim()) {
@@ -37,43 +37,41 @@ export function useSettingsLogic() {
         body: JSON.stringify({ apiKey: apiKey.trim() }),
       })
       const data = await response.json()
+      const now = new Date().toLocaleTimeString()
+
       if (response.ok && data.success) {
         toast.success(`API connection successful! Found ${data.resultsCount} result(s)`, { id: loadingId })
-        setApiStatus("connected")
+        setSettings({ apiStatus: "connected", lastTested: now })
       } else {
         toast.error(data.message || "API connection failed!", { id: loadingId })
-        setApiStatus("disconnected")
+        setSettings({ apiStatus: "disconnected", lastTested: now })
       }
-      const now = new Date().toLocaleTimeString()
-      setLastTested(now)
-      // Save to DB
+
       await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ apiKey, apiStatus: response.ok && data.success ? "connected" : "disconnected", lastTested: now })
+        body: JSON.stringify({
+          apiKey,
+          apiStatus: response.ok && data.success ? "connected" : "disconnected",
+          lastTested: now,
+        }),
       })
     } catch (error) {
-      console.error('Test connection error:', error)
-      toast.error("Failed to test API connection", { id: loadingId })
-      setApiStatus("disconnected")
+      console.error("Test connection error:", error)
       const now = new Date().toLocaleTimeString()
-      setLastTested(now)
-      await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ apiKey, apiStatus: "disconnected", lastTested: now })
-      })
+      setSettings({ apiStatus: "disconnected", lastTested: now })
+      toast.error("Failed to test API connection", { id: loadingId })
     }
   })
+
   const handleSaveApiKey = async () => {
     try {
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ apiKey, apiStatus, lastTested })
+        body: JSON.stringify({ apiKey, apiStatus, lastTested }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
@@ -85,13 +83,14 @@ export function useSettingsLogic() {
     }
   }
 
-  // Preferences logic
-  const [preferences, setPreferences] = useState({
+  // Preferences logic (Later expand to include more settings)
+  const preferences = {
     defaultResultCount: 20,
     autoRefreshInterval: 30,
     theme: "light",
     timezone: "UTC",
-  })
+  }
+
   const handleSavePreferences = () => {
     toast.success("Preferences saved!")
   }
@@ -138,9 +137,15 @@ export function useSettingsLogic() {
   }
 
   return {
-    apiKey, setApiKey, testApiConnection, handleSaveApiKey,
-    apiStatus, lastTested,
-    preferences, setPreferences, handleSavePreferences,
-    handleExportData, handleClearData
+    apiKey,
+    apiStatus,
+    lastTested,
+    testApiConnection,
+    handleSaveApiKey,
+    preferences,
+    handleSavePreferences,
+    handleExportData,
+    handleClearData,
+    setApiKey: (key: string) => setSettings({ apiKey: key }),
   }
 }

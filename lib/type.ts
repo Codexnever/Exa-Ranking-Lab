@@ -179,4 +179,7 @@ export interface TrendPoint {
   count: number;
   predictedPosition: number;
   isAnomaly: boolean;
+  anomalyType?: 'high_volatility' | 'sudden_drop' | 'sudden_rise' | 'position_spike';
+  anomalyScore?: number;
+  volatilityThreshold?: number;
 }

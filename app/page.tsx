@@ -2,12 +2,11 @@
 
 import dynamic from "next/dynamic"
 import { useQueries } from "@/hooks/use-queries"
-import { useAnalytics } from "@/hooks/use-analytics"
+import { useAnalyticsStore } from "@/app/store"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
-import { useAnalyticsStore } from "@/app/store"
 
 const DashboardStats = dynamic(() => import("@/components/dashboard/DashboardStats"), { ssr: false })
 const RecentQueryActivity = dynamic(() => import("@/components/dashboard/RecentQueryActivity"), { ssr: false })
@@ -17,7 +16,7 @@ const PerformanceOverview = dynamic(() => import("@/components/dashboard/Perform
 export default function Dashboard() {
   const { user, loading } = useAuth()
   const { queries, runQuery, fetchQueries } = useQueries()
-  const { analytics, fetchAnalytics } = useAnalytics()
+  const { analytics, fetchAnalytics } = useAnalyticsStore()
   const { snapshots, fetchSnapshots } = useSnapshots()
   const [runningQueries, setRunningQueries] = useState<Set<string>>(new Set())
 

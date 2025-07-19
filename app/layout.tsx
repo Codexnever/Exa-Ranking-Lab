@@ -9,7 +9,10 @@ import { AuthProvider, useAuth } from "@/lib/contexts/auth-context"
 import { Toaster } from "sonner"
 import { Loader2 } from "lucide-react"
 import Head from "next/head"
-
+import { useRealTimeQueries } from "@/hooks/use-realtimeQuerie";
+import { useRealTimeSnapshots } from "@/hooks/use-realtimeSnapshot";
+import { useRealTimeDrift } from "@/hooks/use-realtimeDrift";
+import { useRealTimeAnalytics } from "@/hooks/use-realtimeAnalytics";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" })
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" })
 
@@ -46,8 +49,18 @@ const metadata = {
   twitterHandle: "@ChaitanyaK48841", 
 }
 
-function AppShell({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
+// Client-only shell for authenticated app experience
+function ClientAppShell({ children }: { children: React.ReactNode }) {
+  // Move all real-time hooks here so they are only called on the client
+  useRealTimeDrift();
+  useRealTimeQueries();
+  useRealTimeSnapshots();
+  useRealTimeAnalytics();
+
+  const auth = useAuth();
+  const user = auth.user;
+  const loading = auth.loading;
+
   if (loading) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-white">
@@ -55,11 +68,10 @@ function AppShell({ children }: { children: React.ReactNode }) {
           <div className="h-12 w-12 rounded-md bg-blue-600 flex items-center justify-center">
             <span className="text-white font-bold text-xl">E</span>
           </div>
-          <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
           <p className="text-sm text-gray-600">Loading Exa Ranking Lab...</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -70,10 +82,15 @@ function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 overflow-y-auto bg-slate-50 p-6">{children}</main>
       </div>
     </div>
-  )
+  );
+}
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return <ClientAppShell>{children}</ClientAppShell>;
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // No hooks here! Only in client-only components
   return (
     <html lang="en">
       <Head>

@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import type { QueryConfig } from "@/lib/type"
 import { useAuth } from "@/lib/contexts/auth-context"
-import { useAnalytics } from "@/hooks/use-analytics"
+import { useAnalyticsStore } from "@/app/store"
 
 const QueryCategory = z.enum([
   "company",
@@ -50,7 +50,7 @@ export function useQueryFormLogic(
   const [domainInput, setDomainInput] = useState("")
   const [tagInput, setTagInput] = useState("")
 
-  const { analytics, fetchAnalytics } = useAnalytics()
+  const { analytics, fetchAnalytics } = useAnalyticsStore()
   useEffect(() => {
     fetchAnalytics()
   }, [])

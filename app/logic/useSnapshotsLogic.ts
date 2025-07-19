@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useQueries } from "@/hooks/use-queries"
-import { useAnalytics } from "@/hooks/use-analytics"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useToast } from "@/components/ui/use-toast"
-import { useSnapshotsStore, useAnalyticsStore } from "@/app/store"
+import { useAnalyticsStore } from "@/app/store"
+import { useSnapshotsStore } from "@/app/store"
 import type { QueryConfig } from "@/lib/type"
 
 export function useSnapshotsLogic() {
-  const { snapshots, isLoading, fetchSnapshots } = useSnapshots()
+  const { snapshots, isLoading, fetchSnapshots } = useSnapshotsStore()
   const { queries } = useQueries()
-  const { analytics } = useAnalytics()
+  const { analytics } = useAnalyticsStore()
   const { user } = useAuth()
   const { toast } = useToast()
   const [filters, setFilters] = useState({

@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download } from "lucide-react";
-import { useAnalytics } from "@/hooks/use-analytics";
+import { useAnalyticsStore } from "@/app/store";
 import { useQueries } from "@/hooks/use-queries";
 import { useSnapshots } from "@/hooks/use-snapshots";
 import { useAnalyticsCalculations } from "@/app/logic/analyticsLogic"; // Your strengthened logic hook
@@ -91,18 +91,6 @@ interface CategoryDistribution {
   percent: number;
 }
 
-interface SuccessRateDataPoint {
-  hour: number;
-  successRate: number;
-  avgTime: number;
-}
-
-interface HourlyData {
-  success: number;
-  total: number;
-  time: number;
-}
-
 interface PerformanceDataPoint {
   hour: number;
   responseTime: number;
@@ -114,7 +102,7 @@ interface CategoryData extends CategoryDistribution {
 }
 
 export default function Analytics() {
-  const { analytics, fetchAnalytics } = useAnalytics();
+  const { analytics, fetchAnalytics } = useAnalyticsStore();
   const { queries, fetchQueries } = useQueries();
   const { snapshots, fetchSnapshots } = useSnapshots();
   const [timeRange, setTimeRange] = useState("30d");

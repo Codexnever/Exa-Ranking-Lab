@@ -76,6 +76,15 @@ export async function DELETE(
       return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
     }
 
+    // Access log
+    await databaseService.accessLogService.logAccess(
+      user.$id,
+      "delete_query",
+      { query },
+      ip,
+      userAgent
+    )
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("❌ Failed to delete query:", error);

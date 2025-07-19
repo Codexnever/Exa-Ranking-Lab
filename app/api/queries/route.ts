@@ -22,6 +22,39 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const query = await databaseService.queryService.createQuery({ ...body, userId: user.$id })
+    // Access log
+    const ip = request.headers.get("x-real-ip") || "unknown"
+    const uaRaw = request.headers.get("x-user-agent") || "{}"
+      let userAgentInfo: {
+      browser: string;
+      version: string;
+      deviceType: string;
+      os: string;
+      isBot: boolean;
+    } = {
+      browser: "unknown",
+      version: "unknown",
+      deviceType: "unknown",
+      os: "unknown",
+      isBot: false,
+    }
+    try {
+      const parsed = JSON.parse(uaRaw)
+      userAgentInfo = {
+        browser: parsed.browser || "unknown",
+        version: parsed.version || "unknown",
+        deviceType: parsed.deviceType || "unknown",
+        os: parsed.os || "unknown",
+        isBot: parsed.isBot || false,
+      }
+    } catch {}
+    await databaseService.accessLogService.logAccess(
+      user.$id,
+      "create_query",
+      { query },
+      ip,
+      userAgentInfo
+    )
     return NextResponse.json(query)
   } catch (err) {
     console.error("❌ Failed to create query:", err)

@@ -29,7 +29,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // ✅ Prevent logged-in users from seeing auth page
   if (pathname.startsWith("/auth") && jwt) {
     return NextResponse.redirect(new URL("/query-builder", request.url))
   }
@@ -37,7 +36,6 @@ export async function middleware(request: NextRequest) {
   const isProtected = PROTECTED_ROUTES.some(route => pathname.startsWith(route))
   if (!isProtected) return NextResponse.next()
 
-  // ✅ Extract IP and User-Agent
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
   const ua = userAgent(request)
   const userAgentInfo = {

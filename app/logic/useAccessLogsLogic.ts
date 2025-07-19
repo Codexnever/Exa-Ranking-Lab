@@ -17,7 +17,11 @@ export function useAccessLogsLogic() {
       const response = await databases.listDocuments(
         DATABASE_ID,
         COLLECTIONS.ACCESS_LOGS,
-        [Query.equal("userId", user.$id)]
+         [
+    Query.equal("userId", user.$id),
+    Query.orderDesc("timestamp"), 
+    Query.limit(30)             
+  ]
       )
       setLogs(response.documents)
     } catch (err: any) {

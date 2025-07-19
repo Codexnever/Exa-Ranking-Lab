@@ -1,65 +1,59 @@
-import { create } from "zustand"
-import { persist } from "zustand/middleware"
-import { toast } from "sonner"
-import type { QueryConfig } from "@/lib/type"
-import { StoreApi } from 'zustand'
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { toast } from "sonner";
+import type { QueryConfig } from "@/lib/type";
 
 interface QueriesState {
-  queries: QueryConfig[]
-  isLoading: boolean
-  error: string | null
+  queries: QueryConfig[];
+  isLoading: boolean;
+  error: string | null;
 }
 
 interface QueriesActions {
-  fetchQueries: () => Promise<void>
-  createQuery: (query: Omit<QueryConfig, "id" | "createdAt">) => Promise<QueryConfig>
-  runQuery: (queryId: string) => Promise<any>
-  updateQuery: (queryId: string, query: Partial<QueryConfig>) => Promise<void>
-  deleteQuery: (queryId: string) => Promise<void>
-  clearQueries: () => void
+  fetchQueries: (userId?: string) => Promise<void>; // Updated with userId
+  createQuery: (query: Omit<QueryConfig, "id" | "createdAt">) => Promise<QueryConfig>;
+  runQuery: (queryId: string) => Promise<any>;
+  updateQuery: (queryId: string, query: Partial<QueryConfig>) => Promise<void>;
+  deleteQuery: (queryId: string) => Promise<void>;
+  clearQueries: () => void;
 }
 
-type QueriesStoreType = QueriesState & QueriesActions
+type QueriesStoreType = QueriesState & QueriesActions;
 
 const getAuthHeaders = async () => {
   return {
     'Content-Type': 'application/json'
-  }
-}
-
-
-
-type SetState = StoreApi<QueriesStoreType>['setState']
-type GetState = StoreApi<QueriesStoreType>['getState']
+  };
+};
 
 export const useQueriesStore = create<QueriesStoreType>()(
   persist(
-    (set: SetState, get: GetState) => ({
+    (set, get) => ({
       queries: [] as QueryConfig[],
       isLoading: false,
       error: null as string | null,
 
       fetchQueries: async (userId?: string) => {
-        set({ isLoading: true, error: null })
+        set({ isLoading: true, error: null });
         try {
-          const headers = await getAuthHeaders()
-          let url = "/api/queries"
-          if (userId) url += `?userId=${encodeURIComponent(userId)}`
-          const response = await fetch(url, { headers, credentials: "include" })
+          const headers = await getAuthHeaders();
+          let url = "/api/queries";
+          if (userId) url += `?userId=${encodeURIComponent(userId)}`; // Added userId support
+          const response = await fetch(url, { headers, credentials: "include" });
           if (response.status === 401) {
-            set({ queries: [] })
-            throw new Error("Please log in to access your queries")
+            set({ queries: [] });
+            throw new Error("Please log in to access your queries");
           }
           if (!response.ok) {
-            const error = await response.json()
-            throw new Error(error.details || "Failed to fetch queries")
+            const error = await response.json();
+            throw new Error(error.details || "Failed to fetch queries");
           }
-          const queries = await response.json() as QueryConfig[]
-          set({ queries, isLoading: false, error: null })
+          const queries = await response.json() as QueryConfig[];
+          set({ queries, isLoading: false, error: null });
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to fetch queries"
-          set({ error: message, isLoading: false, queries: [] })
-          toast.error(message)
+          const message = error instanceof Error ? error.message : "Failed to fetch queries";
+          set({ error: message, isLoading: false, queries: [] });
+          toast.error(message);
         }
       },
 
@@ -217,7 +211,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
       },      clearQueries: () => {
         set({ queries: [], error: null })
       },    }),
-    {
+  {
       name: 'queries-storage',
       partialize: (state: QueriesStoreType) => ({ queries: state.queries }),
     }

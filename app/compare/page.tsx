@@ -10,7 +10,6 @@ import { useCompareLogic } from "@/app/logic/compareLogic"
 import { useAuth } from "@/lib/contexts/auth-context"
 
 export default function CompareRankings() {
-  const { user } = useAuth()
   const { queries } = useQueries()
   const { snapshots } = useSnapshots()
   const [selectedQuery, setSelectedQuery] = useState("")
