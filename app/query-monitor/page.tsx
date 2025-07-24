@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { useQueries } from "@/hooks/use-queries"
+import { useQueriesStore } from "@/app/store"
 import QueryExecutionStatus from "@/components/query-form/QueryExecutionStatus"
 import { Play, Pause, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
@@ -11,7 +11,10 @@ import { useAuth } from "@/lib/contexts/auth-context"
 
 export default function QueryMonitor() {
   const { user } = useAuth()
-  const { queries, runQuery } = useQueries()
+const { queries, runQuery } = useQueriesStore(state => ({
+    queries: state.queries,
+    runQuery: state.runQuery,
+  }))
   const [executionStates, setExecutionStates] = useState<Map<string, any>>(new Map())
   const [isMonitoring, setIsMonitoring] = useState(false)
 

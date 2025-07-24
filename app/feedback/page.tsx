@@ -1,7 +1,7 @@
 "use client"
 
 import { useFeedbackLogic } from "@/app/logic/feedbackLogic"
-import { useQueries } from "@/hooks/use-queries"
+import { useQueriesStore } from "@/app/store"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -25,7 +25,7 @@ const formatDate = (dateString: string) => {
 export default function Feedback() {
   const { user } = useAuth()
 
-  const { queries } = useQueries()
+  const queries = useQueriesStore(state => state.queries)
   const { snapshots } = useSnapshots()
   const {
     selectedQuery,

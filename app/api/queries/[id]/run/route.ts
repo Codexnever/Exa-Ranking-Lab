@@ -61,7 +61,7 @@ async function handlePost(request: NextRequest, queryId: string) {
     })
 
     const responseTime = (Date.now() - start)
-
+// Analyze this file also is this is correct means to calculate REs. time and other is it correct
     const mappedResults = (exaResults.results || []).map((r: any, idx: number) => ({
       id: r.id || `${query.id}_${idx}`,
       position: idx + 1,

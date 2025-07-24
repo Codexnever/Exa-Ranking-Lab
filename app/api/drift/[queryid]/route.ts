@@ -5,9 +5,10 @@ import { analyzeDrift } from "@/app/logic/driftAnalyzer";
 import { getCurrentUser } from "@/app/server/auth"; 
 
 
-export async function GET(request: NextRequest, { params }: { params: { queryid: string } }) {
+export async function GET(request: NextRequest, context: { params: { queryid: string } }) {
   try {
-    const { queryid } = params;
+     const { params } = context;
+  const queryid = params.queryid;
 
     const user = await getCurrentUser();
     if (!user) {

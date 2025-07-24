@@ -61,28 +61,28 @@ export const useQueriesStore = create<QueriesStoreType>()(
         set({ isLoading: true, error: null })
         try {
           const headers = await getAuthHeaders()
-          
+
           const response = await fetch("/api/queries", {
             method: "POST",
             headers,
             credentials: "include",
             body: JSON.stringify(query),
           })
-          
+
           if (response.status === 401) {
             throw new Error("Session expired. Please log in again")
           }
-          
+
           if (!response.ok) {
             const error = await response.json()
             throw new Error(error.details || "Failed to create query")
-          }          const newQuery = await response.json() as QueryConfig
-            set((state: QueriesStoreType): QueriesState => ({
+          } const newQuery = await response.json() as QueryConfig
+          set((state: QueriesStoreType): QueriesState => ({
             queries: [...state.queries, newQuery],
             isLoading: false,
             error: null
           }))
-          
+
           return newQuery
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to create query"
@@ -90,7 +90,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           toast.error(message)
           throw error
         }
-      },      runQuery: async (queryId: string): Promise<any> => {
+      }, runQuery: async (queryId: string): Promise<any> => {
         set({ isLoading: true, error: null })
         try {
           // First check if query exists in local store
@@ -111,7 +111,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           if (response.status === 401) {
             throw new Error("Please log in to run queries")
           }
-          
+
           if (response.status === 404) {
             // Remove from local store if it doesn't exist on server
             set((state: QueriesStoreType): QueriesState => ({
@@ -121,12 +121,12 @@ export const useQueriesStore = create<QueriesStoreType>()(
             }))
             throw new Error("Query not found")
           }
-          
+
           if (!response.ok) {
             const error = await response.json()
             throw new Error(error.details || "Failed to run query")
-          }          const result = await response.json()
-          
+          } const result = await response.json()
+
           // Update the lastRun timestamp for the query
           set((state: QueriesStoreType): QueriesState => ({
             queries: state.queries.map((q: QueryConfig) =>
@@ -135,8 +135,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
             isLoading: false,
             error: null
           }))
-          
-          toast.success("Query executed successfully")
+
           return result
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to run query"
@@ -144,7 +143,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           toast.error(`Failed to run query: ${message}`)
           throw error
         }
-      },      updateQuery: async (queryId: string, query: Partial<QueryConfig>): Promise<void> => {
+      }, updateQuery: async (queryId: string, query: Partial<QueryConfig>): Promise<void> => {
         set({ isLoading: true, error: null })
         try {
           const headers = await getAuthHeaders()
@@ -162,14 +161,13 @@ export const useQueriesStore = create<QueriesStoreType>()(
             isLoading: false,
             error: null
           }))
-          toast.success("Query updated successfully")
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to delete query"
           set({ error: message, isLoading: false })
           toast.error(`Failed to delete query: ${message}`)
           throw error
         }
-      },      deleteQuery: async (queryId: string): Promise<void> => {
+      }, deleteQuery: async (queryId: string): Promise<void> => {
         set({ isLoading: true, error: null })
         try {
           const headers = await getAuthHeaders()
@@ -208,10 +206,11 @@ export const useQueriesStore = create<QueriesStoreType>()(
           toast.error(`Failed to delete query: ${message}`)
           throw error
         }
-      },      clearQueries: () => {
+      }, clearQueries: () => {
         set({ queries: [], error: null })
-      },    }),
-  {
+      },
+    }),
+    {
       name: 'queries-storage',
       partialize: (state: QueriesStoreType) => ({ queries: state.queries }),
     }

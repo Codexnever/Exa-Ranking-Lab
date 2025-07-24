@@ -13,11 +13,12 @@
  * - Performance analytics with confidence intervals
  * - Category distribution analysis with semantic clustering support
  * - Time-based data filtering and aggregation
+ * - Smart snapshot deduplication strategies
  * 
  */
 
 // app/logic/analyticsLogic.ts
-import { useMemo } from "react";
+// No React imports needed for pure calculation
 import type { QueryConfig, RankingSnapshot, TrendPoint } from "@/lib/type";
 import { pipeline } from '@xenova/transformers'; // For semantic clustering (npm install @xenova/transformers)
 
@@ -47,10 +48,10 @@ export function calculateTimeRangeMs(timeRange: string): number {
 }
 
 /**
- * Filters and limits ranking snapshots based on time range and custom criteria.
+ * Filters and deduplicates ranking snapshots based on time range and custom criteria.
  * 
- * Applies temporal filtering, optional query type filtering, domain-specific filtering,
- * and enforces a maximum snapshot limit for performance optimization.
+ * Applies temporal filtering, deduplication strategies, optional query type filtering,
+ * domain-specific filtering, and enforces a maximum snapshot limit for performance optimization.
  * 
  * @param {RankingSnapshot[]} snapshots - Array of ranking snapshot data
  * @param {number} timeRangeMs - Time range in milliseconds for filtering
@@ -58,36 +59,200 @@ export function calculateTimeRangeMs(timeRange: string): number {
  * @param {string} [filters.queryType] - Filter by specific query type
  * @param {string} [filters.domain] - Filter by domain presence in results
  * @param {number} [maxSnapshots=1000] - Maximum number of snapshots to return
- * @returns {RankingSnapshot[]} Filtered array of snapshots
- * 
- * @example
- * ```
- * const filtered = filterSnapshots(
- *   allSnapshots, 
- *   calculateTimeRangeMs("7d"),
- *   { queryType: "research", domain: "example.com" }
- * );
- * ```
+ * @param {string} [deduplicationStrategy="latest"] - Strategy for handling duplicates
+ * @returns {RankingSnapshot[]} Filtered and deduplicated array of snapshots
  */
-function filterSnapshots(
+export function filterSnapshots(
   snapshots: RankingSnapshot[],
   timeRangeMs: number,
   filters: { queryType?: string; domain?: string } = {},
-  maxSnapshots: number = 1000
+  maxSnapshots: number = 1000,
+  deduplicationStrategy: 'latest' | 'average' | 'best' | 'worst' | 'none' = 'latest'
 ): RankingSnapshot[] {
+  if (!Array.isArray(snapshots)) return [];
+  
   const cutoffDate = new Date(Date.now() - timeRangeMs);
-  let filtered = snapshots.filter(s => new Date(s.timestamp) > cutoffDate);
+  let filtered = snapshots.filter(s => s && s.timestamp && new Date(s.timestamp) > cutoffDate);
 
+  // Apply existing filters
   if (filters.queryType) {
-    filtered = filtered.filter(s => s.queryType === filters.queryType); // Now safe after adding to type
+    filtered = filtered.filter(s => s.queryType === filters.queryType);
   }
   if (filters.domain) {
     filtered = filtered.filter(s =>
-      s.results.some(r => r.url?.includes(filters.domain!)) // ✅ safe now
+      s.results?.some(r => r.url?.includes(filters.domain!))
     );
   }
 
+  // Apply deduplication strategy
+  if (deduplicationStrategy !== 'none') {
+    filtered = deduplicateSnapshots(filtered, deduplicationStrategy);
+  }
+
   return filtered.slice(0, maxSnapshots);
+}
+
+/**
+ * Deduplicates snapshots based on query ID and date using specified strategy.
+ * 
+ * Groups snapshots by query ID and date (YYYY-MM-DD), then applies the selected
+ * strategy to choose the representative snapshot for each group.
+ * 
+ * @param {RankingSnapshot[]} snapshots - Snapshots to deduplicate
+ * @param {string} strategy - Deduplication strategy
+ * @returns {RankingSnapshot[]} Deduplicated snapshots
+ */
+export function deduplicateSnapshots(
+  snapshots: RankingSnapshot[],
+  strategy: 'latest' | 'average' | 'best' | 'worst'
+): RankingSnapshot[] {
+  if (!Array.isArray(snapshots)) return [];
+  
+  // Group snapshots by query ID and date (YYYY-MM-DD)
+  const grouped = new Map<string, RankingSnapshot[]>();
+  
+  snapshots.forEach(snapshot => {
+    if (!snapshot.timestamp || !snapshot.queryId) return;
+    
+    const date = new Date(snapshot.timestamp).toISOString().split('T')[0]; // YYYY-MM-DD
+    const key = `${snapshot.queryId}-${date}`;
+    
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key)!.push(snapshot);
+  });
+
+  // Apply deduplication strategy to each group
+  const deduplicated: RankingSnapshot[] = [];
+  
+  grouped.forEach((groupSnapshots) => {
+    if (groupSnapshots.length === 1) {
+      deduplicated.push(groupSnapshots[0]);
+      return;
+    }
+
+    let selectedSnapshot: RankingSnapshot;
+
+    switch (strategy) {
+      case 'latest':
+        selectedSnapshot = groupSnapshots.reduce((latest, current) => 
+          new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest
+        );
+        break;
+
+      case 'best':
+        // Best = lowest average position (better ranking)
+        selectedSnapshot = groupSnapshots.reduce((best, current) => {
+          const currentAvg = current.results?.length > 0 
+            ? current.results.reduce((sum, r) => sum + (r.position || 0), 0) / current.results.length 
+            : Infinity;
+          const bestAvg = best.results?.length > 0 
+            ? best.results.reduce((sum, r) => sum + (r.position || 0), 0) / best.results.length 
+            : Infinity;
+          return currentAvg < bestAvg ? current : best;
+        });
+        break;
+
+      case 'worst':
+        // Worst = highest average position (worse ranking)
+        selectedSnapshot = groupSnapshots.reduce((worst, current) => {
+          const currentAvg = current.results?.length > 0 
+            ? current.results.reduce((sum, r) => sum + (r.position || 0), 0) / current.results.length 
+            : 0;
+          const worstAvg = worst.results?.length > 0 
+            ? worst.results.reduce((sum, r) => sum + (r.position || 0), 0) / worst.results.length 
+            : 0;
+          return currentAvg > worstAvg ? current : worst;
+        });
+        break;
+
+      case 'average':
+        // Create a synthetic snapshot with averaged data
+        selectedSnapshot = createAverageSnapshot(groupSnapshots);
+        break;
+
+      default:
+        selectedSnapshot = groupSnapshots[0];
+    }
+
+    deduplicated.push(selectedSnapshot);
+  });
+
+  return deduplicated;
+}
+
+/**
+ * Creates a synthetic snapshot representing the average of multiple snapshots.
+ * 
+ * Combines multiple snapshots from the same query on the same day into a single
+ * representative snapshot with averaged metrics and deduplicated results.
+ * 
+ * @param {RankingSnapshot[]} snapshots - Snapshots to average
+ * @returns {RankingSnapshot} Synthetic averaged snapshot
+ */
+export function createAverageSnapshot(snapshots: RankingSnapshot[]): RankingSnapshot {
+  if (!Array.isArray(snapshots) || snapshots.length === 0) {
+    throw new Error('Invalid snapshots array for averaging');
+  }
+  
+  if (snapshots.length === 1) return snapshots[0];
+
+  const base = snapshots[0];
+  
+  // Average response times
+  const avgResponseTime = snapshots.reduce((sum, s) => 
+    sum + (s.metadata?.responseTime || 0), 0
+  ) / snapshots.length;
+
+  // Combine and average results by URL
+  const urlMap = new Map<string, { positions: number[]; title: string; snippet: string }>();
+  
+  snapshots.forEach(snapshot => {
+    snapshot.results?.forEach(result => {
+      if (!result.url) return;
+      if (!urlMap.has(result.url)) {
+        urlMap.set(result.url, { 
+          positions: [], 
+          title: result.title || '', 
+          snippet: result.snippet || ''
+        });
+      }
+      urlMap.get(result.url)!.positions.push(result.position || 0);
+    });
+  });
+
+  // Create averaged results with all required SearchResult fields
+  const averagedResults = Array.from(urlMap.entries()).map(([url, data]) => {
+    // Find the first snapshot that contains this result to extract required fields
+    let foundResult: any = null;
+    for (const snapshot of snapshots) {
+      foundResult = snapshot.results?.find(r => r.url === url);
+      if (foundResult) break;
+    }
+    return {
+      id: foundResult?.id ?? `avg-${url}`,
+      url,
+      title: data.title,
+      snippet: data.snippet,
+      position: data.positions.reduce((sum, pos) => sum + pos, 0) / data.positions.length,
+      domain: foundResult?.domain ?? "",
+      contentType: foundResult?.contentType ?? "",
+    };
+  }).sort((a, b) => a.position - b.position);
+
+  return {
+    ...base,
+    id: `avg-${base.queryId}-${new Date(base.timestamp).toISOString().split('T')[0]}`,
+    results: averagedResults,
+    metadata: {
+      ...base.metadata,
+      responseTime: avgResponseTime,
+      isAveraged: true, // Flag to indicate this is synthetic
+      sourceCount: snapshots.length, // How many snapshots were averaged
+    } as any, // Type assertion to handle extended metadata
+    timestamp: base.timestamp, // Keep the date, time doesn't matter for daily grouping
+  };
 }
 
 /**
@@ -99,17 +264,8 @@ function filterSnapshots(
  * 
  * @param {Record<string, number>} categories - Category counts to cluster
  * @returns {Record<string, number>} Clustered category counts
- * 
- * @example
- * ```
- * const clustered = clusterCategories({
- *   "research paper": 5,
- *   "academic": 3,
- *   "pdf": 2
- * });
- * ```
  */
-function clusterCategories(categories: Record<string, number>): Record<string, number> {
+export function clusterCategories(categories: Record<string, number>): Record<string, number> {
   // Example: Merge similar categories manually if needed
   // For now, just return as-is (can add manual merges here)
   return { ...categories };
@@ -125,106 +281,40 @@ function clusterCategories(categories: Record<string, number>): Record<string, n
  * @param {number[]} positions - Historical ranking positions
  * @param {number} [forecastDays=7] - Number of days to forecast ahead
  * @returns {number} Predicted ranking position
- * 
- * @example
- * ```
- * const positions = ;
- * const prediction = predictTrend(positions, 7);
- * console.log(`Predicted position in 7 days: ${prediction}`);
- * ```
  */
-function predictTrend(positions: number[], forecastDays: number = 7): number {
-  if (positions.length < 2) return positions[0] || 0;
+export function predictTrend(positions: number[], forecastDays: number = 7): number {
+  if (!Array.isArray(positions) || positions.length < 2) return positions?.[0] || 0;
+  
   const n = positions.length;
   const sumX = positions.reduce((sum, _, i) => sum + i, 0);
   const sumY = positions.reduce((sum, y) => sum + y, 0);
   const sumXY = positions.reduce((sum, y, i) => sum + i * y, 0);
   const sumX2 = positions.reduce((sum, _, i) => sum + i * i, 0);
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  
+  const denominator = n * sumX2 - sumX * sumX;
+  if (denominator === 0) return positions[0];
+  
+  const slope = (n * sumXY - sumX * sumY) / denominator;
   const intercept = (sumY - slope * sumX) / n;
   return intercept + slope * (n + forecastDays - 1); // Forecast next value
 }
 
 /**
- * Comprehensive analytics calculation hook for Exa Ranking Lab.
- * 
- * This is the main analytics engine that processes queries and snapshots to generate
- * actionable insights including ranking trends, performance metrics, anomaly detection,
- * and predictive analytics. All calculations are memoized for optimal performance.
- * 
- * Features:
- * - Ranking trend analysis with volatility and anomaly detection
- * - Category distribution with optional semantic clustering
- * - Hourly success rate analysis with confidence intervals
- * - Top performing queries identification
- * - Statistical performance metrics
- * - Predictive modeling for future rankings
- * 
- * @param {QueryConfig[]} queries - Array of search query configurations
- * @param {RankingSnapshot[]} snapshots - Array of ranking snapshot data
- * @param {string} timeRange - Time range for analysis ("7d", "30d", "90d", "1y")
- * @param {Object} [filters={}] - Optional filtering criteria
- * @param {string} [filters.queryType] - Filter by specific query type
- * @param {string} [filters.domain] - Filter by domain presence
- * 
- * @returns {Object} Comprehensive analytics data object
- * @returns {number} returns.timeRangeMs - Time range in milliseconds
- * @returns {RankingSnapshot[]} returns.filteredSnapshots - Filtered snapshot data
- * @returns {TrendPoint[]} returns.rankingTrendData - Daily ranking trends with predictions
- * @returns {Object[]} returns.categoryDistribution - Query category distribution
- * @returns {Object[]} returns.successRateByHour - Hourly success rate statistics
- * @returns {Object[]} returns.performanceData - Performance metrics by hour
- * @returns {Object[]} returns.topPerformingQueries - Top 5 most stable queries
- * @returns {Object[]} returns.queryPerformanceStats - Query performance statistics
- * 
- * @example
- * ```
- * const {
- *   rankingTrendData,
- *   categoryDistribution,
- *   topPerformingQueries
- * } = useAnalyticsCalculations(
- *   queries,
- *   snapshots,
- *   "30d",
- *   { queryType: "research" }
- * );
- * ```
+ * Calculate ranking trend data - PURE FUNCTION
  */
-export function useAnalyticsCalculations(
-  queries: QueryConfig[],
-  snapshots: RankingSnapshot[],
-  timeRange: string,
-  filters: { queryType?: string; domain?: string } = {}
-) {
-  /**
-   * Memoized time range calculation in milliseconds
-   */
-  const timeRangeMs = useMemo(() => calculateTimeRangeMs(timeRange), [timeRange]);
-
-  /**
-   * Memoized filtered snapshots based on time range and custom filters
-   */
-  const filteredSnapshots = useMemo(() => filterSnapshots(snapshots, timeRangeMs, filters), [snapshots, timeRangeMs, filters]);
-
-  /**
-   * Ranking trend analysis with volatility detection and anomaly identification.
-   * 
-   * Aggregates daily ranking data, calculates volatility metrics, applies statistical
-   * anomaly detection using 2-sigma threshold, and generates trend predictions.
-   */
-  // Enhanced anomaly detection in rankingTrendData
-const rankingTrendData = useMemo(() => {
-  if (filteredSnapshots.length === 0) return [];
+export function calculateRankingTrendData(filteredSnapshots: RankingSnapshot[]): TrendPoint[] {
+  if (!Array.isArray(filteredSnapshots) || filteredSnapshots.length === 0) return [];
 
   const dailyData = new Map<string, { positions: number[]; volatility: number; isAnomaly: boolean }>();
   const allVolatilities: number[] = [];
   const allPositions: number[] = [];
 
   filteredSnapshots.forEach((snapshot) => {
+    if (!snapshot.timestamp || !snapshot.results) return;
+    
     const date = new Date(snapshot.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" });
     const existing = dailyData.get(date) || { positions: [], volatility: 0, isAnomaly: false };
-    const positions = snapshot.results.map(r => r.position);
+    const positions = snapshot.results.map(r => r.position || 0);
     existing.positions.push(...positions);
     allPositions.push(...positions);
     dailyData.set(date, existing);
@@ -294,146 +384,162 @@ const rankingTrendData = useMemo(() => {
   }
 
   return trend.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-}, [filteredSnapshots]);
+}
 
+/**
+ * Calculate category distribution - PURE FUNCTION
+ */
+export function calculateCategoryDistribution(queries: QueryConfig[]) {
+  if (!Array.isArray(queries) || queries.length === 0) return [];
 
-  /**
-   * Category distribution analysis with semantic clustering support.
-   * 
-   * Analyzes query categories, applies optional semantic clustering,
-   * calculates distribution percentages, and assigns predefined colors
-   * for consistent visualization across the application.
-   */
-  const categoryDistribution = useMemo(() => {
-    if (queries.length === 0) return [];
+  const categoryColors: Record<string, string> = {
+    "company": "#3b82f6",
+    "research paper": "#a21caf",
+    "news": "#22c55e",
+    "pdf": "#f59e42",
+    "github": "#24292f",
+    "tweet": "#1df27dff",
+    "personal site": "#f43f5e",
+    "linkedin profile": "#0a66c2",
+    "financial report": "#eab308",
+    "documents": "#f97316", // for clustered categories like 'pdf' + 'financial report'
+  };
+  
+  // Count category frequency
+  const rawCounts: Record<string, number> = queries.reduce((acc, query) => {
+    const category = query.category || "unknown";
+    acc[category] = (acc[category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
-    const categoryColors: Record<string, string> = {
-      "company": "#3b82f6",
-      "research paper": "#a21caf",
-      "news": "#22c55e",
-      "pdf": "#f59e42",
-      "github": "#24292f",
-      "tweet": "#1da1f2",
-      "personal site": "#f43f5e",
-      "linkedin profile": "#0a66c2",
-      "financial report": "#eab308",
-      "documents": "#f97316", // for clustered categories like 'pdf' + 'financial report'
-    };
-    // Count category frequency
-    const rawCounts: Record<string, number> = queries.reduce((acc, query) => {
-      const category = query.category || "unknown";
-      acc[category] = (acc[category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+  // Optionally cluster categories
+  const clusteredCounts = clusterCategories(rawCounts);
 
-    // Optionally cluster categories
-    const clusteredCounts = clusterCategories(rawCounts);
+  // Total number of categorized queries
+  const total = Object.values(clusteredCounts).reduce((sum, count) => sum + count, 0);
 
-    // Total number of categorized queries
-    const total = Object.values(clusteredCounts).reduce((sum, count) => sum + count, 0);
+  // Build the final distribution array
+  const distribution = Object.entries(clusteredCounts).map(([name, value]) => ({
+    name,
+    value,
+    percent: total > 0 ? (value / total) * 100 : 0,
+    color: categoryColors[name] || "#94a3b8", // fallback color
+    diversity: value / queries.length, // how much this category contributes
+  }));
 
-    // Build the final distribution array
-    const distribution = Object.entries(clusteredCounts).map(([name, value]) => ({
-      name,
-      value,
-      percent: total > 0 ? (value / total) * 100 : 0,
-      color: categoryColors[name] || "#94a3b8", // fallback color
-      diversity: value / queries.length, // how much this category contributes
+  return distribution.sort((a, b) => b.percent - a.percent);
+}
+
+/**
+ * Calculate success rate by hour - PURE FUNCTION
+ */
+export function calculateSuccessRateByHour(filteredSnapshots: RankingSnapshot[]) {
+  if (!Array.isArray(filteredSnapshots) || filteredSnapshots.length === 0) {
+    return Array.from({ length: 24 }, (_, hour) => ({ 
+      hour, 
+      successRate: 0, 
+      avgTime: 0, 
+      failureRate: 0,
+      confidenceInterval: [0, 0] 
     }));
+  }
 
-    return distribution.sort((a, b) => b.percent - a.percent);
-  }, [queries]);
+  const hourlyStats = Array.from({ length: 24 }, () => ({ success: 0, total: 0, time: 0, failures: 0, times: [] as number[] }));
+  filteredSnapshots.forEach((snapshot) => {
+    if (!snapshot.timestamp || !snapshot.metadata) return;
+    
+    const hour = new Date(snapshot.timestamp).getHours();
+    hourlyStats[hour].total++;
+    if (snapshot.results && snapshot.results.length > 0) {
+      hourlyStats[hour].success++;
+      hourlyStats[hour].time += snapshot.metadata.responseTime || 0;
+      hourlyStats[hour].times.push(snapshot.metadata.responseTime || 0);
+    } else {
+      hourlyStats[hour].failures++;
+    }
+  });
 
-  /**
-   * Hourly success rate analysis with statistical confidence intervals.
-   * 
-   * Calculates success rates, response times, and failure rates by hour of day.
-   * Includes 95% confidence intervals for response times using normal distribution
-   * approximation for statistical significance testing.
-   */
-  const successRateByHour = useMemo(() => {
-    if (filteredSnapshots.length === 0) return new Array(24).fill({ hour: 0, successRate: 0, avgTime: 0, confidenceInterval: [0, 0] });
+  return hourlyStats.map((stats, hour) => {
+    const successRate = stats.total > 0 ? (stats.success / stats.total) * 100 : 0;
+    const avgTime = stats.success > 0 ? stats.time / stats.success : 0;
+    const variance = stats.times.length > 0 ? stats.times.reduce((sum, t) => sum + Math.pow(t - avgTime, 2), 0) / stats.times.length : 0;
+    const stdDev = Math.sqrt(variance);
+    const confidenceInterval = [avgTime - 1.96 * stdDev, avgTime + 1.96 * stdDev]; // 95% CI
+    const failureRate = stats.total > 0 ? (stats.failures / stats.total) * 100 : 0;
+    return { hour, successRate, avgTime, failureRate, confidenceInterval };
+  });
+}
 
-    const hourlyStats = Array.from({ length: 24 }, () => ({ success: 0, total: 0, time: 0, failures: 0, times: [] as number[] }));
-    filteredSnapshots.forEach((snapshot) => {
-      const hour = new Date(snapshot.timestamp).getHours();
-      hourlyStats[hour].total++;
-      if (snapshot.results.length > 0) {
-        hourlyStats[hour].success++;
-        hourlyStats[hour].time += snapshot.metadata.responseTime;
-        hourlyStats[hour].times.push(snapshot.metadata.responseTime);
-      } else {
-        hourlyStats[hour].failures++;
-      }
-    });
+/**
+ * Calculate top performing queries - PURE FUNCTION
+ */
+export function calculateTopPerformingQueries(queries: QueryConfig[], filteredSnapshots: RankingSnapshot[]) {
+  if (!Array.isArray(queries) || !Array.isArray(filteredSnapshots) || queries.length === 0 || filteredSnapshots.length === 0) return [];
 
-    return hourlyStats.map((stats, hour) => {
-      const successRate = stats.total > 0 ? (stats.success / stats.total) * 100 : 0;
-      const avgTime = stats.success > 0 ? stats.time / stats.success : 0;
-      const variance = stats.times.length > 0 ? stats.times.reduce((sum, t) => sum + Math.pow(t - avgTime, 2), 0) / stats.times.length : 0;
-      const stdDev = Math.sqrt(variance);
-      const confidenceInterval = [avgTime - 1.96 * stdDev, avgTime + 1.96 * stdDev]; // 95% CI
-      return { hour, successRate, avgTime, failureRate: (stats.failures / stats.total) * 100, confidenceInterval };
-    });
-  }, [filteredSnapshots]);
+  const queryStats = new Map<string, { name: string; positions: number[]; lastPosition: number | null }>();
+  filteredSnapshots.forEach((snapshot) => {
+    const query = queries.find(q => q.id === snapshot.queryId);
+    if (!query) return;
+    const stats = queryStats.get(query.id) || { name: query.name, positions: [], lastPosition: null };
+    const avgPosition = snapshot.results && snapshot.results.length > 0
+      ? snapshot.results.reduce((sum, r) => sum + (r.position || 0), 0) / snapshot.results.length
+      : 0;
+    stats.positions.push(avgPosition);
+    stats.lastPosition = avgPosition;
+    queryStats.set(query.id, stats);
+  });
 
-  /**
-   * Performance data alias for backward compatibility.
-   * 
-   * Provides the same hourly statistics as successRateByHour for components
-   * that expect performance-specific data formatting.
-   */
-  const performanceData = useMemo(() => successRateByHour, [successRateByHour]);
+  return Array.from(queryStats.values()).map(stats => {
+    const avgPosition = stats.positions.length > 0 ? stats.positions.reduce((sum, pos) => sum + pos, 0) / stats.positions.length : 0;
+    const variance = stats.positions.length > 0 ? stats.positions.reduce((sum, pos) => sum + Math.pow(pos - avgPosition, 2), 0) / stats.positions.length : 0;
+    const stability = 100 - Math.sqrt(variance);
+    const recentPositions = stats.positions.slice(-3);
+    const trendSlope = recentPositions.length < 2 ? 0 : (recentPositions[recentPositions.length - 1] - recentPositions[0]) / (recentPositions.length - 1);
+    const trend = trendSlope < 0 ? "up" : trendSlope > 0 ? "down" : "stable";
+    const predictedPosition = predictTrend(stats.positions);
+    return { name: stats.name, avgPosition, stability, trend, trendSlope, predictedPosition };
+  }).sort((a, b) => b.stability - a.stability).slice(0, 5);
+}
 
-  /**
-   * Top performing queries analysis with stability metrics and trend predictions.
-   * 
-   * Identifies the most stable queries based on position variance, calculates
-   * trend slopes, determines trend direction, and provides future position
-   * predictions using linear regression.
-   */
-  const topPerformingQueries = useMemo(() => {
-    if (queries.length === 0 || filteredSnapshots.length === 0) return [];
+/**
+ * Comprehensive analytics calculation hook for Exa Ranking Lab.
+ * 
+ * This is the main analytics engine that processes queries and snapshots to generate
+ * actionable insights including ranking trends, performance metrics, anomaly detection,
+ * and predictive analytics. All calculations are memoized for optimal performance.
+ * 
+ * @param {QueryConfig[]} queries - Array of search query configurations
+ * @param {RankingSnapshot[]} snapshots - Array of ranking snapshot data
+ * @param {string} timeRange - Time range for analysis ("7d", "30d", "90d", "1y")
+ * @param {Object} [filters={}] - Optional filtering criteria
+ * @param {string} [deduplicationStrategy="latest"] - Strategy for handling duplicate snapshots
+ * 
+ * @returns {Object} Comprehensive analytics data object
+ */
+export function analyticsCalculations(
+  queries: QueryConfig[],
+  snapshots: RankingSnapshot[],
+  timeRange: string,
+  filters: { queryType?: string; domain?: string } = {},
+  deduplicationStrategy: 'latest' | 'average' | 'best' | 'worst' | 'none' = 'latest'
+) {
+  const stableFilters = {
+    queryType: filters.queryType || "",
+    domain: filters.domain || ""
+  };
 
-    const queryStats = new Map<string, { name: string; positions: number[]; lastPosition: number | null }>();
-    filteredSnapshots.forEach((snapshot) => {
-      const query = queries.find(q => q.id === snapshot.queryId);
-      if (!query) return;
-      const stats = queryStats.get(query.id) || { name: query.name, positions: [], lastPosition: null };
-      const avgPosition = snapshot.results.length > 0
-        ? snapshot.results.reduce((sum, r) => sum + r.position, 0) / snapshot.results.length
-        : 0;
-      stats.positions.push(avgPosition);
-      stats.lastPosition = avgPosition;
-      queryStats.set(query.id, stats);
-    });
-
-    return Array.from(queryStats.values()).map(stats => {
-      const avgPosition = stats.positions.length > 0 ? stats.positions.reduce((sum, pos) => sum + pos, 0) / stats.positions.length : 0;
-      const variance = stats.positions.length > 0 ? stats.positions.reduce((sum, pos) => sum + Math.pow(pos - avgPosition, 2), 0) / stats.positions.length : 0;
-      const stability = 100 - Math.sqrt(variance);
-      const recentPositions = stats.positions.slice(-3);
-      const trendSlope = recentPositions.length < 2 ? 0 : (recentPositions[recentPositions.length - 1] - recentPositions[0]) / (recentPositions.length - 1);
-      const trend = trendSlope < 0 ? "up" : trendSlope > 0 ? "down" : "stable";
-      const predictedPosition = predictTrend(stats.positions);
-      return { name: stats.name, avgPosition, stability, trend, trendSlope, predictedPosition }; // New: Prediction
-    }).sort((a, b) => b.stability - a.stability).slice(0, 5);
-  }, [queries, filteredSnapshots]);
-
-  /**
-   * Query performance statistics summary for tabular display.
-   * 
-   * Transforms top performing queries data into a format optimized for
-   * table components, including current and predicted positions sorted
-   * by performance ranking.
-   */
-  const queryPerformanceStats = useMemo(() => {
-    return topPerformingQueries.map(q => ({
-      name: q.name,
-      lastPosition: q.avgPosition,
-      predictedPosition: q.predictedPosition, // New
-    })).sort((a, b) => (a.lastPosition ?? 0) - (b.lastPosition ?? 0)).slice(0, 5);
-  }, [topPerformingQueries]);
+  const timeRangeMs = calculateTimeRangeMs(timeRange);
+  const filteredSnapshots = filterSnapshots(snapshots || [], timeRangeMs, stableFilters, 1000, deduplicationStrategy);
+  const rankingTrendData = calculateRankingTrendData(filteredSnapshots);
+  const categoryDistribution = calculateCategoryDistribution(queries || []);
+  const successRateByHour = calculateSuccessRateByHour(filteredSnapshots);
+  const performanceData = successRateByHour;
+  const topPerformingQueries = calculateTopPerformingQueries(queries || [], filteredSnapshots);
+  const queryPerformanceStats = topPerformingQueries.map(q => ({
+    name: q.name,
+    lastPosition: q.avgPosition,
+    predictedPosition: q.predictedPosition,
+  })).sort((a, b) => (a.lastPosition ?? 0) - (b.lastPosition ?? 0)).slice(0, 5);
 
   return {
     timeRangeMs,

@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
       queries.map((q) => ({ id: q.id, name: q.name })),
       snapshots,
     );
-
+    
     driftResults.sort((a, b) => b.latestDrift - a.latestDrift);
 
     return NextResponse.json(driftResults);

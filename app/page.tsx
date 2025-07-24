@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useQueries } from "@/hooks/use-queries"
+import { useQueriesStore } from "@/app/store"
 import { useAnalyticsStore } from "@/app/store"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useAuth } from "@/lib/contexts/auth-context"
@@ -15,7 +15,11 @@ const PerformanceOverview = dynamic(() => import("@/components/dashboard/Perform
 
 export default function Dashboard() {
   const { user, loading } = useAuth()
-  const { queries, runQuery, fetchQueries } = useQueries()
+  const { queries, runQuery, fetchQueries } =  useQueriesStore(state => ({
+    queries: state.queries,
+    runQuery: state.runQuery,
+    fetchQueries: state.fetchQueries
+  }))
   const { analytics, fetchAnalytics } = useAnalyticsStore()
   const { snapshots, fetchSnapshots } = useSnapshots()
   const [runningQueries, setRunningQueries] = useState<Set<string>>(new Set())

@@ -3,14 +3,14 @@ import { Button } from "@/components/ui/button"
 import { Download, Trash2, Database } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { useSettingsLogic } from "../../app/logic/useSettingsLogic"
-import { useQueries } from "@/hooks/use-queries"
+import { useQueriesStore } from "@/app/store"
 import { useSnapshots } from "@/hooks/use-snapshots"
 import { useAuth } from "@/lib/contexts/auth-context"
 
 export function SettingsDataManagement() {
   const { handleExportData, handleClearData } = useSettingsLogic()
   const { user } = useAuth()
-  const { queries } = useQueries()
+  const queries = useQueriesStore(state => state.queries)
   const { snapshots } = useSnapshots()
   // Only count queries/snapshots for current user if user is present
   const userQueries = user ? queries.filter(q => q.userId === user.$id) : queries

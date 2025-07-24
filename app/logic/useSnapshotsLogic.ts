@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useSnapshots } from "@/hooks/use-snapshots"
-import { useQueries } from "@/hooks/use-queries"
+import { useQueriesStore } from "@/app/store"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useToast } from "@/components/ui/use-toast"
 import { useAnalyticsStore } from "@/app/store"
@@ -9,7 +9,7 @@ import type { QueryConfig } from "@/lib/type"
 
 export function useSnapshotsLogic() {
   const { snapshots, isLoading, fetchSnapshots } = useSnapshotsStore()
-  const { queries } = useQueries()
+  const queries = useQueriesStore(state => state.queries)
   const { analytics } = useAnalyticsStore()
   const { user } = useAuth()
   const { toast } = useToast()
