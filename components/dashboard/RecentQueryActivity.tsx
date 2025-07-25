@@ -1,7 +1,9 @@
+// components/dashboard/RecentQueryActivity.tsx
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { formatResponseTime } from "@/hooks/format-response-time"
 import React from "react"
+import type { QueryConfig, RankingSnapshot } from "@/lib/type"
 
 function formatTimeAgo(date: Date | string) {
   const now = new Date()
@@ -13,7 +15,44 @@ function formatTimeAgo(date: Date | string) {
   return `${Math.floor(diffHours / 24)}d ago`
 }
 
-export default function RecentQueryActivity({ recentSnapshots, queries }: { recentSnapshots: any[]; queries: any[] }) {
+// ✅ Updated interface to include new props
+interface RecentQueryActivityProps {
+  recentSnapshots: RankingSnapshot[]
+  queries: QueryConfig[]
+  isLoading?: boolean // ✅ Add missing isLoading prop
+}
+
+export default function RecentQueryActivity({ 
+  recentSnapshots, 
+  queries, 
+  isLoading = false 
+}: RecentQueryActivityProps) {
+  // Show loading skeleton if data is loading
+  if (isLoading) {
+    return (
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="text-gray-900">Recent Query Activity</CardTitle>
+          <CardDescription>Latest ranking snapshots and changes</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="flex items-center gap-4 p-3 rounded-lg border border-gray-100">
+                <div className="w-2 h-2 rounded-full bg-gray-200 animate-pulse"></div>
+                <div className="flex-1">
+                  <div className="h-4 w-48 bg-gray-200 rounded animate-pulse mb-2"></div>
+                  <div className="h-3 w-32 bg-gray-200 rounded animate-pulse"></div>
+                </div>
+                <div className="h-4 w-16 bg-gray-200 rounded animate-pulse"></div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <Card className="lg:col-span-2">
       <CardHeader>
@@ -32,13 +71,19 @@ export default function RecentQueryActivity({ recentSnapshots, queries }: { rece
                 >
                   <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900">{query?.name || "Unknown Query"}</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {query?.name || query?.query || "Unknown Query"}
+                    </p>
                     <div className="flex items-center gap-2 mt-1">
                       <Badge variant="outline" className="text-xs">
                         {query?.category || "web"}
                       </Badge>
-                      <span className="text-xs text-gray-500">{formatTimeAgo(snapshot.timestamp)}</span>
-                      <span className="text-xs text-gray-500">{snapshot.results.length} results</span>
+                      <span className="text-xs text-gray-500">
+                        {formatTimeAgo(snapshot.timestamp)}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {snapshot.results.length} results
+                      </span>
                     </div>
                   </div>
                   <div className="text-sm font-medium text-gray-500">

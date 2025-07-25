@@ -1,3 +1,4 @@
+// hooks/use-realtimeSnapshots.ts
 "use client"
 
 import { useEffect } from "react";
@@ -11,10 +12,11 @@ import type { RankingSnapshot } from "@/lib/type";
 export function useRealTimeSnapshots() {
   const { userId } = useAuth();
   const { recordActivity, recordError, recordReconnectAttempt } = useConnectionHealth();
-  const fetchSnapshots = useSnapshotsStore((state) => state.fetchSnapshots);
+  const fetchSnapshotsComplete = useSnapshotsStore((state) => state.fetchSnapshotsComplete);
+  const pagination = useSnapshotsStore((state) => state.pagination);
 
   useEffect(() => {
-    if (!userId || !fetchSnapshots) return;
+    if (!userId) return;
 
     let unsubscribe: (() => void) | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
@@ -22,7 +24,7 @@ export function useRealTimeSnapshots() {
 
     const setupSubscription = async () => {
       try {
-        console.log('[RealTime] Setting up snapshots subscription');
+        console.log('[RealTime] Setting up snapshots subscription for user:', userId);
         
         unsubscribe = client.subscribe(
           `databases.${DATABASE_ID}.collections.${COLLECTIONS.SNAPSHOTS}.documents`,
@@ -33,12 +35,29 @@ export function useRealTimeSnapshots() {
               console.log("[Real-Time] Snapshot events:", payload.events);
 
               const document = payload.payload as RankingSnapshot;
-              if (document?.userId !== userId) return;
+              if (!document?.userId || document.userId !== userId) {
+                console.log('[RealTime] Ignoring snapshot event for different user:', document?.userId);
+                return;
+              }
 
               if (payload.events?.includes('database.documents.create') || 
                   payload.events?.includes('database.documents.update')) {
                 
-                await fetchSnapshots(undefined, userId);
+                console.log('[RealTime] Processing snapshot event for:', document.id);
+                
+                // ✅ Refresh both paginated and complete datasets
+                setTimeout(async () => {
+                  try {
+                    await fetchSnapshotsComplete(
+                      pagination.currentPage, 
+                      pagination.itemsPerPage, 
+                      userId
+                    );
+                    console.log("[Real-Time] Snapshots refreshed successfully");
+                  } catch (error) {
+                    console.error("[Real-Time] Failed to refresh snapshots:", error);
+                  }
+                }, 500); // 500ms delay to ensure database consistency
                 
                 // ✅ Record successful activity with response time
                 const responseTime = Date.now() - startTime;
@@ -46,8 +65,6 @@ export function useRealTimeSnapshots() {
                 
                 // Reset reconnect attempts on success
                 reconnectAttempts = 0;
-                
-                console.log("[Real-Time] Snapshots updated successfully");
               }
             } catch (error) {
               console.error("[Real-Time] Error processing snapshot event:", error);
@@ -94,5 +111,5 @@ export function useRealTimeSnapshots() {
         }
       }
     };
-  }, [userId, fetchSnapshots, recordActivity, recordError, recordReconnectAttempt]);
+  }, [userId, fetchSnapshotsComplete, pagination.currentPage, pagination.itemsPerPage, recordActivity, recordError, recordReconnectAttempt]);
 }

@@ -9,10 +9,22 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const queryId = searchParams.get("queryId")
     const userId = searchParams.get("userId")
+    const limitParam = searchParams.get("limit")
+    
+    // ✅ Allow custom limit, default to 100
+    const limit = limitParam ? parseInt(limitParam, 10) : 100
+    
+    console.log('[API] Fetching snapshots with params:', { queryId, userId, limit })
 
-    const snapshots = await databaseService.snapshotService.getSnapshots(queryId || undefined, userId || undefined)
+    const snapshots = await databaseService.snapshotService.getSnapshots(
+      queryId || undefined, 
+      userId || undefined,
+      limit // ✅ Pass limit to service
+    )
+    
+    console.log(`[API] Retrieved ${snapshots.length} snapshots from service`)
 
-    // Sort by newest first
+    // Sort by newest first (additional safety)
     snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
     return NextResponse.json(snapshots)

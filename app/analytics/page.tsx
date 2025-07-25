@@ -1,3 +1,4 @@
+// pages/analytics.tsx
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
@@ -68,12 +69,23 @@ const DomainAnalysis = dynamic(() => import("@/components/analytics/DomainAnalys
 type DeduplicationStrategy = 'latest' | 'average' | 'best' | 'worst' | 'none';
 
 export default function Analytics() {
-  const { userId } = useAuth();
-  const { analytics } = useAnalyticsStore();
+  const { user } = useAuth(); // ✅ Use user object instead of userId
   
-  // Use stores directly to avoid wrapper hook issues
-  const { queries, fetchQueries, isLoading: queriesLoading } = useQueriesStore();
-  const { snapshots, fetchSnapshots, isLoading: snapshotsLoading } = useSnapshotsStore();
+  // ✅ Use individual selectors to prevent infinite loops
+  const analytics = useAnalyticsStore(state => state.analytics);
+  const fetchAnalytics = useAnalyticsStore(state => state.fetchAnalytics);
+  const calculateAnalytics = useAnalyticsStore(state => state.calculateAnalyticsFromSnapshots);
+  const analyticsLoading = useAnalyticsStore(state => state.isLoading);
+  
+  // ✅ Use individual selectors for queries
+  const queries = useQueriesStore(state => state.queries);
+  const fetchQueries = useQueriesStore(state => state.fetchQueries);
+  const queriesLoading = useQueriesStore(state => state.isLoading);
+  
+  // ✅ Use new store structure - complete dataset for analytics
+  const allSnapshots = useSnapshotsStore(state => state.allSnapshots); // ✅ Complete dataset
+  const fetchAllSnapshots = useSnapshotsStore(state => state.fetchAllSnapshots); // ✅ For analytics
+  const isLoadingAnalytics = useSnapshotsStore(state => state.isLoadingAnalytics); // ✅ Analytics loading state
   
   // Refs to prevent infinite loops
   const isMountedRef = useRef(true);
@@ -96,55 +108,58 @@ export default function Analytics() {
     };
   }, [queryTypeFilter, domainFilter]);
 
-  // Stable arrays to prevent infinite recalculations
+  // ✅ Stable arrays to prevent infinite recalculations - use complete dataset
   const stableQueries = useMemo(() => Array.isArray(queries) ? queries : [], [queries]);
-  const stableSnapshots = useMemo(() => Array.isArray(snapshots) ? snapshots : [], [snapshots]);
+  const stableSnapshots = useMemo(() => Array.isArray(allSnapshots) ? allSnapshots : [], [allSnapshots]); // ✅ Use complete dataset
 
-
-
-  // Memoize analytics calculations at the component level
- // In your Analytics component
-const analyticsData = useMemo(() =>
-  analyticsCalculations(
-    stableQueries,
-    stableSnapshots,
-    timeRange,
-    filters,
-    deduplicationStrategy
-  ),
-  [stableQueries, stableSnapshots, timeRange, filters, deduplicationStrategy]
-);
-
+  // ✅ Memoize analytics calculations using complete dataset
+  const analyticsData = useMemo(() => {
+    console.log('[Analytics] Calculating analytics with:', {
+      queries: stableQueries.length,
+      snapshots: stableSnapshots.length,
+      timeRange,
+      deduplicationStrategy
+    });
+    
+    return analyticsCalculations(
+      stableQueries,
+      stableSnapshots, // ✅ Use complete dataset for accurate analytics
+      timeRange,
+      filters,
+      deduplicationStrategy
+    );
+  }, [stableQueries, stableSnapshots, timeRange, filters, deduplicationStrategy]);
 
   // Computed values with guards
-const filteredSnapshotsLength = useMemo(() => 
-  Array.isArray(analyticsData.filteredSnapshots) ? analyticsData.filteredSnapshots.length : 0, 
-  [analyticsData.filteredSnapshots]
-);
+  const filteredSnapshotsLength = useMemo(() => 
+    Array.isArray(analyticsData.filteredSnapshots) ? analyticsData.filteredSnapshots.length : 0, 
+    [analyticsData.filteredSnapshots]
+  );
   
+  // ✅ Updated loading state to use analytics-specific loading
   const isLoading = useMemo(() => 
-    queriesLoading || snapshotsLoading || !dataLoaded, 
-    [queriesLoading, snapshotsLoading, dataLoaded]
+    queriesLoading || isLoadingAnalytics || analyticsLoading || !dataLoaded, 
+    [queriesLoading, isLoadingAnalytics, analyticsLoading, dataLoaded]
   );
 
   // Performance summary with error handling
   const performanceSummary = useMemo(() => {
-  try {
-    if (!Array.isArray(analyticsData.successRateByHour) || analyticsData.successRateByHour.length === 0) {
+    try {
+      if (!Array.isArray(analyticsData.successRateByHour) || analyticsData.successRateByHour.length === 0) {
+        return { avgSuccessRate: "0", avgResponseTime: "0" };
+      }
+      const validHours = analyticsData.successRateByHour.filter(h => h && typeof h.successRate === 'number');
+      if (validHours.length === 0) {
+        return { avgSuccessRate: "0", avgResponseTime: "0" };
+      }
+      const avgSuccessRate = (validHours.reduce((sum, h) => sum + h.successRate, 0) / validHours.length).toFixed(1);
+      const avgResponseTime = (validHours.reduce((sum, h) => sum + (h.avgTime || 0), 0) / validHours.length).toFixed(0);
+      return { avgSuccessRate, avgResponseTime };
+    } catch (error) {
+      console.error("Performance summary error:", error);
       return { avgSuccessRate: "0", avgResponseTime: "0" };
     }
-    const validHours = analyticsData.successRateByHour.filter(h => h && typeof h.successRate === 'number');
-    if (validHours.length === 0) {
-      return { avgSuccessRate: "0", avgResponseTime: "0" };
-    }
-    const avgSuccessRate = (validHours.reduce((sum, h) => sum + h.successRate, 0) / validHours.length).toFixed(1);
-    const avgResponseTime = (validHours.reduce((sum, h) => sum + (h.avgTime || 0), 0) / validHours.length).toFixed(0);
-    return { avgSuccessRate, avgResponseTime };
-  } catch (error) {
-    console.error("Performance summary error:", error);
-    return { avgSuccessRate: "0", avgResponseTime: "0" };
-  }
-}, [analyticsData.successRateByHour]);
+  }, [analyticsData.successRateByHour]);
 
   // Strategy info
   const strategyInfo = useMemo(() => {
@@ -158,50 +173,60 @@ const filteredSnapshotsLength = useMemo(() =>
     return info[deduplicationStrategy] || info.latest;
   }, [deduplicationStrategy]);
 
-  // Debounced fetch function to prevent spam
-// Move fetchQueries and fetchSnapshots out of the dependency array
-const debouncedFetch = useCallback(async (force = false) => {
-  const now = Date.now();
-  const timeSinceLastFetch = now - lastFetchTimeRef.current;
-  
-  // Prevent fetching more than once every 5 seconds unless forced
-  if (!force && timeSinceLastFetch < 5000) {
-    console.log("Fetch debounced, too soon since last fetch");
-    return;
-  }
+  // ✅ Updated debounced fetch function for new store structure
+  const debouncedFetch = useCallback(async (force = false) => {
+    const now = Date.now();
+    const timeSinceLastFetch = now - lastFetchTimeRef.current;
+    
+    // Prevent fetching more than once every 5 seconds unless forced
+    if (!force && timeSinceLastFetch < 5000) {
+      console.log("Fetch debounced, too soon since last fetch");
+      return;
+    }
 
-  if (!userId || !isMountedRef.current) return;
+    if (!user?.$id || !isMountedRef.current) return;
 
-  try {
-    lastFetchTimeRef.current = now;
-    console.log("Fetching data for userId:", userId);
-    
-    // Get fresh references from the stores
-    const queriesStore = useQueriesStore.getState();
-    const snapshotsStore = useSnapshotsStore.getState();
-    
-    const promises = [];
-    if (queriesStore.fetchQueries) promises.push(queriesStore.fetchQueries(userId));
-    if (snapshotsStore.fetchSnapshots) promises.push(snapshotsStore.fetchSnapshots(undefined, userId));
-    
-    if (promises.length > 0) {
-      await Promise.all(promises);
+    try {
+      lastFetchTimeRef.current = now;
+      console.log('[Analytics] Fetching data for user:', user.$id);
+      
+      // ✅ Use new store methods
+      const promises = [];
+      
+      // Fetch queries
+      if (fetchQueries) promises.push(fetchQueries(user.$id));
+      
+      // ✅ Fetch complete snapshots for analytics (not paginated)
+      if (fetchAllSnapshots) promises.push(fetchAllSnapshots(user.$id));
+      
+      // Fetch analytics data
+      if (fetchAnalytics) promises.push(fetchAnalytics(user.$id));
+      
+      if (promises.length > 0) {
+        await Promise.allSettled(promises); // Use allSettled to not fail if one request fails
+        
+        // ✅ Recalculate analytics with fresh complete dataset
+        const freshAllSnapshots = useSnapshotsStore.getState().allSnapshots;
+        if (calculateAnalytics && Array.isArray(freshAllSnapshots)) {
+          calculateAnalytics(freshAllSnapshots);
+        }
+        
+        if (isMountedRef.current) {
+          setDataLoaded(true);
+          console.log('[Analytics] Data fetched and analytics recalculated');
+        }
+      }
+    } catch (error) {
+      console.error("[Analytics] Fetch error:", error);
       if (isMountedRef.current) {
-        setDataLoaded(true);
+        setDataLoaded(true); // Still mark as loaded to prevent infinite loading
       }
     }
-  } catch (error) {
-    console.error("Fetch error:", error);
-    if (isMountedRef.current) {
-      setDataLoaded(true); // Still mark as loaded to prevent infinite loading
-    }
-  }
-}, [userId]); // Only depend on userId
-
+  }, [user?.$id, fetchQueries, fetchAllSnapshots, fetchAnalytics, calculateAnalytics]);
 
   // Initial data fetch - only once on mount with userId
   useEffect(() => {
-    if (userId && !dataLoaded && isMountedRef.current) {
+    if (user?.$id && !dataLoaded && isMountedRef.current) {
       // Clear any existing timeout
       if (fetchTimeoutRef.current) {
         clearTimeout(fetchTimeoutRef.current);
@@ -220,7 +245,7 @@ const debouncedFetch = useCallback(async (force = false) => {
         clearTimeout(fetchTimeoutRef.current);
       }
     };
-  }, [userId, dataLoaded, debouncedFetch]);
+  }, [user?.$id, dataLoaded, debouncedFetch]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -234,20 +259,21 @@ const debouncedFetch = useCallback(async (force = false) => {
     };
   }, []);
 
-  // Stable event handlers
+  // ✅ Enhanced refresh handler
   const handleRefresh = useCallback(async () => {
     if (isRefreshing || !isMountedRef.current) return;
     
     setIsRefreshing(true);
     try {
+      console.log('[Analytics] Manual refresh initiated');
       await debouncedFetch(true);
       if (isMountedRef.current) {
-        toast.success("Data refreshed successfully");
+        toast.success("Analytics data refreshed successfully");
       }
     } catch (error) {
-      console.error("Refresh error:", error);
+      console.error("[Analytics] Refresh error:", error);
       if (isMountedRef.current) {
-        toast.error("Failed to refresh data");
+        toast.error("Failed to refresh analytics data");
       }
     } finally {
       if (isMountedRef.current) {
@@ -256,18 +282,19 @@ const debouncedFetch = useCallback(async (force = false) => {
     }
   }, [isRefreshing, debouncedFetch]);
 
- const handleExport = useCallback(() => {
-  try {
-    if (!Array.isArray(analyticsData.rankingTrendData) || analyticsData.rankingTrendData.length === 0) {
-      toast.error("No data available for export");
-      return;
-    }
+  const handleExport = useCallback(() => {
+    try {
+      if (!Array.isArray(analyticsData.rankingTrendData) || analyticsData.rankingTrendData.length === 0) {
+        toast.error("No data available for export");
+        return;
+      }
 
       const csvContent = "data:text/csv;charset=utf-8," + 
         `Analytics Export - ${new Date().toLocaleDateString()}\n` +
         `Time Range: ${timeRange}\n` +
         `Deduplication Strategy: ${deduplicationStrategy}\n` +
-        `Total Snapshots: ${filteredSnapshotsLength}\n\n` +
+        `Total Snapshots: ${filteredSnapshotsLength}\n` +
+        `Complete Dataset Size: ${stableSnapshots.length}\n\n` + // ✅ Show complete dataset info
         "Date,Avg Position,Volatility,Predicted Position,Is Anomaly,Count\n" + 
         analyticsData.rankingTrendData.map(row => 
           `${row?.date || "N/A"},${row?.avgPosition || 0},${row?.volatility || 0},${row?.predictedPosition || 0},${row?.isAnomaly || false},${row?.count || 0}`
@@ -282,11 +309,11 @@ const debouncedFetch = useCallback(async (force = false) => {
       document.body.removeChild(link);
       
       toast.success("Analytics data exported successfully");
- } catch (error) {
-    console.error("Export error:", error);
-    toast.error("Failed to export data");
-  }
-}, [timeRange, deduplicationStrategy, filteredSnapshotsLength, analyticsData.rankingTrendData]);
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("Failed to export data");
+    }
+  }, [timeRange, deduplicationStrategy, filteredSnapshotsLength, stableSnapshots.length, analyticsData.rankingTrendData]);
 
   const handleClearFilters = useCallback(() => {
     setQueryTypeFilter("");
@@ -308,18 +335,21 @@ const debouncedFetch = useCallback(async (force = false) => {
     }
   }, [deduplicationStrategy]);
 
-  // // Loading state
-  // if (isLoading) {
-  //   return (
-  //     <div className="flex-1 flex items-center justify-center min-h-[400px]">
-  //       <div className="text-center">
-  //         <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
-  //         <h3 className="text-lg font-medium mb-2">Loading Analytics</h3>
-  //         <p className="text-gray-500">Fetching your ranking data...</p>
-  //       </div>
-  //     </div>
-  //   );
-  // }
+  // ✅ Loading state with better messaging
+
+
+  // ✅ Authentication guard
+  if (!user) {
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+          <h3 className="text-lg font-medium mb-2">Authentication Required</h3>
+          <p className="text-gray-500 mb-4">Please log in to view analytics</p>
+        </div>
+      </div>
+    );
+  }
 
   // Empty state
   if (stableQueries.length === 0 && stableSnapshots.length === 0) {
@@ -351,6 +381,15 @@ const debouncedFetch = useCallback(async (force = false) => {
           <p className="text-gray-500 mt-1">
             Track your ranking performance and insights with advanced deduplication
           </p>
+          {/* ✅ Show dataset information */}
+          <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+            <span>{stableQueries.length} queries</span>
+            <span>{stableSnapshots.length} total snapshots</span>
+            <span>{filteredSnapshotsLength} filtered snapshots</span>
+            {deduplicationStrategy !== 'none' && (
+              <span>({deduplicationStrategy} strategy)</span>
+            )}
+          </div>
         </div>
         
         {/* Controls Section */}
@@ -429,6 +468,9 @@ const debouncedFetch = useCallback(async (force = false) => {
             <div className="text-right">
               <div className="text-sm text-gray-500">Filtered Snapshots</div>
               <div className="text-2xl font-bold text-blue-600">{filteredSnapshotsLength}</div>
+              <div className="text-xs text-gray-400">
+                from {stableSnapshots.length} total
+              </div>
             </div>
           </div>
         </CardContent>
@@ -500,6 +542,23 @@ const debouncedFetch = useCallback(async (force = false) => {
           <DomainAnalysis snapshots={analyticsData.filteredSnapshots} />
         </TabsContent>
       </Tabs>
+
+      {/* ✅ Debug info for development */}
+      {process.env.NODE_ENV === 'development' && (
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle className="text-sm">Debug Information</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-gray-500 space-y-1">
+            <div>Complete Dataset: {stableSnapshots.length} snapshots</div>
+            <div>Filtered Dataset: {filteredSnapshotsLength} snapshots</div>
+            <div>Queries: {stableQueries.length}</div>
+            <div>Time Range: {timeRange}</div>
+            <div>Strategy: {deduplicationStrategy}</div>
+            <div>Loading States: Analytics={isLoadingAnalytics}, Queries={queriesLoading}</div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

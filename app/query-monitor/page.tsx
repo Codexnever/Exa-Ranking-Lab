@@ -11,10 +11,8 @@ import { useAuth } from "@/lib/contexts/auth-context"
 
 export default function QueryMonitor() {
   const { user } = useAuth()
-const { queries, runQuery } = useQueriesStore(state => ({
-    queries: state.queries,
-    runQuery: state.runQuery,
-  }))
+  const queries = useQueriesStore(state => state.queries)
+  const runQuery = useQueriesStore(state => state.runQuery)
   const [executionStates, setExecutionStates] = useState<Map<string, any>>(new Map())
   const [isMonitoring, setIsMonitoring] = useState(false)
 
