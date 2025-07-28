@@ -1,6 +1,6 @@
 // app/store/use-snapshots-store.ts
 import { create } from "zustand"
-import { persist } from "zustand/middleware"
+import { persist, createJSONStorage } from "zustand/middleware"
 import { toast } from "sonner"
 import type { RankingSnapshot, RankingChange } from "@/lib/type"
 
@@ -22,6 +22,10 @@ interface SnapshotsState {
   isLoadingAnalytics: boolean
   error: string | null
   lastFetch: number | null
+  
+  // ✅ Add hydration tracking
+  isHydrated: boolean
+  lastUserId: string | null
 }
 
 interface SnapshotsActions {
@@ -34,6 +38,9 @@ interface SnapshotsActions {
   // Combined fetch for initial load
   fetchSnapshotsComplete: (page: number, limit: number, userId?: string) => Promise<void>
   
+  // ✅ Enhanced refresh method
+  forceRefresh: (userId: string) => Promise<void>
+  
   // Pagination controls
   setPage: (page: number) => void
   setItemsPerPage: (limit: number) => void
@@ -44,6 +51,10 @@ interface SnapshotsActions {
   getSnapshot: (id: string) => Promise<RankingSnapshot | undefined>
   compareSnapshots: (snapshotIds: string[]) => Promise<RankingChange[]>
   clearSnapshots: () => void
+  
+  // ✅ Hydration control
+  setHydrated: () => void
+  checkAndRefreshIfEmpty: (userId: string) => Promise<void>
 }
 
 type SnapshotsStore = SnapshotsState & SnapshotsActions
@@ -68,6 +79,59 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
       isLoadingAnalytics: false,
       error: null,
       lastFetch: null,
+      
+      // ✅ Hydration tracking
+      isHydrated: false,
+      lastUserId: null,
+
+      // ✅ Set hydration flag
+      setHydrated: () => {
+        set({ isHydrated: true })
+      },
+
+      // ✅ Check if data is empty and refresh if needed
+      checkAndRefreshIfEmpty: async (userId: string) => {
+        const { allSnapshots, lastUserId, isHydrated } = get()
+        
+        console.log('[SnapshotsStore] Checking data state:', {
+          snapshotsCount: allSnapshots.length,
+          lastUserId,
+          currentUserId: userId,
+          isHydrated
+        })
+        
+        // If no data or different user, force refresh
+        if (!isHydrated || allSnapshots.length === 0 || lastUserId !== userId) {
+          console.log('[SnapshotsStore] Data empty or stale, forcing refresh')
+          await get().forceRefresh(userId)
+        }
+      },
+
+      // ✅ Enhanced force refresh method
+      forceRefresh: async (userId: string) => {
+        console.log('[SnapshotsStore] Force refreshing data for user:', userId)
+        
+        set({ 
+          isLoadingAnalytics: true, 
+          error: null,
+          lastUserId: userId 
+        })
+        
+        try {
+          // Clear existing data first
+          set({ allSnapshots: [] })
+          
+          // Fetch fresh data
+          await get().fetchAllSnapshots(userId)
+          
+          console.log('[SnapshotsStore] Force refresh completed')
+        } catch (error) {
+          console.error('[SnapshotsStore] Force refresh failed:', error)
+          const message = error instanceof Error ? error.message : 'Failed to refresh data'
+          set({ error: message, isLoadingAnalytics: false })
+          toast.error(message)
+        }
+      },
 
       fetchPaginatedSnapshots: async (page: number, limit: number, userId?: string, queryId?: string) => {
         set({ isLoadingPaginated: true, error: null })
@@ -135,14 +199,24 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
           
           console.log('[SnapshotsStore] Analytics fetch result:', allSnapshots.length, 'snapshots')
           
+          // ✅ Enhanced validation and sorting
+          const validSnapshots = Array.isArray(allSnapshots) 
+            ? allSnapshots.filter(s => s && s.id && s.timestamp) // Filter out invalid entries
+            : []
+          
+          const sortedSnapshots = validSnapshots.sort((a, b) => 
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          )
+          
           set({
-            allSnapshots: Array.isArray(allSnapshots) ? allSnapshots.sort((a, b) => 
-              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-            ) : [],
+            allSnapshots: sortedSnapshots,
             isLoadingAnalytics: false,
             error: null,
-            lastFetch: Date.now()
+            lastFetch: Date.now(),
+            lastUserId: userId || null
           })
+          
+          console.log('[SnapshotsStore] Successfully stored', sortedSnapshots.length, 'valid snapshots')
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Failed to fetch analytics snapshots'
           console.error('[SnapshotsStore] Analytics fetch error:', error)
@@ -174,10 +248,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
         if (page !== pagination.currentPage && page >= 1 && page <= pagination.totalPages) {
           console.log('[SnapshotsStore] Changing page to:', page)
           
-          // You'll need to get the current user ID from your auth context
-          // For now, we'll use a placeholder - you should replace this with actual user ID logic
           const userId = localStorage.getItem('currentUserId') || undefined
-          
           await get().fetchPaginatedSnapshots(page, pagination.itemsPerPage, userId)
         }
       },
@@ -187,9 +258,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
         if (limit !== pagination.itemsPerPage) {
           console.log('[SnapshotsStore] Changing items per page to:', limit)
           
-          // Reset to page 1 when changing items per page
           const userId = localStorage.getItem('currentUserId') || undefined
-          
           await get().fetchPaginatedSnapshots(1, limit, userId)
         }
       },
@@ -264,23 +333,34 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
             itemsPerPage: 20
           },
           error: null,
-          lastFetch: null
+          lastFetch: null,
+          lastUserId: null
         })
       }
     }),
     {
       name: 'snapshots-storage',
+      storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        // Only persist the complete dataset for analytics and user preferences
+        // ✅ Enhanced persistence
         allSnapshots: state.allSnapshots,
         pagination: {
-          currentPage: 1, // Reset pagination on reload
+          currentPage: 1,
           totalPages: 0,
           totalItems: 0,
-          itemsPerPage: state.pagination.itemsPerPage // Keep user's preferred page size
+          itemsPerPage: state.pagination.itemsPerPage
         },
-        lastFetch: state.lastFetch
-      })
+        lastFetch: state.lastFetch,
+        lastUserId: state.lastUserId, // ✅ Persist last user ID
+      }),
+      // ✅ Add hydration callback
+      onRehydrateStorage: () => (state) => {
+        console.log('[SnapshotsStore] Hydration completed:', {
+          snapshotsCount: state?.allSnapshots?.length || 0,
+          lastUserId: state?.lastUserId
+        })
+        state?.setHydrated()
+      }
     }
   )
 )

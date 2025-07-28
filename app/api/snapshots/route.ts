@@ -6,9 +6,15 @@ import { getCurrentUser } from "@/app/server/auth";
 
 export async function GET(request: NextRequest) {
   try {
+
+     const user = await getCurrentUser()
+        if (!user) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+        }
+
     const { searchParams } = new URL(request.url)
     const queryId = searchParams.get("queryId")
-    const userId = searchParams.get("userId")
+    const userId = searchParams.get("userId") || user.$id
     const limitParam = searchParams.get("limit")
     
     // ✅ Allow custom limit, default to 100

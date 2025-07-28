@@ -9,6 +9,8 @@ import { CompareSummary } from "@/components/compare/CompareSummary"
 import { CompareTable } from "@/components/compare/CompareTable"
 import { useCompareLogic } from "@/app/logic/compareLogic"
 import { useAuth } from "@/lib/contexts/auth-context"
+import { Button } from "@/components/ui/button"
+import { RefreshCw } from "lucide-react"
 
 export default function CompareRankings() {
   const { user } = useAuth()
@@ -18,43 +20,76 @@ export default function CompareRankings() {
   const fetchQueries = useQueriesStore(state => state.fetchQueries)
   const queriesLoading = useQueriesStore(state => state.isLoading)
   
-  // ✅ Use complete dataset for accurate comparisons
-  const allSnapshots = useSnapshotsStore(state => state.allSnapshots) // ✅ Use complete dataset
+  // ✅ Enhanced store selectors with validation
+  const allSnapshots = useSnapshotsStore(state => state.allSnapshots)
   const fetchAllSnapshots = useSnapshotsStore(state => state.fetchAllSnapshots)
+  const forceRefresh = useSnapshotsStore(state => state.forceRefresh)
+  const checkAndRefreshIfEmpty = useSnapshotsStore(state => state.checkAndRefreshIfEmpty)
   const isLoadingAnalytics = useSnapshotsStore(state => state.isLoadingAnalytics)
+  const isHydrated = useSnapshotsStore(state => state.isHydrated)
   
   const [selectedQuery, setSelectedQuery] = useState("")
   const [snapshot1, setSnapshot1] = useState("")
   const [snapshot2, setSnapshot2] = useState("")
   const [isInitialized, setIsInitialized] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
 
-  // ✅ Initial data fetch
+  // ✅ Enhanced data initialization with validation
   useEffect(() => {
-    if (user?.$id && !isInitialized) {
+    if (user?.$id && !isInitialized && isHydrated) {
       const initializeData = async () => {
         try {
-          console.log('[Compare] Initializing data for user:', user.$id)
+          console.log('[Compare] Initializing data for user:', user.$id, {
+            currentSnapshots: allSnapshots.length,
+            isHydrated
+          })
+          
+          // ✅ Check if data is empty and refresh if needed
+          await checkAndRefreshIfEmpty(user.$id)
           
           // Fetch both queries and complete snapshots for comparison
           await Promise.all([
             fetchQueries(user.$id),
-            fetchAllSnapshots(user.$id)
+            allSnapshots.length === 0 ? fetchAllSnapshots(user.$id) : Promise.resolve()
           ])
           
           setIsInitialized(true)
           console.log('[Compare] Data initialized successfully')
         } catch (error) {
           console.error('[Compare] Failed to initialize data:', error)
+          
+          // ✅ Retry logic with exponential backoff
+          if (retryCount < 3) {
+            const delay = Math.pow(2, retryCount) * 1000 // 1s, 2s, 4s
+            setTimeout(() => {
+              setRetryCount(prev => prev + 1)
+              setIsInitialized(false)
+            }, delay)
+          }
         }
       }
 
       initializeData()
     }
-  }, [user?.$id, isInitialized, fetchQueries, fetchAllSnapshots])
+  }, [user?.$id, isInitialized, isHydrated, fetchQueries, fetchAllSnapshots, checkAndRefreshIfEmpty, allSnapshots.length, retryCount])
+
+  // ✅ Manual refresh function
+  const handleManualRefresh = async () => {
+    if (!user?.$id) return
+    
+    try {
+      setIsInitialized(false)
+      await forceRefresh(user.$id)
+      await fetchQueries(user.$id)
+      setIsInitialized(true)
+    } catch (error) {
+      console.error('[Compare] Manual refresh failed:', error)
+    }
+  }
 
   // ✅ Use complete dataset for comparisons (more accurate)
   const { filteredSnapshots, comparison } = useCompareLogic(
-    allSnapshots, // ✅ Use complete dataset, not paginated
+    allSnapshots,
     selectedQuery, 
     snapshot1, 
     snapshot2
@@ -69,8 +104,8 @@ export default function CompareRankings() {
     })
   }
 
-  // ✅ Loading state
-  const isLoading = queriesLoading || isLoadingAnalytics || !isInitialized
+  // ✅ Enhanced loading state
+  const isLoading = queriesLoading || isLoadingAnalytics || !isInitialized || !isHydrated
 
   if (isLoading) {
     return (
@@ -86,7 +121,14 @@ export default function CompareRankings() {
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-gray-600">Loading comparison data...</p>
-            <p className="text-xs text-gray-500 mt-1">Fetching queries and snapshots</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {!isHydrated ? 'Hydrating store...' : 'Fetching queries and snapshots'}
+            </p>
+            {retryCount > 0 && (
+              <p className="text-xs text-amber-600 mt-2">
+                Retry attempt {retryCount}/3
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -114,17 +156,49 @@ export default function CompareRankings() {
     )
   }
 
+  // ✅ Empty state with refresh option
+  if (allSnapshots.length === 0 && isInitialized) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900">Compare Rankings</h1>
+            <p className="text-gray-600 mt-1">Analyze ranking changes between different snapshots</p>
+          </div>
+          <Button onClick={handleManualRefresh} variant="outline">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh Data
+          </Button>
+        </div>
+        
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No Snapshots Available</h3>
+            <p className="text-gray-500 mb-4">Create some queries and snapshots first to compare rankings.</p>
+            <Button onClick={handleManualRefresh}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Try Refreshing
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Compare Rankings</h1>
           <p className="text-gray-600 mt-1">Analyze ranking changes between different snapshots</p>
-          {/* ✅ Show data stats */}
           <p className="text-xs text-gray-500 mt-1">
             {queries.length} queries • {allSnapshots.length} snapshots available for comparison
           </p>
         </div>
+        <Button onClick={handleManualRefresh} variant="outline" size="sm">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
       </div>
       
       <CompareSetup
@@ -135,7 +209,7 @@ export default function CompareRankings() {
         setSnapshot1={setSnapshot1}
         snapshot2={snapshot2}
         setSnapshot2={setSnapshot2}
-        filteredSnapshots={filteredSnapshots} // ✅ Uses complete dataset
+        filteredSnapshots={filteredSnapshots}
         formatDate={formatDate}
       />
       
@@ -182,10 +256,11 @@ export default function CompareRankings() {
         </div>
       ) : null}
       
-      {/* ✅ Debug info (remove in production) */}
+      {/* ✅ Enhanced debug info */}
       {process.env.NODE_ENV === 'development' && (
         <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded">
-          Debug: {allSnapshots.length} total snapshots, {filteredSnapshots.length} filtered snapshots
+          Debug: {allSnapshots.length} total snapshots, {filteredSnapshots.length} filtered snapshots, 
+          Hydrated: {isHydrated ? 'Yes' : 'No'}, Retries: {retryCount}
         </div>
       )}
     </div>
