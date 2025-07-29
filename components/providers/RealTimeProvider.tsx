@@ -52,27 +52,6 @@ export function RealTimeProvider({ children }: RealTimeProviderProps) {
     <>
       {children}
       
-      {/* Optional: Global Connection Status Indicator (bottom right) */}
-      {user && (
-        <div className="fixed bottom-4 right-4 z-40">
-          <div
-            className={`h-3 w-3 rounded-full transition-all duration-300 shadow-lg ${
-              subscriptionsReady
-                ? 'bg-green-500 shadow-green-500/50'
-                : 'bg-gray-400 shadow-gray-400/50'
-            }`}
-            title={
-              subscriptionsReady
-                ? 'Real-time connections active'
-                : 'Establishing connections...'
-            }
-          >
-            {subscriptionsReady && (
-              <div className="absolute inset-0 h-3 w-3 rounded-full bg-green-500 animate-ping opacity-75" />
-            )}
-          </div>
-        </div>
-      )}
     </>
   );
 }

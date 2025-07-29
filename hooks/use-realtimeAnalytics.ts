@@ -1,3 +1,4 @@
+// hooks/use-realtimeAnalytics.ts
 "use client"
 
 import { useEffect } from "react";
@@ -10,13 +11,18 @@ import { DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite";
 import type { RankingSnapshot } from "@/lib/type";
 
 export function useRealTimeAnalytics() {
-  const { userId } = useAuth();
+  const { user } = useAuth();
   const { recordActivity, recordError, recordReconnectAttempt } = useConnectionHealth();
-  const fetchSnapshots = useSnapshotsStore((state) => state.fetchSnapshots);
+  
+  //  Updated to use new store methods
+  const fetchAllSnapshots = useSnapshotsStore((state) => state.fetchAllSnapshots);
+  const fetchSnapshotsComplete = useSnapshotsStore((state) => state.fetchSnapshotsComplete);
+  const pagination = useSnapshotsStore((state) => state.pagination);
+  
   const calculateAnalytics = useAnalyticsStore((state) => state.calculateAnalyticsFromSnapshots);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!user?.$id) return; //  Updated user check
 
     let unsubscribe: (() => void) | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
@@ -24,7 +30,7 @@ export function useRealTimeAnalytics() {
 
     const setupSubscription = async () => {
       try {
-        console.log('[RealTime] Setting up analytics subscription');
+        console.log('[RealTime] Setting up analytics subscription for user:', user.$id);
         
         unsubscribe = client.subscribe(
           `databases.${DATABASE_ID}.collections.${COLLECTIONS.SNAPSHOTS}.documents`,
@@ -35,28 +41,45 @@ export function useRealTimeAnalytics() {
               console.log("[Real-Time] Analytics - Snapshot events:", payload.events);
 
               const document = payload.payload as RankingSnapshot;
-              if (document?.userId !== userId) return;
+              
+              //  Updated user check
+              if (!document?.userId || document.userId !== user.$id) {
+                console.log('[RealTime] Ignoring snapshot event for different user:', document?.userId);
+                return;
+              }
 
               if (payload.events?.includes('database.documents.create') || 
                   payload.events?.includes('database.documents.update')) {
                 
-                // ✅ Fetch fresh data first
-                await fetchSnapshots(undefined, userId);
+                console.log('[RealTime] Processing analytics update for snapshot:', document.id);
                 
-                // ✅ Get fresh snapshots from store (avoid stale closure)
-                const freshSnapshots = useSnapshotsStore.getState().snapshots;
-                
-                // ✅ Calculate analytics with fresh data
-                calculateAnalytics(freshSnapshots);
-                
-                // ✅ Record successful activity with response time
-                const responseTime = Date.now() - startTime;
-                recordActivity('analytics-update', responseTime);
-                
-                // Reset reconnect attempts on success
-                reconnectAttempts = 0;
-                
-                console.log('[RealTime] Analytics updated successfully');
+                //  Refresh both paginated and complete datasets with delay for DB consistency
+                setTimeout(async () => {
+                  try {
+                    // Refresh complete snapshots for analytics
+                    await fetchAllSnapshots(user.$id);
+                    
+                    //  Get fresh snapshots from store (avoid stale closure)
+                    const freshSnapshots = useSnapshotsStore.getState().allSnapshots; // ✅ Use allSnapshots
+                    
+                    //  Calculate analytics with fresh data
+                    if (freshSnapshots.length > 0) {
+                      calculateAnalytics(freshSnapshots);
+                    }
+                    
+                    //  Record successful activity with response time
+                    const responseTime = Date.now() - startTime;
+                    recordActivity('analytics-update', responseTime);
+                    
+                    // Reset reconnect attempts on success
+                    reconnectAttempts = 0;
+                    
+                    console.log('[RealTime] Analytics updated successfully with', freshSnapshots.length, 'snapshots');
+                  } catch (refreshError) {
+                    console.error("[Real-Time] Failed to refresh analytics data:", refreshError);
+                    recordError(refreshError instanceof Error ? refreshError.message : 'Analytics refresh failed');
+                  }
+                }, 500); // 500ms delay to ensure database consistency
               }
             } catch (error) {
               console.error("[Real-Time] Analytics processing error:", error);
@@ -65,7 +88,7 @@ export function useRealTimeAnalytics() {
           }
         );
         
-        // ✅ Record successful subscription setup
+        //  Record successful subscription setup
         recordActivity('analytics-subscription');
         reconnectAttempts = 0;
         console.log('[RealTime] Analytics subscription established');
@@ -79,7 +102,7 @@ export function useRealTimeAnalytics() {
         // Exponential backoff for reconnection
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Max 30 seconds
         reconnectTimer = setTimeout(() => {
-          if (userId) {
+          if (user?.$id) {
             console.log(`[RealTime] Retrying analytics subscription (attempt ${reconnectAttempts + 1})...`);
             setupSubscription();
           }
@@ -103,5 +126,5 @@ export function useRealTimeAnalytics() {
         }
       }
     };
-  }, [userId, fetchSnapshots, calculateAnalytics, recordActivity, recordError, recordReconnectAttempt]);
+  }, [user?.$id, fetchAllSnapshots, calculateAnalytics, recordActivity, recordError, recordReconnectAttempt]);
 }

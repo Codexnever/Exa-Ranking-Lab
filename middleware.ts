@@ -12,6 +12,8 @@ const PROTECTED_ROUTES = [
   "/snapshots",
   "/settings",
   "/query-monitor",
+  "/drift",
+  "/profile"
 ]
 
 const PUBLIC_API_ROUTES = [
@@ -34,7 +36,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const isProtected = PROTECTED_ROUTES.some(route => pathname.startsWith(route))
-  if (!isProtected) return NextResponse.next()
+  if (!isProtected) return NextResponse.next()//Here Check 
 
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
   const ua = userAgent(request)

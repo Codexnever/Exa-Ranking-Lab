@@ -104,28 +104,26 @@ export function filterSnapshots(
  */
 export function deduplicateSnapshots(
   snapshots: RankingSnapshot[],
-  strategy: 'latest' | 'average' | 'best' | 'worst'
+  strategy: "latest" | "average" | "best" | "worst"
 ): RankingSnapshot[] {
   if (!Array.isArray(snapshots)) return [];
-  
-  // Group snapshots by query ID and date (YYYY-MM-DD)
+
   const grouped = new Map<string, RankingSnapshot[]>();
-  
-  snapshots.forEach(snapshot => {
+
+  snapshots.forEach((snapshot) => {
     if (!snapshot.timestamp || !snapshot.queryId) return;
-    
-    const date = new Date(snapshot.timestamp).toISOString().split('T')[0]; // YYYY-MM-DD
+
+    const date = new Date(snapshot.timestamp).toISOString().split("T")[0];
     const key = `${snapshot.queryId}-${date}`;
-    
+
     if (!grouped.has(key)) {
       grouped.set(key, []);
     }
     grouped.get(key)!.push(snapshot);
   });
 
-  // Apply deduplication strategy to each group
   const deduplicated: RankingSnapshot[] = [];
-  
+
   grouped.forEach((groupSnapshots) => {
     if (groupSnapshots.length === 1) {
       deduplicated.push(groupSnapshots[0]);
@@ -135,44 +133,45 @@ export function deduplicateSnapshots(
     let selectedSnapshot: RankingSnapshot;
 
     switch (strategy) {
-      case 'latest':
-        selectedSnapshot = groupSnapshots.reduce((latest, current) => 
+      case "latest":
+        selectedSnapshot = groupSnapshots.reduce((latest, current) =>
           new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest
         );
         break;
 
-      case 'best':
-        // Best = lowest average position (better ranking)
+      case "best":
         selectedSnapshot = groupSnapshots.reduce((best, current) => {
-          const currentAvg = current.results?.length > 0 
-            ? current.results.reduce((sum, r) => sum + (r.position || 0), 0) / current.results.length 
-            : Infinity;
-          const bestAvg = best.results?.length > 0 
-            ? best.results.reduce((sum, r) => sum + (r.position || 0), 0) / best.results.length 
-            : Infinity;
+          const currentAvg =
+            current.results?.length > 0
+              ? current.results.reduce((sum, r) => sum + (r.position || 0), 0) / current.results.length
+              : Infinity;
+          const bestAvg =
+            best.results?.length > 0
+              ? best.results.reduce((sum, r) => sum + (r.position || 0), 0) / best.results.length
+              : Infinity;
           return currentAvg < bestAvg ? current : best;
         });
         break;
 
-      case 'worst':
-        // Worst = highest average position (worse ranking)
+      case "worst":
         selectedSnapshot = groupSnapshots.reduce((worst, current) => {
-          const currentAvg = current.results?.length > 0 
-            ? current.results.reduce((sum, r) => sum + (r.position || 0), 0) / current.results.length 
-            : 0;
-          const worstAvg = worst.results?.length > 0 
-            ? worst.results.reduce((sum, r) => sum + (r.position || 0), 0) / worst.results.length 
-            : 0;
+          const currentAvg =
+            current.results?.length > 0
+              ? current.results.reduce((sum, r) => sum + (r.position || 0), 0) / current.results.length
+              : 0;
+          const worstAvg =
+            worst.results?.length > 0
+              ? worst.results.reduce((sum, r) => sum + (r.position || 0), 0) / worst.results.length
+              : 0;
           return currentAvg > worstAvg ? current : worst;
         });
         break;
 
-      case 'average':
-        // Create a synthetic snapshot with averaged data
+      case "average":
         selectedSnapshot = createAverageSnapshot(groupSnapshots);
         break;
 
-      default:
+      default: 
         selectedSnapshot = groupSnapshots[0];
     }
 
@@ -181,6 +180,7 @@ export function deduplicateSnapshots(
 
   return deduplicated;
 }
+
 
 /**
  * Creates a synthetic snapshot representing the average of multiple snapshots.
@@ -193,65 +193,62 @@ export function deduplicateSnapshots(
  */
 export function createAverageSnapshot(snapshots: RankingSnapshot[]): RankingSnapshot {
   if (!Array.isArray(snapshots) || snapshots.length === 0) {
-    throw new Error('Invalid snapshots array for averaging');
+    throw new Error("Invalid snapshots array for averaging");
   }
-  
+
   if (snapshots.length === 1) return snapshots[0];
 
   const base = snapshots[0];
-  
-  // Average response times
-  const avgResponseTime = snapshots.reduce((sum, s) => 
-    sum + (s.metadata?.responseTime || 0), 0
-  ) / snapshots.length;
 
-  // Combine and average results by URL
+  const avgResponseTime =
+    snapshots.reduce((sum, s) => sum + (s.metadata?.responseTime || 0), 0) / snapshots.length;
+
   const urlMap = new Map<string, { positions: number[]; title: string; snippet: string }>();
-  
-  snapshots.forEach(snapshot => {
-    snapshot.results?.forEach(result => {
+
+  snapshots.forEach((snapshot) => {
+    snapshot.results?.forEach((result) => {
       if (!result.url) return;
       if (!urlMap.has(result.url)) {
-        urlMap.set(result.url, { 
-          positions: [], 
-          title: result.title || '', 
-          snippet: result.snippet || ''
+        urlMap.set(result.url, {
+          positions: [],
+          title: result.title || "",
+          snippet: result.snippet || "",
         });
       }
       urlMap.get(result.url)!.positions.push(result.position || 0);
     });
   });
 
-  // Create averaged results with all required SearchResult fields
-  const averagedResults = Array.from(urlMap.entries()).map(([url, data]) => {
-    // Find the first snapshot that contains this result to extract required fields
-    let foundResult: any = null;
-    for (const snapshot of snapshots) {
-      foundResult = snapshot.results?.find(r => r.url === url);
-      if (foundResult) break;
-    }
-    return {
-      id: foundResult?.id ?? `avg-${url}`,
-      url,
-      title: data.title,
-      snippet: data.snippet,
-      position: data.positions.reduce((sum, pos) => sum + pos, 0) / data.positions.length,
-      domain: foundResult?.domain ?? "",
-      contentType: foundResult?.contentType ?? "",
-    };
-  }).sort((a, b) => a.position - b.position);
+  const averagedResults = Array.from(urlMap.entries())
+    .map(([url, data]) => {
+      let foundResult: any = null;
+      for (const snapshot of snapshots) {
+        foundResult = snapshot.results?.find((r) => r.url === url);
+        if (foundResult) break;
+      }
+      return {
+        id: foundResult?.id ?? `avg-${url}`,
+        url,
+        title: data.title,
+        snippet: data.snippet,
+        position: data.positions.reduce((sum, pos) => sum + pos, 0) / data.positions.length,
+        domain: foundResult?.domain ?? "",
+        contentType: foundResult?.contentType ?? "",
+      };
+    })
+    .sort((a, b) => a.position - b.position);
 
   return {
     ...base,
-    id: `avg-${base.queryId}-${new Date(base.timestamp).toISOString().split('T')[0]}`,
+    id: `avg-${base.queryId}-${new Date(base.timestamp).toISOString().split("T")[0]}`,
     results: averagedResults,
     metadata: {
       ...base.metadata,
       responseTime: avgResponseTime,
-      isAveraged: true, // Flag to indicate this is synthetic
-      sourceCount: snapshots.length, // How many snapshots were averaged
-    } as any, // Type assertion to handle extended metadata
-    timestamp: base.timestamp, // Keep the date, time doesn't matter for daily grouping
+      isAveraged: true,
+      sourceCount: snapshots.length,
+    } as any,
+    timestamp: base.timestamp,
   };
 }
 
@@ -284,19 +281,19 @@ export function clusterCategories(categories: Record<string, number>): Record<st
  */
 export function predictTrend(positions: number[], forecastDays: number = 7): number {
   if (!Array.isArray(positions) || positions.length < 2) return positions?.[0] || 0;
-  
+
   const n = positions.length;
   const sumX = positions.reduce((sum, _, i) => sum + i, 0);
   const sumY = positions.reduce((sum, y) => sum + y, 0);
   const sumXY = positions.reduce((sum, y, i) => sum + i * y, 0);
   const sumX2 = positions.reduce((sum, _, i) => sum + i * i, 0);
-  
+
   const denominator = n * sumX2 - sumX * sumX;
   if (denominator === 0) return positions[0];
-  
+
   const slope = (n * sumXY - sumX * sumY) / denominator;
   const intercept = (sumY - slope * sumX) / n;
-  return intercept + slope * (n + forecastDays - 1); // Forecast next value
+  return intercept + slope * (n + forecastDays - 1);
 }
 
 /**
