@@ -103,6 +103,9 @@ export default function QueryMonitor() {
   const [refreshInterval, setRefreshInterval] = useState(30) // seconds
   const [sortBy, setSortBy] = useState<'name' | 'lastRun' | 'successRate' | 'avgTime'>('lastRun')
   
+  // ✅ NEW: Scheduler status state
+  const [schedulerStatus, setSchedulerStatus] = useState<any>(null)
+  
   // Scheduler configuration
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig>({
     isEnabled: true,
@@ -119,6 +122,7 @@ export default function QueryMonitor() {
     if (user?.$id) {
       fetchQueries(user.$id)
       fetchAllSnapshots(user.$id)
+      refreshSchedulerStatus() // ✅ Check scheduler status on load
     }
   }, [user?.$id, fetchQueries, fetchAllSnapshots])
 
@@ -133,6 +137,60 @@ export default function QueryMonitor() {
 
     return () => clearInterval(interval)
   }, [autoRefresh, refreshInterval, user?.$id, fetchQueries, fetchAllSnapshots])
+
+  // ✅ NEW: Scheduler control functions
+  const refreshSchedulerStatus = async () => {
+    try {
+      const response = await fetch('/api/scheduler/start')
+      const result = await response.json()
+      setSchedulerStatus(result.status)
+    } catch (error) {
+      console.error('Failed to get scheduler status:', error)
+    }
+  }
+
+  const handleStartScheduler = async () => {
+    try {
+      const response = await fetch('/api/scheduler/start', { method: 'POST' })
+      const result = await response.json()
+      
+      if (result.success) {
+        toast.success('Server scheduler started successfully')
+        await refreshSchedulerStatus()
+      } else {
+        toast.error(result.error || 'Failed to start scheduler')
+      }
+    } catch (error) {
+      toast.error('Failed to start scheduler')
+    }
+  }
+
+  const handleStopScheduler = async () => {
+    try {
+      const response = await fetch('/api/scheduler/stop', { method: 'POST' })
+      const result = await response.json()
+      
+      if (result.success) {
+        toast.success('Server scheduler stopped')
+        await refreshSchedulerStatus()
+      } else {
+        toast.error(result.error || 'Failed to stop scheduler')
+      }
+    } catch (error) {
+      toast.error('Failed to stop scheduler')
+    }
+  }
+
+  const handleRunSelected = () => {
+    const selectedQueries = Array.from(executions.keys())
+    if (selectedQueries.length === 0) {
+      toast.info("No queries selected")
+      return
+    }
+
+    setExecutionQueue(prev => [...prev, ...selectedQueries])
+    toast.info(`Queued ${selectedQueries.length} selected queries`)
+  }
 
   // Filter and sort queries
   const filteredQueries = useMemo(() => {
@@ -378,16 +436,6 @@ export default function QueryMonitor() {
     toast.info(`Queued ${scheduledQueries.length} queries for execution`)
   }
 
-  const handleRunSelected = () => {
-    const selectedQueries = Array.from(executions.keys())
-    if (selectedQueries.length === 0) {
-      toast.info("No queries selected")
-      return
-    }
-
-    setExecutionQueue(prev => [...prev, ...selectedQueries])
-  }
-
   const handleRetryFailed = () => {
     const failedQueries = Array.from(executions.entries())
       .filter(([_, execution]) => execution.status === 'error')
@@ -482,6 +530,12 @@ export default function QueryMonitor() {
           <Button variant="outline" size="sm" onClick={handleRetryFailed}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Retry Failed
+          </Button>
+          
+          {/* ✅ NEW: Add Run Selected button */}
+          <Button variant="outline" size="sm" onClick={handleRunSelected}>
+            <Play className="w-4 h-4 mr-2" />
+            Run Selected
           </Button>
           
           <Button
@@ -858,7 +912,6 @@ export default function QueryMonitor() {
                         size="sm"
                         variant="ghost"
                         onClick={() => {
-                          // Navigate to query details or snapshots
                           window.location.href = `/snapshots?queryId=${query.id}`
                         }}
                       >
@@ -1170,6 +1223,52 @@ export default function QueryMonitor() {
                   <label className="text-sm font-medium">Sound Notifications</label>
                   <Switch defaultChecked={false} />
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ✅ NEW: Server-Side Scheduler Control */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Server-Side Scheduler Control</CardTitle>
+              <p className="text-sm text-gray-600">
+                Control the automatic query execution scheduler
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">Scheduler Status</p>
+                  <p className="text-sm text-gray-500">
+                    {schedulerStatus?.isRunning ? 'Running' : 'Stopped'} • 
+                    Runs scheduled queries automatically on the server
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={handleStartScheduler} 
+                    size="sm"
+                    disabled={schedulerStatus?.isRunning}
+                  >
+                    <Play className="w-4 h-4 mr-2" />
+                    {schedulerStatus?.isRunning ? 'Running' : 'Start Scheduler'}
+                  </Button>
+                  <Button 
+                    onClick={handleStopScheduler} 
+                    variant="outline" 
+                    size="sm"
+                    disabled={!schedulerStatus?.isRunning}
+                  >
+                    <Pause className="w-4 h-4 mr-2" />
+                    Stop
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="text-xs text-gray-500">
+                <p>• Automatic scheduler runs every 30 minutes</p>
+                <p>• Processes all due scheduled queries</p>
+                <p>• Independent of browser sessions</p>
               </div>
             </CardContent>
           </Card>

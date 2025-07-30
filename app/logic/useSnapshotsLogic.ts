@@ -1,5 +1,5 @@
 // app/logic/useSnapshotsLogic.ts
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useQueriesStore } from "@/app/store"
 import { useSnapshotsStore } from "@/app/store"
 import { useAnalyticsStore } from "@/app/store"
@@ -51,15 +51,17 @@ export function useSnapshotsLogic() {
   })
 
   // ✅ Filter the paginated snapshots for display
-  const filteredSnapshots = snapshotsWithQueries.filter((snapshot) => {
-    if (filters.category !== "all" && snapshot.queryInfo?.category !== filters.category) return false
+const filteredSnapshots = useMemo(() => {
+  return snapshotsWithQueries.filter((snapshot) => {
+    if (filters.category !== "all" && snapshot.queryInfo?.category !== filters.category) return false;
     if (filters.status !== "all-status") {
-      const status = snapshot.results.length > 0 ? "completed" : "failed"
-      if (status !== filters.status) return false
+      const status = snapshot.results.length > 0 ? "completed" : "failed";
+      if (status !== filters.status) return false;
     }
-    if (filters.search && !snapshot.queryInfo?.query.toLowerCase().includes(filters.search.toLowerCase())) return false
-    return true
-  })
+    if (filters.search && !snapshot.queryInfo?.query.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    return true;
+  });
+}, [snapshotsWithQueries, filters]);
 
   const formatDate = (date: Date | string) => {
     const parsedDate = typeof date === 'string' ? new Date(date) : date

@@ -11,18 +11,15 @@ import { DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite";
 import type { RankingSnapshot } from "@/lib/type";
 
 export function useRealTimeAnalytics() {
-  const { user } = useAuth();
+  const { user } = useAuth(); // ✅ Changed from userId to user
   const { recordActivity, recordError, recordReconnectAttempt } = useConnectionHealth();
   
-  //  Updated to use new store methods
+  // ✅ Updated to use new store methods
   const fetchAllSnapshots = useSnapshotsStore((state) => state.fetchAllSnapshots);
-  const fetchSnapshotsComplete = useSnapshotsStore((state) => state.fetchSnapshotsComplete);
-  const pagination = useSnapshotsStore((state) => state.pagination);
-  
   const calculateAnalytics = useAnalyticsStore((state) => state.calculateAnalyticsFromSnapshots);
 
   useEffect(() => {
-    if (!user?.$id) return; //  Updated user check
+    if (!user?.$id) return;
 
     let unsubscribe: (() => void) | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
@@ -38,48 +35,36 @@ export function useRealTimeAnalytics() {
             const startTime = Date.now();
             
             try {
-              console.log("[Real-Time] Analytics - Snapshot events:", payload.events);
-
               const document = payload.payload as RankingSnapshot;
               
-              //  Updated user check
               if (!document?.userId || document.userId !== user.$id) {
-                console.log('[RealTime] Ignoring snapshot event for different user:', document?.userId);
                 return;
               }
 
               if (payload.events?.includes('database.documents.create') || 
                   payload.events?.includes('database.documents.update')) {
                 
-                console.log('[RealTime] Processing analytics update for snapshot:', document.id);
-                
-                //  Refresh both paginated and complete datasets with delay for DB consistency
+                // ✅ Refresh with delay for DB consistency
                 setTimeout(async () => {
                   try {
-                    // Refresh complete snapshots for analytics
                     await fetchAllSnapshots(user.$id);
                     
-                    //  Get fresh snapshots from store (avoid stale closure)
-                    const freshSnapshots = useSnapshotsStore.getState().allSnapshots; // ✅ Use allSnapshots
+                    const freshSnapshots = useSnapshotsStore.getState().allSnapshots;
                     
-                    //  Calculate analytics with fresh data
                     if (freshSnapshots.length > 0) {
                       calculateAnalytics(freshSnapshots);
                     }
                     
-                    //  Record successful activity with response time
                     const responseTime = Date.now() - startTime;
                     recordActivity('analytics-update', responseTime);
-                    
-                    // Reset reconnect attempts on success
                     reconnectAttempts = 0;
                     
-                    console.log('[RealTime] Analytics updated successfully with', freshSnapshots.length, 'snapshots');
+                    console.log('[RealTime] Analytics updated successfully');
                   } catch (refreshError) {
-                    console.error("[Real-Time] Failed to refresh analytics data:", refreshError);
+                    console.error("[Real-Time] Analytics refresh failed:", refreshError);
                     recordError(refreshError instanceof Error ? refreshError.message : 'Analytics refresh failed');
                   }
-                }, 500); // 500ms delay to ensure database consistency
+                }, 500);
               }
             } catch (error) {
               console.error("[Real-Time] Analytics processing error:", error);
@@ -88,7 +73,6 @@ export function useRealTimeAnalytics() {
           }
         );
         
-        //  Record successful subscription setup
         recordActivity('analytics-subscription');
         reconnectAttempts = 0;
         console.log('[RealTime] Analytics subscription established');
@@ -99,11 +83,9 @@ export function useRealTimeAnalytics() {
         recordReconnectAttempt();
         reconnectAttempts++;
         
-        // Exponential backoff for reconnection
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Max 30 seconds
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
         reconnectTimer = setTimeout(() => {
           if (user?.$id) {
-            console.log(`[RealTime] Retrying analytics subscription (attempt ${reconnectAttempts + 1})...`);
             setupSubscription();
           }
         }, delay);
@@ -113,10 +95,7 @@ export function useRealTimeAnalytics() {
     setupSubscription();
 
     return () => {
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
-      
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (unsubscribe) {
         try {
           unsubscribe();

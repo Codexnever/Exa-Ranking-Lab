@@ -16,6 +16,9 @@ interface QueriesActions {
   updateQuery: (queryId: string, query: Partial<QueryConfig>) => Promise<void>;
   deleteQuery: (queryId: string) => Promise<void>;
   clearQueries: () => void;
+   getScheduledQueries: (userId?: string) => Promise<QueryConfig[]>;
+  getDueQueries: (userId?: string) => Promise<QueryConfig[]>;
+  batchRunQueries: (queryIds: string[]) => Promise<any[]>;
 }
 
 type QueriesStoreType = QueriesState & QueriesActions;
@@ -209,6 +212,63 @@ export const useQueriesStore = create<QueriesStoreType>()(
       }, clearQueries: () => {
         set({ queries: [], error: null })
       },
+     getScheduledQueries: async (userId?: string): Promise<QueryConfig[]> => {
+  try {
+    const queries = get().queries.length > 0 ? get().queries : await get().fetchQueries(userId).then(() => get().queries);
+    return queries.filter(q => q.schedule?.enabled && (!userId || q.userId === userId));
+  } catch (error) {
+    console.error('Failed to get scheduled queries:', error);
+    return [];
+  }
+},
+
+
+getDueQueries: async (userId?: string): Promise<QueryConfig[]> => {
+  try {
+    const scheduledQueries = await get().getScheduledQueries(userId);
+    console.log('Scheduled Queries:', scheduledQueries);  
+    const now = new Date();
+    
+    return scheduledQueries.filter(query => {
+      if (!query.lastRun) return true; // Never run before
+      
+      const lastRun = new Date(query.lastRun);
+      const diffMs = now.getTime() - lastRun.getTime();
+      
+      switch (query.schedule.frequency) {
+        case 'hourly':
+          return diffMs >= 60 * 60 * 1000; // 1 hour
+        case 'daily':
+          return diffMs >= 24 * 60 * 60 * 1000; // 1 day
+        case 'weekly':
+          return diffMs >= 7 * 24 * 60 * 60 * 1000; // 1 week
+        default:
+          return false;
+      }
+    });
+  } catch (error) {
+    console.error('Failed to get due queries:', error);
+    return [];
+  }
+},
+
+batchRunQueries: async (queryIds: string[]): Promise<any[]> => {
+  const results = [];
+  for (const queryId of queryIds) {
+    try {
+      const result = await get().runQuery(queryId);
+      console.log('Batching Query Result:', result);
+      results.push({ queryId, status: 'success', result });
+    } catch (error) {
+      results.push({ 
+        queryId, 
+        status: 'error', 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      });
+    }
+  }
+  return results;
+},
     }),
     {
       name: 'queries-storage',
