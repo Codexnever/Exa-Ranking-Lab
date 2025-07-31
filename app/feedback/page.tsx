@@ -246,7 +246,7 @@ export default function Feedback() {
                   </SelectTrigger>
                   <SelectContent>
                     {userQueries.length === 0 ? (
-                      <SelectItem value="" disabled>No queries available</SelectItem>
+                      <SelectItem value="no-queries" disabled>No queries available</SelectItem>
                     ) : (
                       userQueries.map((query: QueryConfig) => (
                         <SelectItem key={query.id} value={query.id}>
@@ -269,7 +269,7 @@ export default function Feedback() {
                   </SelectTrigger>
                   <SelectContent>
                     {filteredSnapshots.length === 0 ? (
-                      <SelectItem value="" disabled>
+                      <SelectItem value="no-snapshots" disabled>
                         {selectedQuery ? "No snapshots for this query" : "Select a query first"}
                       </SelectItem>
                     ) : (

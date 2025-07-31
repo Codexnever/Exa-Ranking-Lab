@@ -1,6 +1,6 @@
-// app/services/snapshot-service.ts
 import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { ID, Query } from "appwrite"
+import { createHash } from "crypto"
 import type { RankingSnapshot } from "@/lib/type"
 import { loadFromStorage, saveToStorage, transformSnapshotDocument } from "./db-utils"
 
@@ -8,6 +8,17 @@ export class SnapshotService {
   private isLocal: boolean
   constructor(isLocal: boolean) {
     this.isLocal = isLocal
+  }
+
+  // ✅ NEW: Generate content hash for deduplication
+  private generateSnapshotHash(results: any[]): string {
+    const content = JSON.stringify(results.map(r => ({
+      url: r.url,
+      title: r.title,
+      snippet: r.snippet,
+      position: r.position
+    })))
+    return createHash("sha256").update(content).digest("hex")
   }
 
   // New: Paginated fetch method for UI display
@@ -117,11 +128,55 @@ export class SnapshotService {
     }
   }
 
+  // ✅ ENHANCED: Create snapshot with deduplication logic
   async createSnapshot(snapshot: Omit<RankingSnapshot, "id"> & { userId: string }): Promise<RankingSnapshot> {
     try {
+      const snapshotHash = this.generateSnapshotHash(snapshot.results)
+      const currentTime = new Date()
+      
+      console.log(`[SnapshotService] Creating snapshot for query: ${snapshot.queryId}, hash: ${snapshotHash}`)
+
+      // ✅ Check for recent duplicate snapshots (last 2 minutes)
+      if (!this.isLocal) {
+        const recentSnapshots = await databases.listDocuments(
+          DATABASE_ID,
+          COLLECTIONS.SNAPSHOTS,
+          [
+            Query.equal("queryId", snapshot.queryId),
+            Query.equal("userId", snapshot.userId),
+            Query.greaterThan("timestamp", new Date(Date.now() - 120000).toISOString()), // Last 2 minutes
+            Query.orderDesc("timestamp"),
+            Query.limit(3)
+          ]
+        )
+
+        // Check for duplicate content
+        for (const recentDoc of recentSnapshots.documents) {
+          const recentSnapshot = transformSnapshotDocument(recentDoc, false)
+          const recentHash = this.generateSnapshotHash(recentSnapshot.results)
+          const timeDiff = currentTime.getTime() - new Date(recentSnapshot.timestamp).getTime()
+          
+          if (recentHash === snapshotHash && timeDiff < 120000) { // Same content within 2 minutes
+            console.log(`[SnapshotService] Duplicate snapshot detected, returning existing: ${recentDoc.$id}`)
+            console.log(`[SnapshotService] Time difference: ${timeDiff}ms, Content hash match: ${recentHash}`)
+            return recentSnapshot
+          }
+        }
+      }
+
+      // ✅ No duplicate found, create new snapshot
       const id = ID.unique()
+      console.log(`[SnapshotService] Creating new unique snapshot: ${id}`)
+      
       if (this.isLocal) {
-        const newSnapshot: RankingSnapshot = { ...snapshot, id }
+        const newSnapshot: RankingSnapshot = { 
+          ...snapshot, 
+          id,
+          metadata: {
+            ...snapshot.metadata,
+            contentHash: snapshotHash
+          }
+        }
         const snapshots = loadFromStorage<RankingSnapshot>("snapshots")
         snapshots.push(newSnapshot)
         saveToStorage("snapshots", snapshots)
@@ -132,13 +187,17 @@ export class SnapshotService {
         ...snapshot,
         timestamp: snapshot.timestamp.toISOString(),
         results: JSON.stringify(snapshot.results),
-        metadata: JSON.stringify(snapshot.metadata),
+        metadata: JSON.stringify({
+          ...snapshot.metadata,
+          contentHash: snapshotHash
+        }),
         userId: snapshot.userId,
       })
       
+      console.log(`[SnapshotService] New snapshot created successfully: ${id}`)
       return transformSnapshotDocument(document, this.isLocal)
     } catch (error) {
-      console.error("Failed to create snapshot:", error)
+      console.error("[SnapshotService] Failed to create snapshot:", error)
       throw new Error("Failed to create snapshot")
     }
   }

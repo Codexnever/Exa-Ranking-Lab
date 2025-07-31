@@ -34,21 +34,32 @@ export interface RankingSnapshot {
     totalResults: number
     responseTime: number
     exaVersion?: string
+    executedAt?: string // ISO date string
+    contentHash?: string // SHA-256 hash of results for deduplication
+    executionType?: "manual" | "scheduled" // Track how the snapshot was created
+    source?: "snapshots_api" | "query_run_api" // Track which API created this
   }
 }
 
 
 export interface SearchResult {
-  id: string
-  title: string
-  url: string
-  snippet: string
-  position: number
-  score?: number
-  publishDate?: string
-  author?: string
-  domain: string
-  contentType: "article" | "blog" | "research" | "news" | "other"
+  id: string;
+  title: string;
+  url: string;
+  snippet: string;
+  score: number;
+  publishedDate?: string;
+  author?: string;
+  domain: string;
+  position: number;
+  timestamp: Date;
+  contentType: 'word' | 'pdf' | 'tweet' | 'github' | 'article' | 'news' | 'auto';
+  
+  // ✅ NEW: Content hash for drift detection
+  contentHash: string; // SHA-256 hash of title + snippet + url
+  
+  highlights?: string[];
+  summary?: string;
 }
 
 export interface RankingChange {
@@ -153,6 +164,10 @@ export interface DriftAnalysisResult {
   latestDrift: number
   stability: "stable" | "medium" | "volatile"
   driftTrend: "improving" | "worsening" | "stable"
+  totalProcessingTime: number
+  totalContentChanges: number
+  averageCacheHitRate: number
+
 }
 
 export interface DriftTimelinePoint {
@@ -163,6 +178,8 @@ export interface DriftTimelinePoint {
   rankChanges: RankChange[]
   newResults: number
   droppedResults: number
+  contentChanges: number
+  processingTime: number
 }
 
 export interface RankChange {
@@ -172,6 +189,7 @@ export interface RankChange {
   currentPosition: number
   positionDelta: number
   similarityScore: number
+  contentChanged: boolean | number
 }
 export interface TrendPoint {
   date: string;

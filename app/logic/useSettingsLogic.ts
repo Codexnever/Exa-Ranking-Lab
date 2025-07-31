@@ -80,9 +80,8 @@ export function useSettingsLogic() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const [settingsRes, prefsRes] = await Promise.allSettled([
+        const [settingsRes] = await Promise.allSettled([
           fetch("/api/settings", { credentials: "include" }),
-          fetch("/api/preferences", { credentials: "include" })
         ])
 
         // Load settings

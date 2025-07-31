@@ -226,14 +226,18 @@ export function createAverageSnapshot(snapshots: RankingSnapshot[]): RankingSnap
         foundResult = snapshot.results?.find((r) => r.url === url);
         if (foundResult) break;
       }
+      const avgPosition = data.positions.reduce((sum, pos) => sum + pos, 0) / data.positions.length;
       return {
         id: foundResult?.id ?? `avg-${url}`,
         url,
         title: data.title,
         snippet: data.snippet,
-        position: data.positions.reduce((sum, pos) => sum + pos, 0) / data.positions.length,
+        position: avgPosition,
         domain: foundResult?.domain ?? "",
         contentType: foundResult?.contentType ?? "",
+        score: foundResult?.score ?? 0,
+        timestamp: foundResult?.timestamp ?? new Date(),
+        contentHash: foundResult?.contentHash ?? "",
       };
     })
     .sort((a, b) => a.position - b.position);

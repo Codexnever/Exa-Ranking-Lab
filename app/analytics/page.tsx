@@ -17,6 +17,7 @@ import { Download, Filter, RefreshCw, TrendingUp, BarChart3, Settings2 } from "l
 import { useAnalyticsStore } from "@/app/store";
 import { useQueriesStore } from "@/app/store";
 import { useSnapshotsStore } from "@/app/store";
+import { formatResponseTime } from "@/hooks/format-response-time"
 import { analyticsCalculations } from "@/app/logic/analyticsLogic";
 import { useAuth } from "@/lib/contexts/auth-context";
 import { toast } from "sonner";
@@ -153,7 +154,8 @@ export default function Analytics() {
         return { avgSuccessRate: "0", avgResponseTime: "0" };
       }
       const avgSuccessRate = (validHours.reduce((sum, h) => sum + h.successRate, 0) / validHours.length).toFixed(1);
-      const avgResponseTime = (validHours.reduce((sum, h) => sum + (h.avgTime || 0), 0) / validHours.length).toFixed(0);
+    const rawAvgTime = (validHours.reduce((sum, h) => sum + (h.avgTime || 0), 0) / validHours.length).toFixed(0);
+    const avgResponseTime = formatResponseTime(Number(rawAvgTime));       
       return { avgSuccessRate, avgResponseTime };
     } catch (error) {
       console.error("Performance summary error:", error);
@@ -527,7 +529,7 @@ export default function Analytics() {
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-blue-600">
-                      {performanceSummary.avgResponseTime}ms
+                      {performanceSummary.avgResponseTime}
                     </div>
                     <div className="text-sm text-gray-500">Avg Response Time</div>
                   </div>

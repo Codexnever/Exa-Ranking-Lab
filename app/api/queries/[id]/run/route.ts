@@ -1,10 +1,13 @@
-// app/api/queries/[id]/run/route.ts
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database-service"
 import { ExaClient } from "@/app/server/exa-client"
 import { getCurrentUser } from "@/app/server/auth"
 import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite"
 import { Query } from "appwrite"
+import { createHash } from "crypto"
+
+// ✅ Track active executions to prevent double-calling
+const activeExecutions = new Map<string, { timestamp: number; promise: Promise<any> }>()
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const params = await context.params
@@ -15,11 +18,45 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return NextResponse.json({ error: "Unauthorized - JWT verification failed" }, { status: 401 })
   }
 
+  // ✅ Create execution key to prevent concurrent runs
+  const executionKey = `${user.$id}-${queryId}`
+  
+  // ✅ Check if query is already running
+  const activeExecution = activeExecutions.get(executionKey)
+  if (activeExecution && Date.now() - activeExecution.timestamp < 30000) {
+    console.log(`[Query Run] Query already running, waiting for existing execution: ${queryId}`)
+    try {
+      return await activeExecution.promise
+    } catch (error) {
+      // If waiting execution failed, continue with new execution
+      activeExecutions.delete(executionKey)
+    }
+  }
+
+  console.log(`[Query Run] Starting execution for query: ${queryId}`)
+
   const query = await databaseService.queryService.getQuery(queryId)
   if (!query || query.userId !== user.$id) {
     return NextResponse.json({ error: "Query not found or forbidden" }, { status: 404 })
   }
 
+  // ✅ Create execution promise and track it
+  const executionPromise = executeQuery(user, query, queryId)
+  activeExecutions.set(executionKey, {
+    timestamp: Date.now(),
+    promise: executionPromise
+  })
+
+  try {
+    const result = await executionPromise
+    return result
+  } finally {
+    // ✅ Clean up execution tracking
+    activeExecutions.delete(executionKey)
+  }
+}
+
+async function executeQuery(user: any, query: any, queryId: string) {
   try {
     // Get user's API key
     const settingsRes = await databases.listDocuments(
@@ -39,6 +76,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const exaClient = new ExaClient(apiKey)
     const start = Date.now()
     
+    console.log(`[Query Run] Executing Exa search for query: ${queryId}`)
+    
     const exaResults = await exaClient.search({
       query: query.query,
       category: query.category,
@@ -51,47 +90,70 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const responseTime = (Date.now() - start)
 
-    // Map results
-    const mappedResults = (exaResults.results || []).map((r: any, idx: number) => ({
-      id: r.id || `${query.id}_${idx}`,
-      position: idx + 1,
-      domain: r.domain || (r.url ? new URL(r.url).hostname : ""),
-      contentType: r.type || "auto",//Here later we want to add use can select content type
-      title: r.title,
-      snippet: r.snippet,
-      url: r.url,
-      timestamp: new Date(),
-      ...r,
-    }))
+    // ✅ Enhanced result mapping with content hash
+    const mappedResults = (exaResults.results || []).map((r: any, idx: number) => {
+      const title = r.title || ''
+      const snippet = r.snippet || r.summary || ''
+      const url = r.url || ''
+      
+      // Generate content hash for drift analysis
+      const contentHash = createHash('sha256')
+        .update(`${title}|${snippet}|${url}`, 'utf8')
+        .digest('hex')
 
-    // ✅ CREATE SNAPSHOT (This was missing!)
+      return {
+        id: r.id || `${query.id}_${idx}`,
+        position: idx + 1,
+        domain: r.domain || (url ? new URL(url).hostname : ""),
+        contentType: r.type || "auto",
+        title,
+        snippet,
+        url,
+        contentHash, // ✅ Add content hash for drift analysis
+        timestamp: new Date(),
+        ...r,
+      }
+    })
+
+    console.log(`[Query Run] Creating snapshot for query: ${queryId} with ${mappedResults.length} results`)
+
+    // ✅ CREATE SNAPSHOT with enhanced metadata and deduplication
     const snapshot = await databaseService.snapshotService.createSnapshot({
       queryId: query.id,
       userId: user.$id,
       results: mappedResults,
       metadata: {
         totalResults: mappedResults.length,
-        responseTime
+        responseTime,
+        executedAt: new Date().toISOString(),
+        executionType: 'manual', // Track execution type
+        source: 'query_run_api' // Track which API created this
       },
       timestamp: new Date()
     })
+
+    console.log(`[Query Run] Snapshot handling completed: ${snapshot.id}`)
 
     // ✅ Update query's lastRun timestamp
     await databaseService.queryService.updateQuery(query.id, {
       lastRun: new Date()
     })
 
-    return NextResponse.json({
+    const response = {
       success: true,
       results: mappedResults,
       responseTime,
       totalResults: mappedResults.length,
       timestamp: new Date(),
-      snapshotId: snapshot.id, // ✅ Return snapshot info
-    })
+      snapshotId: snapshot.id,
+      source: 'query_run_api', // ✅ Track source
+    }
+
+    console.log(`[Query Run] Query execution completed successfully: ${queryId}`)
+    return NextResponse.json(response)
 
   } catch (err) {
-    console.error("[Query Run Error]", err)
+    console.error(`[Query Run Error] Query: ${queryId}`, err)
     return NextResponse.json(
       { error: "Search failed", details: err instanceof Error ? err.message : String(err) },
       { status: 500 }

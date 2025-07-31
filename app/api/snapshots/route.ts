@@ -1,16 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database-service"
-import { users } from "@/app/server/appwrite-server"
-import { getCurrentUser } from "@/app/server/auth"; 
-
+import { getCurrentUser } from "@/app/server/auth"
 
 export async function GET(request: NextRequest) {
   try {
-
-     const user = await getCurrentUser()
-        if (!user) {
-          return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-        }
+    const user = await getCurrentUser()
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
     const { searchParams } = new URL(request.url)
     const queryId = searchParams.get("queryId")
@@ -20,15 +17,15 @@ export async function GET(request: NextRequest) {
     // ✅ Allow custom limit, default to 100
     const limit = limitParam ? parseInt(limitParam, 10) : 100
     
-    console.log('[API] Fetching snapshots with params:', { queryId, userId, limit })
+    console.log('[Snapshots API] Fetching snapshots with params:', { queryId, userId, limit })
 
     const snapshots = await databaseService.snapshotService.getSnapshots(
       queryId || undefined, 
       userId || undefined,
-      limit // ✅ Pass limit to service
+      limit
     )
     
-    console.log(`[API] Retrieved ${snapshots.length} snapshots from service`)
+    console.log(`[Snapshots API] Retrieved ${snapshots.length} snapshots from service`)
 
     // Sort by newest first (additional safety)
     snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
@@ -53,14 +50,25 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
-
+    
+    console.log(`[Snapshots API] Manual snapshot creation by user: ${user.$id}`)
+    
     // 🛠 Proceed to snapshot creation
     const snapshot = await request.json()
+    
+    // ✅ Enhanced snapshot creation with source tracking
     const newSnapshot = await databaseService.snapshotService.createSnapshot({
       ...snapshot,
       userId: user.$id, // Attach correct user to snapshot
       timestamp: new Date(),
+      metadata: {
+        ...snapshot.metadata,
+        executionType: 'manual',
+        source: 'snapshots_api' // ✅ Track which API created this
+      }
     })
+
+    console.log(`[Snapshots API] Manual snapshot created: ${newSnapshot.id}`)
 
     // Access log
     const ip = request.headers.get("x-real-ip") || "unknown"
@@ -88,6 +96,7 @@ export async function POST(request: NextRequest) {
         isBot: parsed.isBot || false,
       }
     } catch {}
+    
     await databaseService.accessLogService.logAccess(
       user.$id,
       "create_snapshot",
@@ -95,6 +104,7 @@ export async function POST(request: NextRequest) {
       ip,
       userAgentInfo
     )
+    
     return NextResponse.json(newSnapshot)
   } catch (error) {
     console.error("Failed to create snapshot:", error)

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { BarChart3, TrendingUp, Clock, Target } from "lucide-react"
 import type { AnalyticsData, RankingSnapshot } from "@/lib/type"
 import { useMemo } from "react"
-
+import { formatResponseTime } from "@/hooks/format-response-time"
 // ✅ Updated interface to include new props
 interface PerformanceOverviewProps {
   analytics: AnalyticsData | null
@@ -131,7 +131,7 @@ export default function PerformanceOverview({
             <div className="text-center p-4 border rounded-lg">
               <div className="text-2xl font-bold text-blue-600 mb-1 flex items-center justify-center gap-1">
                 <Clock className="h-5 w-5" />
-                {avgResponseTime.toFixed(0)}ms
+              {formatResponseTime(avgResponseTime)}
               </div>
               <div className="text-sm font-medium mb-1">Avg Response</div>
               <div className="text-xs text-gray-500">

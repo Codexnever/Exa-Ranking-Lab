@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { format } from "date-fns"
-import type { DriftTimelinePoint } from "@/app/logic/driftAnalyzer"
+import type { DriftTimelinePoint } from "@/lib/type"
 import { Card, CardContent } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
