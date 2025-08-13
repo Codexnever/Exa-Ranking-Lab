@@ -392,7 +392,7 @@ const exportData: ExportData = {
     
     try {
       // Clear server data first
-      const serverResponse = await fetch('/api/user/clear-data', {
+      const serverResponse = await fetch('/api/clear-data', {
         method: 'DELETE',
         credentials: 'include',
         headers: { "Content-Type": "application/json" },

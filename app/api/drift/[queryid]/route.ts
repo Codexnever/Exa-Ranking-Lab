@@ -1,34 +1,31 @@
-// app/api/drift/[queryid]/route.ts
+// app/api/drift/[queryid]/route.ts - Updated with security
 import { type NextRequest, NextResponse } from "next/server";
 import { databaseService } from "@/app/services/database-service";
 import { analyzeDrift } from "@/app/logic/driftAnalyzer";
-import { getCurrentUser } from "@/app/server/auth";
+import { withEnhancedSecurity } from "@/lib/middleware/security-middleware";
+import { SecurityContext } from "@/lib/type";
 
-export async function GET(
+async function getDriftHandler(
   request: NextRequest, 
-  context: { params: Promise<{ queryid: string }> }
+  context: SecurityContext,
+  routeParams: { params: Promise<{ queryid: string }> }
 ) {
   try {
-    const params = await context.params;
+    const params = await routeParams.params;
     const queryid = params.queryid;
 
-    const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    console.log(`[Drift API] Single query analysis for: ${queryid}, user: ${user.$id}`);
+    console.log(`[Drift API] Single query analysis for: ${queryid}, user: ${context.user.$id}`);
 
     const query = await databaseService.queryService.getQuery(queryid);
     if (!query) {
       return NextResponse.json({ error: "Query not found" }, { status: 404 });
     }
 
-    if (query.userId !== user.$id) {
+    if (query.userId !== context.user.$id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const snapshots = await databaseService.snapshotService.getSnapshots(queryid, user.$id);
+    const snapshots = await databaseService.snapshotService.getSnapshots(queryid, context.user.$id);
     if (snapshots.length < 2) {
       return NextResponse.json({ 
         error: "Not enough snapshots to analyze drift",
@@ -61,3 +58,13 @@ export async function GET(
     );
   }
 }
+
+// ✅ ADD: Apply security middleware
+export const GET = withEnhancedSecurity(getDriftHandler, {
+  allowedMethods: ['GET'],
+  rateLimit: {
+    maxRequests: 10,
+    windowMs: 60000 // 1 minute
+  },
+  logAttempts: true
+});

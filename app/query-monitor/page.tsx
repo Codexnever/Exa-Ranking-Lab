@@ -13,7 +13,9 @@ import { Switch } from "@/components/ui/switch"
 import { useQueriesStore } from "@/app/store"
 import { useSnapshotsStore } from "@/app/store"
 import { useAuth } from "@/lib/contexts/auth-context"
+import { useSecureApi } from '@/lib/use-secureApi'
 import { toast } from "sonner"
+import type { MonitorStats, SchedulerConfig, QueryExecution } from "@/lib/type"
 import { 
   Play, 
   Pause, 
@@ -37,52 +39,13 @@ import {
   BarChart3
 } from "lucide-react"
 
-// Enhanced interfaces
-interface QueryExecution {
-  id: string
-  queryId: string
-  status: 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled'
-  progress: number
-  startTime?: number
-  endTime?: number
-  duration?: number
-  results?: {
-    totalResults: number
-    responseTime: number
-    timestamp: Date
-    averagePosition?: number
-    topDomains: string[]
-  }
-  error?: string
-  retryCount: number
-  scheduledTime?: Date
-  nextRun?: Date
-}
-
-interface SchedulerConfig {
-  isEnabled: boolean
-  batchSize: number
-  intervalBetweenQueries: number
-  maxConcurrent: number
-  retryAttempts: number
-  retryDelay: number
-  autoRetryOnFailure: boolean
-}
-
-interface MonitorStats {
-  totalExecutions: number
-  successRate: number
-  averageResponseTime: number
-  totalResults: number
-  activeQueries: number
-  queuedQueries: number
-  failedQueries: number
-  uptime: number
-}
 
 export default function QueryMonitor() {
   const { user } = useAuth()
   
+   const { call: secureCall, loading: apiLoading, error: apiError } = useSecureApi({
+    showErrorToast: true
+  })
   // Store selectors
   const queries = useQueriesStore(state => state.queries) || []
   const runQuery = useQueriesStore(state => state.runQuery)
@@ -139,19 +102,18 @@ export default function QueryMonitor() {
   }, [autoRefresh, refreshInterval, user?.$id, fetchQueries, fetchAllSnapshots])
 
   // ✅ NEW: Scheduler control functions
-  const refreshSchedulerStatus = async () => {
-    try {
-      const response = await fetch('/api/scheduler/start')
-      const result = await response.json()
-      setSchedulerStatus(result.status)
-    } catch (error) {
-      console.error('Failed to get scheduler status:', error)
-    }
+ const refreshSchedulerStatus = async () => {
+  try {
+    const result = await secureCall('GET', '/scheduler/start')
+    setSchedulerStatus(result.status)
+  } catch (error) {
+    console.error('Failed to get scheduler status:', error)
   }
+}
 
   const handleStartScheduler = async () => {
     try {
-      const response = await fetch('/api/scheduler/start', { method: 'POST' })
+      const response = await secureCall('POST', '/scheduler/start')
       const result = await response.json()
       
       if (result.success) {
@@ -165,21 +127,20 @@ export default function QueryMonitor() {
     }
   }
 
-  const handleStopScheduler = async () => {
-    try {
-      const response = await fetch('/api/scheduler/stop', { method: 'POST' })
-      const result = await response.json()
-      
-      if (result.success) {
-        toast.success('Server scheduler stopped')
-        await refreshSchedulerStatus()
-      } else {
-        toast.error(result.error || 'Failed to stop scheduler')
-      }
-    } catch (error) {
-      toast.error('Failed to stop scheduler')
+ const handleStopScheduler = async () => {
+  try {
+    const result = await secureCall('POST', '/scheduler/stop')
+    
+    if (result.success) {
+      toast.success('Server scheduler stopped')
+      await refreshSchedulerStatus()
+    } else {
+      toast.error(result.error || 'Failed to stop scheduler')
     }
+  } catch (error) {
+      toast.error('Failed to stop scheduler')
   }
+}
 
   const handleRunSelected = () => {
     const selectedQueries = Array.from(executions.keys())

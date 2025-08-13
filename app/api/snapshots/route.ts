@@ -1,3 +1,4 @@
+// /app/api/snapshots
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database-service"
 import { getCurrentUser } from "@/app/server/auth"

@@ -1,3 +1,4 @@
+// app/drift/[queryId]/page.tsx
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -9,6 +10,7 @@ import { DriftTimeline } from "@/components/driftAnalyzer/drift-timeline";
 import { DriftBadge } from "@/components/driftAnalyzer/drift-badge";
 import { Loader2, AlertTriangle, ArrowLeft, Calendar, Activity, Clock, Zap, Hash } from "lucide-react";
 import { useAuth } from "@/lib/contexts/auth-context";
+import { useSecureApi } from '@/lib/use-secureApi'
 import type { DriftAnalysisResult } from "@/lib/type";
 
 export default function QueryDriftPage({ params }: { params: { queryid: string } }) {
@@ -21,42 +23,39 @@ export default function QueryDriftPage({ params }: { params: { queryid: string }
   const handleBack = () => {
     router.push("/drift");
   };
+   const { call: secureCall, loading: apiLoading, error: apiError } = useSecureApi({
+    showErrorToast: true
+  })
 
-  useEffect(() => {
-    if (!userId || !params.queryid) return;
+ // app/drift/[queryId]/page.tsx
+useEffect(() => {
+  if (!userId || !params.queryid) return;
 
-    const fetchDriftData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  const fetchDriftData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-        const response = await fetch(`/api/drift/${params.queryid}`, {
-          credentials: 'include'
-        });
+      // ✅ Use getData instead of call
+      console.log("Fetching drift data for queryId&&&&&&&&&P----[][]-09876:", params.queryid);
+      const data = await secureCall<DriftAnalysisResult>('GET',`/drift/${params.queryid}`);
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to fetch drift data');
-        }
-
-        const data = await response.json();
-        
-        // ✅ FIXED: Ensure we have proper data structure
-        if (data && typeof data === 'object') {
-          setDriftResult(data);
-        } else {
-          throw new Error('Invalid response format');
-        }
-      } catch (err) {
-        console.error('Failed to fetch drift data:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load drift data');
-      } finally {
-        setLoading(false);
+      if (data && typeof data === 'object') {
+        setDriftResult(data);
+      } else {
+        throw new Error('Invalid response format');
       }
-    };
+    } catch (err) {
+      console.error('Failed to fetch drift data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load drift data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchDriftData();
-  }, [userId, params.queryid]);
+  fetchDriftData();
+}, [userId, params.queryid]); // Add getData to dependencies
+
 
   if (loading) {
     return (

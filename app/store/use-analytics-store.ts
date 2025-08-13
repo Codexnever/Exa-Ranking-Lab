@@ -1,27 +1,40 @@
-// hooks/use-analytics-store.ts
+// hooks/use-analytics-store.ts - FIXED VERSION
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { toast } from "sonner";
-import type { AnalyticsData, RankingSnapshot } from "@/lib/type";
-import { AnalyticsService } from "@/app/services/analytics-service";
+import type { AnalyticsData, RankingSnapshot, QueryConfig } from "@/lib/type";
+import { AppwriteAnalyticsService } from "@/app/services/AppwriteAnalyticsService";
+import { WeaviateAnalyticsService } from "@/app/services/weaviate-analytics-service";
+import { WeaviateService } from "@/app/services/weaviate-service";
 
 interface AnalyticsState {
   analytics: AnalyticsData | null;
   isLoading: boolean;
   error: string | null;
-  lastCalculationHash: string; // Add to prevent unnecessary recalculations
+  lastCalculationHash: string;
+  dataSource: 'appwrite' | 'weaviate';
+  
+  // Service instances
+  appwriteService: AppwriteAnalyticsService;
+  weaviateService: WeaviateAnalyticsService;
 }
 
 interface AnalyticsActions {
-  fetchAnalytics: (userId?: string, forceRefetch?: boolean) => Promise<void>;
+  fetchAnalytics: (userId?: string, timeRangeMs?: number, queries?: QueryConfig[], forceRefetch?: boolean) => Promise<void>;
   clearAnalytics: () => void;
-  calculateAnalyticsFromSnapshots: (snapshots: RankingSnapshot[]) => void;
-  refetchOnFocus: () => void;
+  calculateAnalyticsFromSnapshots: (snapshots: RankingSnapshot[], queries?: QueryConfig[]) => void;
+  setDataSource: (source: 'appwrite' | 'weaviate') => void;
+  
+  // Dual-source methods
+  getAppwriteAnalytics: (userId: string, timeRangeMs?: number, queries?: QueryConfig[]) => Promise<AnalyticsData>;
+  getWeaviateAnalytics: (userId: string, timeRangeMs?: number, queries?: QueryConfig[]) => Promise<any>;
 }
 
 type AnalyticsStore = AnalyticsState & AnalyticsActions;
 
-const analyticsService = new AnalyticsService(false);
+// Initialize services
+const weaviateServiceInstance = new WeaviateService();
+const appwriteService = new AppwriteAnalyticsService(false);
+const weaviateService = new WeaviateAnalyticsService(false, weaviateServiceInstance);
 
 export const useAnalyticsStore = create<AnalyticsStore>()(
   persist(
@@ -30,53 +43,117 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
       isLoading: false,
       error: null,
       lastCalculationHash: "",
+      dataSource: 'appwrite',
+      
+      // Service instances
+      appwriteService,
+      weaviateService,
 
-      fetchAnalytics: async (userId?: string, forceRefetch = false) => {
-        if (get().analytics && !forceRefetch) return;
+      setDataSource: (source: 'appwrite' | 'weaviate') => {
+        set({ dataSource: source });
+        // Clear analytics when switching to trigger fresh fetch
+        if (source !== get().dataSource) {
+          set({ analytics: null, lastCalculationHash: "" });
+        }
+      },
+
+      fetchAnalytics: async (userId?: string, timeRangeMs?: number, queries: QueryConfig[] = [], forceRefetch = false) => {
+        const { analytics, dataSource } = get();
+        
+        if (analytics && !forceRefetch) return;
+        
         set({ isLoading: true, error: null });
+        
         try {
-          const url = userId ? `/api/analytics?userId=${userId}` : "/api/analytics";
-          const response = await fetch(url);
-          if (!response.ok) throw new Error("Failed to fetch analytics");
-          const analytics = await response.json();
-          set({ analytics, isLoading: false, error: null });
+          let analyticsData: AnalyticsData;
+
+          if (dataSource === 'weaviate') {
+            // Use Weaviate analytics service
+            analyticsData = await get().getWeaviateAnalytics(userId || '', timeRangeMs, queries);
+          } else {
+            // Use Appwrite analytics service
+            if (userId && timeRangeMs) {
+              analyticsData = await get().getAppwriteAnalytics(userId, timeRangeMs, queries);
+            } else {
+              // Fallback to API for backward compatibility
+              const url = userId ? `/api/analytics?userId=${userId}` : "/api/analytics";
+              const response = await fetch(url);
+              if (!response.ok) throw new Error("Failed to fetch analytics");
+              analyticsData = await response.json();
+            }
+          }
+
+          set({ 
+            analytics: analyticsData, 
+            isLoading: false, 
+            error: null 
+          });
+
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to fetch analytics";
           set({ error: message, isLoading: false });
-          toast.error(`Failed to fetch analytics: ${message}`);
           
-          const localSnapshots: RankingSnapshot[] = JSON.parse(localStorage.getItem('snapshots') || '[]');
-          get().calculateAnalyticsFromSnapshots(localSnapshots);
+          // ✅ FIXED: Proper client-side check and error handling
+          if (typeof window !== 'undefined') {
+            // Dynamic import for client-side only
+            import('sonner').then(({ toast }) => {
+              toast.error(`Failed to fetch analytics: ${message}`);
+            }).catch(console.error);
+            
+            // Fallback to local calculation
+            try {
+              const localSnapshots: RankingSnapshot[] = JSON.parse(localStorage.getItem('snapshots') || '[]');
+              get().calculateAnalyticsFromSnapshots(localSnapshots, queries);
+            } catch (localError) {
+              console.error('Failed to load local snapshots:', localError);
+            }
+          }
         }
+      },
+
+      getAppwriteAnalytics: async (userId: string, timeRangeMs: number = 30 * 24 * 60 * 60 * 1000, queries: QueryConfig[] = []) => {
+        const { appwriteService } = get();
+        return await appwriteService.getAnalytics(userId, timeRangeMs, queries);
+      },
+
+      getWeaviateAnalytics: async (userId: string, timeRangeMs: number = 30 * 24 * 60 * 60 * 1000, queries: QueryConfig[] = []) => {
+        const { weaviateService } = get();
+        return await weaviateService.getSemanticAnalyticsMerged(userId, timeRangeMs, queries);
       },
 
       clearAnalytics: () => {
         set({ analytics: null, error: null, lastCalculationHash: "" });
       },
 
-      calculateAnalyticsFromSnapshots: (snapshots: RankingSnapshot[]) => {
+      calculateAnalyticsFromSnapshots: (snapshots: RankingSnapshot[], queries: QueryConfig[] = []) => {
         try {
-          // Create a hash of snapshot IDs to prevent unnecessary recalculations
           const snapshotHash = snapshots.map(s => s.id).sort().join(',');
           const currentHash = get().lastCalculationHash;
           
-          // Only recalculate if snapshots actually changed
           if (snapshotHash === currentHash && snapshots.length > 0) {
-            return; // Skip calculation if data hasn't changed
+            return;
           }
 
-          const analytics = analyticsService.calculateAnalyticsFromSnapshots(snapshots);
+          const { appwriteService } = get();
+          const analytics = appwriteService.calculateAnalyticsFromSnapshots(snapshots, queries);
+          
           set({ 
             analytics, 
             lastCalculationHash: snapshotHash 
           });
           
-          // Remove the excessive logging
-          // console.log("[AnalyticsStore] Recalculated analytics with deduplicated data:", analytics);
         } catch (error) {
           console.error("Local calculation failed:", error);
           set({ 
             analytics: {
+              timeRangeMs: 0,
+              filteredSnapshots: [],
+              rankingTrendData: [],
+              categoryDistribution: [],
+              successRateByHour: [],
+              performanceData: [],
+              topPerformingQueries: [],
+              queryPerformanceStats: [],
               rankingStability: 0,
               volatilityIndex: 0,
               domainDiversity: 0,
@@ -91,18 +168,13 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
           });
         }
       },
-
-      refetchOnFocus: () => {
-        const handler = () => get().fetchAnalytics(undefined, true);
-        window.addEventListener('focus', handler);
-        return () => window.removeEventListener('focus', handler);
-      },
     }),
     {
       name: 'analytics-storage',
       partialize: (state) => ({ 
         analytics: state.analytics,
-        lastCalculationHash: state.lastCalculationHash 
+        lastCalculationHash: state.lastCalculationHash,
+        dataSource: state.dataSource
       }),
     }
   )

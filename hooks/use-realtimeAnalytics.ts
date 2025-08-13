@@ -4,7 +4,7 @@
 import { useEffect } from "react";
 import { client } from "@/app/server/appwrite";
 import { useSnapshotsStore } from "@/app/store";
-import { useAnalyticsStore } from "@/app/store";
+import { useAnalyticsStore } from '@/app/store';
 import { useAuth } from "@/lib/contexts/auth-context";
 import { useConnectionHealth } from "@/components/providers/ConnectionHealthProvider";
 import { DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite";

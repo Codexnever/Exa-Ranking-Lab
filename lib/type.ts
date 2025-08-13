@@ -85,6 +85,14 @@ export interface UserFeedback {
   createdAt: Date
 }
 
+export interface FeedbackFormData {
+  resultUrl: string
+  feedbackType: "relevance" | "quality" | "freshness" | "authority"
+  expectedPosition: string
+  rating: number
+  comment: string
+}
+
 export interface AnalyticsData {
   rankingStability: number;
   volatilityIndex: number;
@@ -201,4 +209,55 @@ export interface TrendPoint {
   anomalyType?: 'high_volatility' | 'sudden_drop' | 'sudden_rise' | 'position_spike';
   anomalyScore?: number;
   volatilityThreshold?: number;
+}
+
+export interface QueryExecution {
+  id: string
+  queryId: string
+  status: 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled'
+  progress: number
+  startTime?: number
+  endTime?: number
+  duration?: number
+  results?: {
+    totalResults: number
+    responseTime: number
+    timestamp: Date
+    averagePosition?: number
+    topDomains: string[]
+  }
+  error?: string
+  retryCount: number
+  scheduledTime?: Date
+  nextRun?: Date
+}
+
+export interface SchedulerConfig {
+  isEnabled: boolean
+  batchSize: number
+  intervalBetweenQueries: number
+  maxConcurrent: number
+  retryAttempts: number
+  retryDelay: number
+  autoRetryOnFailure: boolean
+}
+
+export interface MonitorStats {
+  totalExecutions: number
+  successRate: number
+  averageResponseTime: number
+  totalResults: number
+  activeQueries: number
+  queuedQueries: number
+  failedQueries: number
+  uptime: number
+}
+
+export interface SecurityContext {
+  user: any
+  sessionId: string
+  ip: string
+  userAgent: string
+  endpoint: string
+  method: string
 }

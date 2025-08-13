@@ -15,22 +15,8 @@ import type { RankingSnapshot, SearchResult, QueryConfig } from "@/lib/type"
 import { useAuth } from "@/lib/contexts/auth-context"
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import type { FeedbackFormData } from "@/lib/type"
 
-// ✅ Enhanced TypeScript interfaces
-interface FeedbackFormData {
-  resultUrl: string
-  feedbackType: "relevance" | "quality" | "freshness" | "authority"
-  expectedPosition: string
-  rating: number
-  comment: string
-}
-
-interface FeedbackStats {
-  totalFeedback: number
-  averageRating: number
-  topIssues: string[]
-  recentSubmissions: number
-}
 
 const formatDate = (dateString: string | Date) => {
   const date = typeof dateString === 'string' ? new Date(dateString) : dateString

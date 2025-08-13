@@ -9,9 +9,12 @@ interface DecodedJWT {
 export async function POST(req: Request) {
   const { jwt } = await req.json();
 
-  if (!jwt) {
-    return NextResponse.json({ error: "Missing JWT" }, { status: 400 });
-  }
+   if (!jwt || typeof jwt !== 'string') {
+      return NextResponse.json(
+        { error: "Invalid JWT provided" }, 
+        { status: 400 }
+      );
+    }
 
   // Validate JWT (basic check)
   try {
