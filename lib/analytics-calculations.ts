@@ -3,25 +3,25 @@ import { ContentCoherenceResult, SemanticStabilityResult, StatisticalValidationR
 
 
 // Content Coherence Calculations
-// export function extractTopWords(documents: Array<{content: string}>, count: number = 20): string[] {
-//   const wordFreq = new Map<string, number>();
+export function extractTopWords(documents: Array<{content: string}>, count: number = 20): string[] {
+  const wordFreq = new Map<string, number>();
   
-//   documents.forEach(doc => {
-//     const words = doc.content.toLowerCase()
-//       .replace(/[^\w\s]/g, '')
-//       .split(/\s+/)
-//       .filter(word => word.length > 3);
+  documents.forEach(doc => {
+    const words = doc.content.toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .split(/\s+/)
+      .filter(word => word.length > 3);
     
-//     words.forEach(word => {
-//       wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
-//     });
-//   });
+    words.forEach(word => {
+      wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
+    });
+  });
   
-//   return Array.from(wordFreq.entries())
-//     .sort((a, b) => b[1] - a[1])
-//     .slice(0, count)
-//     .map(([word]) => word);
-// }
+  return Array.from(wordFreq.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, count)
+    .map(([word]) => word);
+}
 
 export function countCooccurrence(word1: string, word2: string, documents: Array<{content: string}>): number {
   let count = 0;
