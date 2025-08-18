@@ -38,9 +38,10 @@ export class WeaviateService {
   private readonly MAX_CACHE_SIZE = 10000;
 
  constructor() {
- const weaviateURL = process.env.WEAVIATE_URL || "mtockgprtsluerirm6bsq.c0.asia-southeast1.gcp.weaviate.cloud";
- const weaviateApiKey = process.env.WEAVIATE_API_KEY || "";
+ const weaviateURL = process.env.NEXT_PUBLIC_WEAVIATE_URL || "mtockgprtsluerirm6bsq.c0.asia-southeast1.gcp.weaviate.cloud";
+ const weaviateApiKey = process.env.NEXT_PUBLIC_WEAVIATE_API_KEY || "";
 
+if(!weaviateApiKey)throw new Error("WEAVIATEAPI_KEY not set");
 
 if (!weaviateURL) throw new Error("WEAVIATE_URL not set");
 

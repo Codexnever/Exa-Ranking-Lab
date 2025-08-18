@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { WeaviateService } from "@/app/services/weaviate-service";
-import { WeaviateAnalyticsService } from "@/app/services/weaviate-analytics-service";
+import { EnhancedAnalyticsService } from "@/app/services/enhanced-analytics-service";
 
 export async function GET(req: Request) {
   try {
@@ -23,10 +23,10 @@ export async function GET(req: Request) {
 
     // Initialize services
     const weaviateService = new WeaviateService();
-    const analyticsService = new WeaviateAnalyticsService(false, weaviateService);
+    const analyticsService = new EnhancedAnalyticsService(false, weaviateService);
 
-    // Get semantic analytics data
-    const data = await analyticsService.getSemanticAnalyticsMerged(userId, timeRangeMs);
+    // Get ENHANCED semantic analytics with enterprise calculations
+    const data = await analyticsService.getSemanticAnalytics(userId, timeRangeMs);
 
     return NextResponse.json({
       success: true,

@@ -1,16 +1,42 @@
 // app/services/analytics-service.ts
 import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite";
 import { Query } from "appwrite";
-import type { AnalyticsData, RankingSnapshot } from "@/lib/type";
+import type { 
+  EnhancedAnalyticsData, 
+  AnalyticsData, 
+  RankingSnapshot, 
+  StatisticalValidationResult, 
+  DataQualityResult,
+  ResponseTimeStats,
+  ExecutionFrequency,
+  DataFreshness,
+  ComplexityMetrics
+} from "@/lib/type";
 import { loadFromStorage, transformSnapshotDocument } from "./db-utils";
+import { 
+  calculateUMassCoherence,
+  calculateSemanticStability,
+  calculateStandardDeviation,   
+} from "@/lib/analytics-calculations";
 
 export class AnalyticsService {
   private isLocal: boolean;
+  
   constructor(isLocal: boolean) {
     this.isLocal = isLocal;
   }
 
-  async getAnalytics(userId?: string, timeRangeMs?: number): Promise<AnalyticsData> {
+  // FIXED: Remove getTimeRangeString from interface, make it a regular method
+  protected getTimeRangeString(timeRangeMs: number): string {
+    const days = Math.floor(timeRangeMs / (24 * 60 * 60 * 1000));
+    if (days >= 365) return '1y';
+    if (days >= 90) return '90d';
+    if (days >= 30) return '30d';
+    if (days >= 7) return '7d';
+    return '24h';
+  }
+
+  async getAnalytics(userId?: string, timeRangeMs?: number): Promise<EnhancedAnalyticsData> {
     try {
       let snapshots: RankingSnapshot[] = [];
 
@@ -27,7 +53,9 @@ export class AnalyticsService {
           const cutoff = new Date(Date.now() - timeRangeMs).toISOString();
           queries.push(Query.greaterThan("timestamp", cutoff));
         }
-        const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SNAPSHOTS, queries);
+        
+        const tempid = "683382eb0006b9130dc5";
+        const response = await databases.listDocuments(DATABASE_ID, tempid, queries);
         snapshots = response.documents
           .map((doc) => {
             try {
@@ -42,16 +70,335 @@ export class AnalyticsService {
 
       console.log(`[AnalyticsService] Fetched ${snapshots.length} snapshots for user ${userId || 'all'}`);
 
-      return this.calculateAnalyticsFromSnapshots(snapshots);
+      return this.calculateEnhancedAnalyticsFromSnapshots(snapshots);
     } catch (error) {
       console.error("Failed to get analytics:", error);
-      return this.getDefaultAnalytics();
+      return this.getDefaultEnhancedAnalytics();
     }
   }
 
   /**
+   * Enhanced analytics calculation with enterprise-level metrics
+   */
+  calculateEnhancedAnalyticsFromSnapshots(snapshots: RankingSnapshot[]): EnhancedAnalyticsData {
+    if (!snapshots || snapshots.length === 0) {
+      console.warn("[AnalyticsService] No snapshots for calculation.");
+      return this.getDefaultEnhancedAnalytics();
+    }
+
+    // Get base analytics first
+    const baseAnalytics = this.calculateAnalyticsFromSnapshots(snapshots);
+    
+    // Calculate enhanced enterprise metrics
+    const enhancedMetrics = this.calculateEnterpriseMetrics(snapshots);
+    
+    // FIXED: Properly spread and combine all properties
+    return {
+      ...baseAnalytics,
+      ...enhancedMetrics,
+      // Add required properties for EnhancedAnalyticsData
+      timeRangeMs: 0, // Will be set by caller if needed
+      filteredSnapshots: snapshots,
+      rankingTrendData: [],
+      categoryDistribution: [],
+      successRateByHour: [],
+      performanceData: [],
+      topPerformingQueries: [],
+      queryPerformanceStats: [],
+      calculatedAt: new Date().toISOString(),
+      dataSourceType: 'appwrite'
+    };
+  }
+
+  /**
+   * Calculate enterprise-level metrics
+   */
+protected calculateEnterpriseMetrics(snapshots: RankingSnapshot[]): Partial<EnhancedAnalyticsData> {
+  try {
+    // Content Coherence Calculation
+    const documents = this.extractDocumentsFromSnapshots(snapshots);
+    const contentCoherence = documents.length > 0 ? 
+      calculateUMassCoherence(documents) : undefined; // FIXED: Use undefined instead of null
+
+    // Semantic Stability Calculation
+    const timeSeriesData = this.extractTimeSeriesFromSnapshots(snapshots);
+    const semanticStability = timeSeriesData.length > 1 ? 
+      calculateSemanticStability(timeSeriesData) : undefined; // FIXED: Use undefined instead of null
+
+    // Data Quality Assessment
+    const dataQuality = this.assessDataQuality(snapshots);
+
+    // Statistical Performance Metrics
+    const responseTimeStats = this.calculateResponseTimeStatistics(snapshots);
+    const executionFrequency = this.calculateExecutionFrequency(snapshots);
+    const dataFreshness = this.calculateDataFreshness(snapshots);
+    const complexityMetrics = this.calculateComplexityMetrics(snapshots);
+
+    return {
+      contentCoherence,
+      semanticStability,
+      dataQuality,
+      responseTimeStats,
+      executionFrequency,
+      dataFreshness,
+      complexityMetrics,
+      isAppwriteSource: true
+    };
+  } catch (error) {
+    console.error("[AnalyticsService] Enterprise metrics calculation failed:", error);
+    return {};
+  }
+}
+
+  /**
+   * Extract documents for coherence calculation
+   */
+// Add to your extractDocumentsFromSnapshots method
+protected extractDocumentsFromSnapshots(snapshots: RankingSnapshot[]): Array<{title: string, content: string, vector?: number[]}> {
+  const documents: Array<{title: string, content: string, vector?: number[]}> = [];
+  
+  snapshots.forEach(snapshot => {
+    snapshot.results?.forEach(result => {
+      if (result.title && result.snippet) {
+        documents.push({
+          title: result.title,
+          content: result.snippet,
+          vector: result.vector // Include vector if available from Weaviate
+        });
+      }
+    });
+  });
+  
+  return documents;
+}
+
+// Update extractTimeSeriesFromSnapshots to include vectors
+protected extractTimeSeriesFromSnapshots(snapshots: RankingSnapshot[]): Array<{timestamp: number, content: string, vectors?: number[][]}> {
+  return snapshots
+    .map(snapshot => {
+      const content = snapshot.results
+        ?.map(result => `${result.title || ''} ${result.snippet || ''}`)
+        .join(' ') || '';
+      
+      const vectors = snapshot.results
+        ?.map(result => result.vector)
+        .filter(Boolean) as number[][] || [];
+      
+      return {
+        timestamp: new Date(snapshot.timestamp).getTime(),
+        content: content.trim(),
+        vectors: vectors.length > 0 ? vectors : undefined
+      };
+    })
+    .filter(item => item.content.length > 0)
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+  /**
+   * Assess data quality
+   */
+  protected assessDataQuality(snapshots: RankingSnapshot[]): DataQualityResult {
+    const now = Date.now();
+    let validSnapshots = 0;
+    let completeSnapshots = 0;
+    let consistentSnapshots = 0;
+    let anomalyCount = 0;
+    
+    const ages: number[] = [];
+    
+    snapshots.forEach(snapshot => {
+      // Validity check
+      if (snapshot.results && Array.isArray(snapshot.results)) {
+        validSnapshots++;
+      }
+      
+      // Completeness check
+      if (snapshot.results?.length > 0 && 
+          snapshot.results.every(r => r.url && r.title)) {
+        completeSnapshots++;
+      }
+      
+      // Consistency check (proper position ordering)
+      if (snapshot.results?.every((result, index) => 
+          result.position === index + 1 || result.position > 0)) {
+        consistentSnapshots++;
+      }
+      
+      // Age calculation
+      ages.push(now - new Date(snapshot.timestamp).getTime());
+      
+      // Simple anomaly detection (unusual result counts)
+      if (snapshot.results && (snapshot.results.length === 0 || snapshot.results.length > 50)) {
+        anomalyCount++;
+      }
+    });
+    
+    const totalSnapshots = snapshots.length;
+    const avgAge = ages.length > 0 ? ages.reduce((sum, age) => sum + age, 0) / ages.length : 0;
+    
+    return {
+      completeness: totalSnapshots > 0 ? (completeSnapshots / totalSnapshots) * 100 : 0,
+      accuracy: totalSnapshots > 0 ? (validSnapshots / totalSnapshots) * 100 : 0,
+      consistency: totalSnapshots > 0 ? (consistentSnapshots / totalSnapshots) * 100 : 0,
+      freshness: Math.max(0, 100 - (avgAge / (24 * 60 * 60 * 1000)) * 10), // Deduct 10 points per day
+      validity: totalSnapshots > 0 ? (validSnapshots / totalSnapshots) * 100 : 0,
+      anomalyCount,
+      assessedAt: now
+    };
+  }
+
+  /**
+   * Calculate response time statistics
+   */
+  protected calculateResponseTimeStatistics(snapshots: RankingSnapshot[]): ResponseTimeStats {
+    const responseTimes = snapshots
+      .map(s => s.metadata?.responseTime)
+      .filter((time): time is number => typeof time === 'number');
+
+    if (responseTimes.length === 0) {
+      return { min: 0, max: 0, mean: 0, median: 0, stdDev: 0, percentile95: 0 };
+    }
+
+    const sorted = [...responseTimes].sort((a, b) => a - b);
+    const mean = responseTimes.reduce((sum, val) => sum + val, 0) / responseTimes.length;
+    const stdDev = calculateStandardDeviation(responseTimes);
+
+    return {
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      mean: parseFloat(mean.toFixed(2)),
+      median: sorted[Math.floor(sorted.length / 2)],
+      stdDev: parseFloat(stdDev.toFixed(2)),
+      percentile95: sorted[Math.floor(sorted.length * 0.95)] || sorted[sorted.length - 1],
+    };
+  }
+
+  /**
+   * Calculate execution frequency
+   */
+  protected calculateExecutionFrequency(snapshots: RankingSnapshot[]): ExecutionFrequency {
+  const executionTimes = snapshots
+    .map(s => new Date(s.timestamp).getTime())
+    .sort((a, b) => a - b);
+
+  if (executionTimes.length < 2) {
+    return { 
+      frequency: 0, 
+      efficiency: 100, 
+      pattern: 'insufficient_data', 
+      avgInterval: 0 // FIXED: Always provide avgInterval
+    };
+  }
+
+     const intervals = [];
+  for (let i = 1; i < executionTimes.length; i++) {
+    intervals.push(executionTimes[i] - executionTimes[i - 1]);
+  }
+
+  const avgInterval = intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
+  const frequency = avgInterval > 0 ? 1000 * 60 * 60 * 24 / avgInterval : 0;
+  
+  // Calculate efficiency based on interval consistency
+  const intervalStdDev = calculateStandardDeviation(intervals);
+  const efficiency = Math.max(0, 100 - (intervalStdDev / avgInterval) * 100);
+
+  return {
+    frequency: parseFloat(frequency.toFixed(2)),
+    efficiency: parseFloat(efficiency.toFixed(2)),
+    pattern: this.determineExecutionPattern(intervals),
+    avgInterval: parseFloat(avgInterval.toFixed(2)) // FIXED: Always include avgInterval
+  };
+}
+  /**
+   * Calculate data freshness
+   */
+  protected calculateDataFreshness(snapshots: RankingSnapshot[]): DataFreshness {
+    const now = Date.now();
+    const ages = snapshots.map(s => now - new Date(s.timestamp).getTime());
+    
+    const avgAge = ages.length > 0 ? ages.reduce((sum, age) => sum + age, 0) / ages.length : 0;
+    const maxAge = ages.length > 0 ? Math.max(...ages) : 0;
+    
+    // Freshness score (0-100, where 100 is very fresh)
+    const freshnessScore = Math.max(0, 100 - (avgAge / (24 * 60 * 60 * 1000)) * 10);
+    
+    return {
+      avgAgeHours: parseFloat((avgAge / (60 * 60 * 1000)).toFixed(2)),
+      maxAgeHours: parseFloat((maxAge / (60 * 60 * 1000)).toFixed(2)),
+      freshnessScore: parseFloat(freshnessScore.toFixed(2)),
+      stalenessIndicator: freshnessScore < 50 ? 'stale' : freshnessScore < 80 ? 'moderate' : 'fresh',
+    };
+  }
+
+  /**
+   * Calculate complexity metrics
+   */
+  protected calculateComplexityMetrics(snapshots: RankingSnapshot[]): ComplexityMetrics {
+    const complexityScores = snapshots.map(snapshot => {
+      const resultCount = snapshot.results?.length || 0;
+      const responseTime = snapshot.metadata?.responseTime || 0;
+      const uniqueDomains = new Set(snapshot.results?.map(r => r.domain).filter(Boolean)).size;
+      
+      // Complexity score based on multiple factors
+      let complexity = 0;
+      complexity += Math.min(resultCount / 10, 5); // Result count factor (max 5)
+      complexity += Math.min(responseTime / 1000, 3); // Response time factor (max 3)
+      complexity += Math.min(uniqueDomains / 5, 2); // Domain diversity factor (max 2)
+      
+      return complexity;
+    });
+
+    const avgComplexityScore = complexityScores.length > 0
+      ? complexityScores.reduce((sum, score) => sum + score, 0) / complexityScores.length
+      : 0;
+
+    return {
+      avgComplexityScore: parseFloat(avgComplexityScore.toFixed(2)),
+      complexityDistribution: this.calculateStatistics(complexityScores),
+      highComplexityQueries: snapshots.filter((_, i) => complexityScores[i] > avgComplexityScore * 1.5).length,
+    };
+  }
+
+  /**
+   * Determine execution pattern based on intervals
+   */
+  protected determineExecutionPattern(intervals: number[]): string {
+    if (intervals.length < 3) return 'insufficient_data';
+    
+    const avgInterval = intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
+    const stdDev = calculateStandardDeviation(intervals);
+    const coefficientOfVariation = stdDev / avgInterval;
+    
+    if (coefficientOfVariation < 0.1) return 'very_regular';
+    if (coefficientOfVariation < 0.3) return 'regular';
+    if (coefficientOfVariation < 0.6) return 'irregular';
+    return 'highly_irregular';
+  }
+
+  /**
+   * Calculate statistics for arrays
+   */
+  protected calculateStatistics(values: number[]) {
+    if (values.length === 0) {
+      return { min: 0, max: 0, mean: 0, median: 0, stdDev: 0, percentile95: 0 };
+    }
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+    const stdDev = calculateStandardDeviation(values);
+    
+    return {
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      mean: parseFloat(mean.toFixed(2)),
+      median: sorted[Math.floor(sorted.length / 2)],
+      stdDev: parseFloat(stdDev.toFixed(2)),
+      percentile95: sorted[Math.floor(sorted.length * 0.95)] || sorted[sorted.length - 1],
+    };
+  }
+
+  /**
    * Calculates analytics from snapshots with proper deduplication handling
-   * This method recalculates metrics that are affected by deduplication
    */
   calculateAnalyticsFromSnapshots(snapshots: RankingSnapshot[]): AnalyticsData {
     if (!snapshots || snapshots.length === 0) {
@@ -62,7 +409,7 @@ export class AnalyticsService {
     // Store original response times before any processing
     const originalResponseTimes = snapshots
       .filter(snap => snap.metadata?.responseTime)
-      .map(snap => snap.metadata.responseTime);
+      .map(snap => snap.metadata!.responseTime!);
 
     const snapshotsByQuery: Record<string, RankingSnapshot[]> = {};
     const seenUrls = new Set<string>();
@@ -71,10 +418,8 @@ export class AnalyticsService {
 
     // Process each snapshot
     for (const snap of snapshots) {
-      if (!snap.queryId) continue;
-      if (!snap.results || !Array.isArray(snap.results)) continue;
-      if (!snap.metadata || typeof snap.metadata.responseTime !== "number") continue;
-
+      if (!snap.queryId || !snap.results || !Array.isArray(snap.results)) continue;
+      
       // Group by query for stability calculations
       if (!snapshotsByQuery[snap.queryId]) snapshotsByQuery[snap.queryId] = [];
       snapshotsByQuery[snap.queryId].push(snap);
@@ -84,36 +429,38 @@ export class AnalyticsService {
         if (!result.url) continue;
         
         try {
-          // Domain diversity calculation (will change with deduplication)
+          // Domain diversity calculation
           const domain = new URL(result.url).hostname;
           domainSet.add(domain);
           
-          // URL tracking for content discovery (will change with deduplication)
+          // URL tracking for content discovery
           seenUrls.add(result.url);
           
-          // Position tracking for trend analysis (will change with deduplication)
-          allPositions.push(result.position);
+          // Position tracking for trend analysis
+          if (typeof result.position === 'number') {
+            allPositions.push(result.position);
+          }
         } catch (e) {
           console.warn("Invalid URL in result:", e);
         }
       }
     }
 
-    // Calculate metrics that are AFFECTED by deduplication
+    // Calculate metrics
     const { stabilityScore, volatilityIndex } = this.calculateRankingMetrics(snapshotsByQuery);
-    const domainDiversity = domainSet.size; // CHANGES with deduplication
-    const newContentDiscovery = snapshots.length > 0 ? seenUrls.size / snapshots.length : 0; // CHANGES
+    const domainDiversity = domainSet.size;
+    const newContentDiscovery = snapshots.length > 0 ? seenUrls.size / snapshots.length : 0;
 
     // Calculate metrics that are NOT affected by deduplication
     const avgResponseTime = originalResponseTimes.length > 0 
       ? originalResponseTimes.reduce((sum, time) => sum + time, 0) / originalResponseTimes.length 
-      : 0; // UNCHANGED by deduplication
+      : 0;
 
     const querySuccessRate = snapshots.length > 0 
-      ? (snapshots.filter(s => s.results.length > 0).length / snapshots.length) * 100 
-      : 0; // UNCHANGED by deduplication
+      ? (snapshots.filter(s => (s.results?.length || 0) > 0).length / snapshots.length) * 100 
+      : 0;
 
-    // Calculate trend metrics (affected by deduplication)
+    // Calculate trend metrics
     const trendSlope = this.calculateTrendSlope(allPositions);
     const predictedPosition = this.predictTrend(allPositions);
     const isAnomaly = this.detectAnomalies(snapshotsByQuery);
@@ -132,10 +479,9 @@ export class AnalyticsService {
   }
 
   /**
-   * Calculates ranking stability and volatility metrics
-   * These metrics CHANGE with deduplication as they depend on position comparisons
+   * Calculate ranking stability and volatility metrics
    */
-  private calculateRankingMetrics(snapshotsByQuery: Record<string, RankingSnapshot[]>) {
+  protected calculateRankingMetrics(snapshotsByQuery: Record<string, RankingSnapshot[]>) {
     let totalRankChanges = 0;
     let totalComparisons = 0;
 
@@ -174,10 +520,9 @@ export class AnalyticsService {
   }
 
   /**
-   * Calculates trend slope from position data
-   * This metric CHANGES with deduplication
+   * Calculate trend slope from position data
    */
-  private calculateTrendSlope(allPositions: number[]): number {
+  protected calculateTrendSlope(allPositions: number[]): number {
     if (allPositions.length < 2) return 0;
     const firstPos = allPositions[0];
     const lastPos = allPositions[allPositions.length - 1];
@@ -185,10 +530,9 @@ export class AnalyticsService {
   }
 
   /**
-   * Predicts future ranking positions using linear regression
-   * This metric CHANGES with deduplication
+   * Predict future ranking positions using linear regression
    */
-  private predictTrend(positions: number[], forecastDays: number = 7): number {
+  protected predictTrend(positions: number[], forecastDays: number = 7): number {
     if (positions.length < 2) return positions[0] || 0;
     
     const n = positions.length;
@@ -197,21 +541,23 @@ export class AnalyticsService {
     const sumXY = positions.reduce((sum, y, i) => sum + i * y, 0);
     const sumX2 = positions.reduce((sum, _, i) => sum + i * i, 0);
     
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const denominator = n * sumX2 - sumX * sumX;
+    if (denominator === 0) return positions[0];
+    
+    const slope = (n * sumXY - sumX * sumY) / denominator;
     const intercept = (sumY - slope * sumX) / n;
     
     return intercept + slope * (n + forecastDays - 1);
   }
 
   /**
-   * Detects anomalies in ranking patterns
-   * This metric CHANGES with deduplication
+   * Detect anomalies in ranking patterns
    */
-  private detectAnomalies(snapshotsByQuery: Record<string, RankingSnapshot[]>): boolean {
+  protected detectAnomalies(snapshotsByQuery: Record<string, RankingSnapshot[]>): boolean {
     const allVolatilities: number[] = [];
 
     Object.values(snapshotsByQuery).forEach((snaps) => {
-      const positions = snaps.flatMap(s => s.results.map(r => r.position));
+      const positions = snaps.flatMap(s => s.results?.map(r => r.position).filter(p => typeof p === 'number') || []);
       if (positions.length > 0) {
         const avg = positions.reduce((sum, pos) => sum + pos, 0) / positions.length;
         const variance = positions.reduce((sum, pos) => sum + Math.pow(pos - avg, 2), 0) / positions.length;
@@ -228,9 +574,69 @@ export class AnalyticsService {
   }
 
   /**
+   * Enhanced default analytics
+   */
+protected getDefaultEnhancedAnalytics(): EnhancedAnalyticsData {
+  return {
+    timeRangeMs: 0,
+    filteredSnapshots: [],
+    rankingTrendData: [],
+    categoryDistribution: [],
+    successRateByHour: [],
+    performanceData: [],
+    topPerformingQueries: [],
+    queryPerformanceStats: [],
+    rankingStability: 0,
+    volatilityIndex: 0,
+    domainDiversity: 0,
+    avgResponseTime: 0,
+    newContentDiscovery: 0,
+    querySuccessRate: 0,
+    trendSlope: 0,
+    predictedPosition: 0,
+    isAnomaly: false,
+    contentCoherence: undefined, // FIXED: Use undefined instead of null
+    semanticStability: undefined, // FIXED: Use undefined instead of null
+    dataQuality: {
+      completeness: 0,
+      accuracy: 0,
+      consistency: 0,
+      freshness: 0,
+      validity: 0,
+      anomalyCount: 0,
+      assessedAt: Date.now()
+    },
+    responseTimeStats: {
+      min: 0, max: 0, mean: 0, median: 0, stdDev: 0, percentile95: 0
+    },
+    executionFrequency: {
+      frequency: 0, 
+      efficiency: 100, 
+      pattern: 'insufficient_data', 
+      avgInterval: 0 // FIXED: Always provide avgInterval
+    },
+    dataFreshness: {
+      avgAgeHours: 0, 
+      maxAgeHours: 0, 
+      freshnessScore: 0, 
+      stalenessIndicator: 'fresh'
+    },
+    complexityMetrics: {
+      avgComplexityScore: 0, 
+      complexityDistribution: { 
+        min: 0, max: 0, mean: 0, median: 0, stdDev: 0, percentile95: 0 
+      },
+      highComplexityQueries: 0
+    },
+    calculatedAt: new Date().toISOString(),
+    dataSourceType: 'appwrite'
+  };
+}
+
+  /**
    * Returns default analytics when no data is available
    */
-  private getDefaultAnalytics(): AnalyticsData {
+  protected getDefaultAnalytics(): AnalyticsData {
     return {
       rankingStability: 0,
       volatilityIndex: 0,

@@ -94,18 +94,32 @@ export interface FeedbackFormData {
 }
 
 export interface AnalyticsData {
-  rankingStability: number;
-  volatilityIndex: number;
-  domainDiversity: number;
-  avgResponseTime: number;
-  newContentDiscovery: number;
-  querySuccessRate: number;
+  timeRangeMs?: number;
+  filteredSnapshots?: RankingSnapshot[];
+  rankingTrendData?: any[];
+  categoryDistribution?: any[];
+  successRateByHour?: any[];
+  performanceData?: any[];
+  topPerformingQueries?: any[];
+  queryPerformanceStats?: any[];
+  rankingStability?: number;
+  volatilityIndex?: number;
+  domainDiversity?: number;
+  avgResponseTime?: number;
+  newContentDiscovery?: number;
+  querySuccessRate?: number;
   trendSlope?: number;
   predictedPosition?: number;
   isAnomaly?: boolean;
+  responseTimeStats?: ResponseTimeStats;
+  executionFrequency?: ExecutionFrequency;
+  dataFreshness?: DataFreshness;
+  complexityMetrics?: ComplexityMetrics;
+  avgComplexityScore?: number;
+  isAppwriteSource?: boolean;
+  dataSourceType?: 'appwrite' | 'weaviate';
+  calculatedAt?: string;
 }
-
-
 export interface QueriesStore {
   queries: QueryConfig[]
   isLoading: boolean
@@ -115,6 +129,43 @@ export interface QueriesStore {
   runQuery: (queryId: string) => Promise<any>
   updateQuery: (queryId: string, query: Partial<QueryConfig>) => Promise<void>
   deleteQuery: (queryId: string) => Promise<void>
+}
+export interface ContentCoherenceResult {
+  overallCoherence: number;
+  method: 'umass' | 'cv' | 'npmi';
+  confidence: number;
+  pValue: number;
+  sampleSize: number;
+  calculatedAt: number;
+  score: number;
+}
+
+export interface SemanticStabilityResult {
+  stabilityScore: number;
+  trendConsistency: number;
+  vocabularyDrift: number;
+  confidenceInterval: { lower: number; upper: number };
+  isSignificant: boolean;
+  calculatedAt: number;
+}
+export interface StatisticalValidationResult {
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1Score: number;
+  mape: number;
+  confidenceLevel: number;
+  lastValidated: number;
+}
+
+export interface DataQualityResult {
+  completeness: number;
+  accuracy: number;
+  consistency: number;
+  freshness: number;
+  validity: number;
+  anomalyCount: number;
+  assessedAt: number;
 }
 
 export interface AuthContextType {
@@ -260,4 +311,130 @@ export interface SecurityContext {
   userAgent: string
   endpoint: string
   method: string
+}
+
+// Add these interfaces to your existing types
+export interface EnhancedAnalyticsData extends AnalyticsData {
+  contentCoherence?: ContentCoherenceResult; // undefined instead of null
+  semanticStability?: SemanticStabilityResult; // undefined instead of null
+  statisticalValidation?: StatisticalValidationResult;
+  dataQuality?: DataQualityResult;
+  semanticInsights?: SemanticInsights;
+  enhancedMetrics?: EnhancedMetrics;
+  isWeaviateSource?: boolean;
+  error?: string;
+}
+
+
+// Add missing interfaces
+export interface ResponseTimeStats {
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+  stdDev: number;
+  percentile95: number;
+}
+
+export interface ExecutionFrequency {
+  frequency: number;
+  efficiency: number;
+  pattern: string;
+  avgInterval?: number; // FIXED: Make optional since it's sometimes missing
+}
+
+
+export interface DataFreshness {
+  avgAgeHours: number;
+  maxAgeHours: number;
+  freshnessScore: number;
+  stalenessIndicator: string;
+}
+
+export interface ComplexityMetrics {
+  avgComplexityScore: number;
+  complexityDistribution: any;
+  highComplexityQueries: number;
+}
+
+// Import these from your analytics-calculations file
+export interface ContentCoherenceResult {
+  overallCoherence: number;
+  method: 'umass' | 'cv' | 'npmi';
+  confidence: number;
+  pValue: number;
+  sampleSize: number;
+  calculatedAt: number;
+}
+
+export interface SemanticStabilityResult {
+  stabilityScore: number;
+  trendConsistency: number;
+  vocabularyDrift: number;
+  confidenceInterval: { lower: number; upper: number };
+  isSignificant: boolean;
+  calculatedAt: number;
+}
+
+export interface StatisticalValidationResult {
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1Score: number;
+  mape: number;
+  confidenceLevel: number;
+  lastValidated: number;
+}
+
+export interface DataQualityResult {
+  completeness: number;
+  accuracy: number;
+  consistency: number;
+  freshness: number;
+  validity: number;
+  anomalyCount: number;
+  assessedAt: number;
+}
+
+// Move these from enhanced-analytics-service to types
+export interface SemanticInsights {
+  contentAnomalies: {
+    count: number;
+    anomalies: any[];
+    severityDistribution: {
+      low: number;
+      medium: number;
+      high: number;
+      critical: number;
+    };
+  };
+  semanticClusters: {
+    clusters: any[];
+    diversity: number;
+    dominantThemes: string[];
+  };
+  contentEvolution: {
+    periods: any[];
+    overallTrend: string;
+    volatility: number;
+    trendDirection: "improving" | "declining" | "stable";
+    discoveryRate: number;
+    stabilityTrend: any[];
+    contentTurnover: number;
+  };
+  weaviateMetrics: any;
+}
+
+export interface EnhancedMetrics {
+  semanticStability: SemanticStabilityResult | number;
+  contentCoherence: ContentCoherenceResult | number;
+  diversityIndex: number;
+  statisticalValidation?: StatisticalValidationResult;
+  dataQuality?: DataQualityResult;
+  performanceInsights?: {
+    anomalyDetectionAccuracy: number;
+    clusteringQuality: number;
+    semanticSearchEfficiency: number;
+    vectorCacheHitRate: number;
+  };
 }

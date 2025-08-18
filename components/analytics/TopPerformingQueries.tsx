@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown } from "lucide-react";
 
-export function TopPerformingQueries({ items }: { items: any[] }) {
+export function TopPerformingQueries({ items = [] }: { items?: any[] }) {
   return (
     <Card>
       <CardHeader>

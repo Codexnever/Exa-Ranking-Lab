@@ -5,7 +5,7 @@ import { analyticsCalculations } from '@/app/logic/analyticsLogic';
 import type { 
   RankingSnapshot, 
   QueryConfig, 
-  AnalyticsData
+  AnalyticsData,
 } from '@/lib/type';
 
 export interface SemanticInsights {
@@ -219,7 +219,7 @@ export class WeaviateAnalyticsService extends AnalyticsService {
             snippet: item.snippet || "",
             position: Number(item.position) || idx + 1,
             domain: item.domain || "",
-            contentType: "text/html" as const,
+              contentType: "article" as const,
             score: typeof item.score === "number" ? item.score : 0,
             timestamp: new Date(item.timestamp),
             contentHash: item.contentHash || "",
@@ -418,21 +418,21 @@ export class WeaviateAnalyticsService extends AnalyticsService {
     };
   }
 
-  private getTimeRangeString(timeRangeMs: number): string {
+  protected getTimeRangeString(timeRangeMs: number): string {
     if (timeRangeMs <= 7 * 24 * 60 * 60 * 1000) return '7d';
     if (timeRangeMs <= 30 * 24 * 60 * 60 * 1000) return '30d';
     if (timeRangeMs <= 90 * 24 * 60 * 60 * 1000) return '90d';
     return '1y';
   }
 
-  private calculateTrendSlope(positions: number[]): number {
+  protected calculateTrendSlope(positions: number[]): number {
     if (positions.length < 2) return 0;
     const firstPos = positions[0];
     const lastPos = positions[positions.length - 1];
     return (lastPos - firstPos) / (positions.length - 1);
   }
 
-  private predictTrend(positions: number[], forecastDays: number = 7): number {
+  protected predictTrend(positions: number[], forecastDays: number = 7): number {
     if (positions.length < 2) return positions[0] || 0;
     
     const n = positions.length;

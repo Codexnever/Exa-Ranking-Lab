@@ -20,7 +20,6 @@
 // app/logic/analyticsLogic.ts
 // No React imports needed for pure calculation
 import type { QueryConfig, RankingSnapshot, TrendPoint } from "@/lib/type";
-import { pipeline } from '@xenova/transformers'; // For semantic clustering (npm install @xenova/transformers)
 
 /**
  * Converts time range string to milliseconds for date calculations.
@@ -518,8 +517,8 @@ export function calculateTopPerformingQueries(queries: QueryConfig[], filteredSn
  * @returns {Object} Comprehensive analytics data object
  */
 export function analyticsCalculations(
-  queries: QueryConfig[],
-  snapshots: RankingSnapshot[],
+  queries: QueryConfig[] = [],
+  snapshots: RankingSnapshot[] = [],
   timeRange: string,
   filters: { queryType?: string; domain?: string } = {},
   deduplicationStrategy: 'latest' | 'average' | 'best' | 'worst' | 'none' = 'latest'

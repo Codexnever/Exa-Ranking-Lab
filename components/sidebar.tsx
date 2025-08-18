@@ -20,105 +20,63 @@ import {
   Zap,
   TrendingUp,
   Database,
+  Brain, // ADDED: For AI features
+  Target, // ADDED: For vector DB
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { useConnectionHealth } from "@/components/providers/ConnectionHealthProvider"
+import { useWeaviateStore } from "@/app/store/weaviate-store" // ADDED: Weaviate store
 import { useState, useEffect } from "react"
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const { connectionQuality, isHealthy, lastActivity, reconnectAttempts } = useConnectionHealth()
+  const { connectionQuality, isHealthy, lastActivity, reconnectAttempts, metrics } = useConnectionHealth()
+  
+  // ADDED: Get Weaviate status from store
+  const { dataSource, isConnected: weaviateConnected, error: weaviateError } = useWeaviateStore()
+  
   const [activityStats, setActivityStats] = useState({
     totalEvents: 0,
     successfulEvents: 0,
     failedEvents: 0,
   })
 
-  // Track activity statistics
+  // Enhanced activity tracking that includes real metrics
   useEffect(() => {
-    // This would be connected to your real-time event tracking
-    // For now, we'll simulate with the lastActivity changes
-    const updateStats = () => {
-      setActivityStats(prev => ({
-        ...prev,
-        totalEvents: prev.totalEvents + 1,
-        successfulEvents: prev.successfulEvents + (isHealthy ? 1 : 0),
-        failedEvents: prev.failedEvents + (isHealthy ? 0 : 1),
-      }))
-    }
+    // Use real metrics from ConnectionHealthProvider
+    setActivityStats({
+      totalEvents: metrics.totalEvents,
+      successfulEvents: metrics.successfulEvents,
+      failedEvents: metrics.failedEvents,
+    })
+  }, [metrics])
 
-    // Simulate activity tracking
-    const interval = setInterval(() => {
-      if (isHealthy) updateStats()
-    }, 30000) // Every 30 seconds if healthy
-
-    return () => clearInterval(interval)
-  }, [isHealthy, lastActivity])
-
-  const routes = [
-    {
-      label: "Dashboard",
-      icon: BarChart2,
-      href: "/",
-    },
-    {
-      label: "Query Builder",
-      icon: Search,
-      href: "/query-builder",
-    },
-    {
-      label: "Query Monitor",
-      icon: MonitorCog,
-      href: "/query-monitor",
-    },
-    {
-      label: "Analytics",
-      icon: Activity,
-      href: "/analytics",
-    },
-    {
-      label: "Drift Radar",
-      icon: Radar,
-      href: "/drift",
-    },
-    {
-      label: "Snapshots",
-      icon: Camera,
-      href: "/snapshots",
-    },
-    {
-      label: "Compare Rankings",
-      icon: GitCompare,
-      href: "/compare",
-    },
-    {
-      label: "Feedback",
-      icon: MessageSquare,
-      href: "/feedback",
-    },
-    {
-      label: "Settings",
-      icon: Settings,
-      href: "/settings",
-    },
-  ]
-
-  // Connection health display configuration
+  // ADDED: Enhanced connection config that considers Weaviate status
   const getConnectionConfig = () => {
     const timeSinceActivity = Date.now() - lastActivity
     const minutesAgo = Math.floor(timeSinceActivity / 60000)
     const secondsAgo = Math.floor((timeSinceActivity % 60000) / 1000)
 
-    switch (connectionQuality) {
+    // Factor in Weaviate connection if in AI mode
+    const isAIMode = dataSource === 'weaviate'
+    const aiConnectionHealthy = isAIMode ? weaviateConnected && !weaviateError : true
+
+    // Determine overall status
+    let effectiveQuality = connectionQuality
+    if (isAIMode && !aiConnectionHealthy && connectionQuality !== 'disconnected') {
+      effectiveQuality = 'poor' // Downgrade if AI features are requested but unavailable
+    }
+
+    switch (effectiveQuality) {
       case 'excellent':
         return {
           icon: CheckCircle,
           color: 'text-green-600',
           bgColor: 'bg-green-50',
           borderColor: 'border-green-200',
-          status: 'Connected',
-          detail: 'Real-time active',
+          status: isAIMode ? 'AI Connected' : 'Connected',
+          detail: isAIMode ? 'AI analytics active' : 'Real-time active',
           showPulse: true,
         }
       case 'good':
@@ -137,8 +95,8 @@ export default function Sidebar() {
           color: 'text-yellow-600',
           bgColor: 'bg-yellow-50',
           borderColor: 'border-yellow-200',
-          status: 'Slow',
-          detail: `${minutesAgo}m ago`,
+          status: isAIMode && !aiConnectionHealthy ? 'AI Limited' : 'Slow',
+          detail: isAIMode && !aiConnectionHealthy ? 'Traditional mode only' : `${minutesAgo}m ago`,
           showPulse: false,
         }
       case 'disconnected':
@@ -169,6 +127,56 @@ export default function Sidebar() {
   const successRate = activityStats.totalEvents > 0 
     ? Math.round((activityStats.successfulEvents / activityStats.totalEvents) * 100)
     : 100
+
+  const routes = [
+    {
+      label: "Dashboard",
+      icon: BarChart2,
+      href: "/",
+    },
+    {
+      label: "Query Builder",
+      icon: Search,
+      href: "/query-builder",
+    },
+    {
+      label: "Query Monitor",
+      icon: MonitorCog,
+      href: "/query-monitor",
+    },
+    {
+      label: "Analytics",
+      icon: Activity,
+      href: "/analytics",
+      // ADDED: Show badge if AI mode is active
+      badge: dataSource === 'weaviate' ? 'AI' : undefined,
+    },
+    {
+      label: "Drift Radar",
+      icon: Radar,
+      href: "/drift",
+    },
+    {
+      label: "Snapshots",
+      icon: Camera,
+      href: "/snapshots",
+    },
+    {
+      label: "Compare Rankings",
+      icon: GitCompare,
+      href: "/compare",
+    },
+    {
+      label: "Feedback",
+      icon: MessageSquare,
+      href: "/feedback",
+    },
+    {
+      label: "Settings",
+      icon: Settings,
+      href: "/settings",
+    },
+  ]
 
   return (
     <div className="flex flex-col w-64 border-r bg-white">
@@ -201,19 +209,25 @@ export default function Sidebar() {
               )}
             >
               <route.icon className="h-4 w-4" />
-              {route.label}
+              <span className="flex-1">{route.label}</span>
+              {/* ADDED: Show AI badge for analytics when in AI mode */}
+              {route.badge && (
+                <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-700">
+                  {route.badge}
+                </Badge>
+              )}
             </Link>
           ))}
         </div>
       </div>
 
-      {/* Connection Health Panel */}
+      {/* ENHANCED: Connection Health Panel with AI Status */}
       <div className="p-3 border-t bg-gray-50/50">
         <div className="space-y-3">
           {/* Connection Status Header */}
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Connection Health
+              {dataSource === 'weaviate' ? 'AI Analytics Health' : 'Connection Health'}
             </span>
             <Badge 
               variant={connectionQuality === 'excellent' ? 'default' : 'secondary'}
@@ -257,7 +271,7 @@ export default function Sidebar() {
               </div>
             </div>
 
-            {/* Connection Metrics */}
+            {/* ENHANCED: Connection Metrics with AI indicator */}
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
               <div className="bg-white/60 rounded px-2 py-1">
                 <div className="flex items-center gap-1">
@@ -268,12 +282,41 @@ export default function Sidebar() {
               </div>
               <div className="bg-white/60 rounded px-2 py-1">
                 <div className="flex items-center gap-1">
-                  <Zap className="h-3 w-3 text-blue-600" />
+                  {dataSource === 'weaviate' ? (
+                    <Brain className="h-3 w-3 text-purple-600" />
+                  ) : (
+                    <Zap className="h-3 w-3 text-blue-600" />
+                  )}
                   <span className="font-medium">{activityStats.totalEvents}</span>
                 </div>
-                <div className="text-gray-500">Events</div>
+                <div className="text-gray-500">
+                  {dataSource === 'weaviate' ? 'AI Ops' : 'Events'}
+                </div>
               </div>
             </div>
+
+            {/* ADDED: AI Mode specific status */}
+            {dataSource === 'weaviate' && (
+              <div className="mt-2 p-2 bg-white/80 rounded text-xs">
+                <div className="flex items-center gap-1">
+                  <Target className={cn(
+                    "h-3 w-3",
+                    weaviateConnected ? "text-green-500" : "text-red-500"
+                  )} />
+                  <span className={cn(
+                    "font-medium",
+                    weaviateConnected ? "text-green-700" : "text-red-700"
+                  )}>
+                    Vector DB: {weaviateConnected ? 'Connected' : 'Disconnected'}
+                  </span>
+                </div>
+                {weaviateError && (
+                  <div className="text-red-600 mt-1 truncate">
+                    {weaviateError}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Detailed Status for Poor/Disconnected */}
             {(connectionQuality === 'poor' || connectionQuality === 'disconnected') && (
@@ -282,7 +325,7 @@ export default function Sidebar() {
                   <AlertCircle className="h-3 w-3" />
                   <span>
                     {connectionQuality === 'poor' 
-                      ? 'Updates may be delayed'
+                      ? (dataSource === 'weaviate' && !weaviateConnected ? 'AI features limited' : 'Updates may be delayed')
                       : 'Real-time features unavailable'
                     }
                   </span>
@@ -296,7 +339,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* Quick Health Indicators */}
+          {/* ENHANCED: Quick Health Indicators with AI status */}
           <div className="grid grid-cols-3 gap-1 text-xs">
             <div className="text-center p-1">
               <div className={cn(
@@ -308,9 +351,13 @@ export default function Sidebar() {
             <div className="text-center p-1">
               <div className={cn(
                 "h-2 w-2 rounded-full mx-auto mb-1",
-                ['excellent', 'good'].includes(connectionQuality) ? 'bg-blue-500' : 'bg-gray-300'
+                dataSource === 'weaviate' 
+                  ? (weaviateConnected ? 'bg-purple-500' : 'bg-gray-300')
+                  : (['excellent', 'good'].includes(connectionQuality) ? 'bg-blue-500' : 'bg-gray-300')
               )} />
-              <span className="text-gray-500">Sync</span>
+              <span className="text-gray-500">
+                {dataSource === 'weaviate' ? 'AI' : 'Sync'}
+              </span>
             </div>
             <div className="text-center p-1">
               <div className={cn(

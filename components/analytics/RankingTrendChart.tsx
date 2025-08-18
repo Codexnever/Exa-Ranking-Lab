@@ -113,7 +113,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-export function RankingTrendChart({ data }: { data: TrendPoint[] }) {
+export function RankingTrendChart({ data = [] }: { data?: TrendPoint[] }) {
   const anomalyCount = data.filter(point => point.isAnomaly).length;
   
   return (

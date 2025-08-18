@@ -38,7 +38,8 @@ export function PerformanceCharts({
         <CardContent className="pt-2">
           <div className="h-96">
             <ResponsiveContainer width="100%" height="100%">
-              {performanceData.length === 0 ? (
+             {!Array.isArray(performanceData) || performanceData.length === 0 ? (
+
                 <div className="flex items-center justify-center h-full text-gray-400">
                   No performance data
                 </div>

@@ -1,7 +1,7 @@
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 
-export function CategoryPieChart({ data }: { data: any[] }) {
+export function CategoryPieChart({ data = [] }: { data?: any[] }) {
   return (
     <Card>
       <CardHeader>

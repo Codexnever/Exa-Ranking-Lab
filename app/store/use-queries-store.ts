@@ -1,4 +1,3 @@
-// app/store/use-queries-store.ts
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { toast } from "sonner";
@@ -22,8 +21,6 @@ interface QueriesActions {
   getScheduledQueries: (userId?: string) => Promise<QueryConfig[]>;
   getDueQueries: (userId?: string) => Promise<QueryConfig[]>;
   batchRunQueries: (queryIds: string[]) => Promise<any[]>;
-  
-  // Enhanced methods
   getQueriesByCategory: (category: string) => QueryConfig[];
   getRecentQueries: (limit?: number) => QueryConfig[];
   syncWithWeaviate: (userId: string) => Promise<void>;
@@ -47,11 +44,18 @@ export const useQueriesStore = create<QueriesStoreType>()(
       currentUserId: null,
 
       fetchQueries: async (userId?: string, forceRefresh = false) => {
-        const { lastFetch, currentUserId } = get();
+        const { lastFetch, currentUserId, queries, isLoading } = get();
         const now = Date.now();
         
-        // Skip fetch if data is fresh and user hasn't changed
-        if (!forceRefresh && lastFetch && currentUserId === userId && (now - lastFetch) < 60000) {
+        const safeQueries = Array.isArray(queries) ? queries : [];
+        
+        if (!forceRefresh && safeQueries.length > 0 && userId === currentUserId) {
+          console.log('[QueriesStore] Using cached queries');
+          return;
+        }
+
+        if (isLoading) {
+          console.log('[QueriesStore] Already loading, skipping request');
           return;
         }
 
@@ -70,7 +74,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           });
           
           if (response.status === 401) {
-            set({ queries: [] });
+            set({ queries: [], isLoading: false });
             throw new Error("Please log in to access your queries");
           }
           
@@ -79,13 +83,14 @@ export const useQueriesStore = create<QueriesStoreType>()(
             throw new Error(error.details || "Failed to fetch queries");
           }
           
-          const queries = await response.json() as QueryConfig[];
+          const fetchedQueries = await response.json() as QueryConfig[];
           
-          // Sort queries by creation date (newest first)
-          const sortedQueries = queries.sort((a, b) => 
+          const safeResult = Array.isArray(fetchedQueries) ? fetchedQueries : [];
+          
+          const sortedQueries = safeResult.sort((a, b) => 
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
           );
-          
+
           set({ 
             queries: sortedQueries, 
             isLoading: false, 
@@ -94,7 +99,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
             currentUserId: userId || null
           });
           
-          console.log(`[QueriesStore] Fetched ${queries.length} queries for user ${userId}`);
+          console.log(`[QueriesStore] Fetched ${sortedQueries.length} queries for user ${userId}`);
           
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to fetch queries";
@@ -128,14 +133,14 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const newQuery = await response.json() as QueryConfig;
           
           set((state: QueriesStoreType): QueriesState => ({
-            queries: [newQuery, ...state.queries], // Add to beginning for newest first
+            queries: [newQuery, ...state.queries],
             isLoading: false,
             error: null,
             lastFetch: state.lastFetch,
             currentUserId: state.currentUserId
           }));
 
-          toast.success(`Query "${newQuery.name}" created successfully`);
+          toast.success(`Query "${newQuery.name || newQuery.title}" created successfully`);
           return newQuery;
           
         } catch (error) {
@@ -169,7 +174,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
           }
 
           if (response.status === 404) {
-            // Remove from local store if it doesn't exist on server
             set((state: QueriesStoreType): QueriesState => ({
               queries: state.queries.filter((q: QueryConfig) => q.id !== queryId),
               isLoading: false,
@@ -187,7 +191,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
 
           const result = await response.json();
 
-          // Update the lastRun timestamp for the query
           set((state: QueriesStoreType): QueriesState => ({
             queries: state.queries.map((q: QueryConfig) =>
               q.id === queryId ? { ...q, lastRun: new Date() } : q
@@ -198,7 +201,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
             currentUserId: state.currentUserId
           }));
 
-          toast.success(`Query "${localQuery.name}" executed successfully`);
+          toast.success(`Query "${localQuery.name || localQuery.title}" executed successfully`);
           return result;
           
         } catch (error) {
@@ -211,7 +214,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
 
       updateQuery: async (queryId: string, query: Partial<QueryConfig>): Promise<void> => {
         set({ isLoading: true, error: null });
-        
+
         try {
           const headers = await getAuthHeaders();
           const response = await fetch(`/api/queries/${queryId}`, {
@@ -247,7 +250,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
 
       deleteQuery: async (queryId: string): Promise<void> => {
         set({ isLoading: true, error: null });
-        
+
         try {
           const headers = await getAuthHeaders();
           const response = await fetch(`/api/queries/${queryId}`, {
@@ -276,7 +279,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
             currentUserId: state.currentUserId
           }));
           
-          toast.success(`Query "${deletedQuery?.name}" deleted successfully`);
+          toast.success(`Query "${deletedQuery?.name || deletedQuery?.title}" deleted successfully`);
           
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to delete query";
@@ -297,8 +300,13 @@ export const useQueriesStore = create<QueriesStoreType>()(
 
       getScheduledQueries: async (userId?: string): Promise<QueryConfig[]> => {
         try {
-          const queries = get().queries.length > 0 ? get().queries : 
-            await get().fetchQueries(userId).then(() => get().queries);
+          let queries = get().queries;
+          
+          if (!Array.isArray(queries) || queries.length === 0) {
+            await get().fetchQueries(userId);
+            queries = get().queries;
+          }
+          
           return queries.filter(q => q.schedule?.enabled && (!userId || q.userId === userId));
         } catch (error) {
           console.error('Failed to get scheduled queries:', error);
@@ -317,7 +325,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
             const lastRun = new Date(query.lastRun);
             const diffMs = now.getTime() - lastRun.getTime();
             
-            switch (query.schedule.frequency) {
+            switch (query.schedule?.frequency) {
               case 'hourly':
                 return diffMs >= 60 * 60 * 1000;
               case 'daily':
@@ -351,35 +359,55 @@ export const useQueriesStore = create<QueriesStoreType>()(
         return results;
       },
 
-      // Enhanced methods
       getQueriesByCategory: (category: string) => {
-        return get().queries.filter(q => q.category === category);
+        const queries = get().queries;
+        return Array.isArray(queries) ? queries.filter(q => q.category === category) : [];
       },
 
       getRecentQueries: (limit: number = 5) => {
-        return get().queries
+        const queries = get().queries;
+        if (!Array.isArray(queries)) return [];
+        
+        return queries
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
           .slice(0, limit);
       },
 
       syncWithWeaviate: async (userId: string) => {
         try {
-          const queries = get().queries;
+          console.log('[QueriesStore] Starting Weaviate sync for user:', userId);
+          
           const response = await fetch('/api/weaviate/sync-queries', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ userId, queries })
+            body: JSON.stringify({ userId })
           });
 
           if (!response.ok) {
-            throw new Error('Failed to sync queries with Weaviate');
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to sync queries with Weaviate');
           }
 
-          console.log('[QueriesStore] Queries synced with Weaviate successfully');
+          const result = await response.json();
+          
+          console.log('[QueriesStore] Weaviate sync completed:', result);
+          
+          if (result.success) {
+            toast.success(`Synced ${result.synced} queries with AI database`);
+            
+            if (result.synced > 0) {
+              await get().fetchQueries(userId, true);
+            }
+          } else {
+            throw new Error(result.message || 'Sync operation failed');
+          }
+          
         } catch (error) {
           console.error('[QueriesStore] Weaviate sync failed:', error);
-          toast.error('Failed to sync queries with AI database');
+          const message = error instanceof Error ? error.message : 'Failed to sync with AI database';
+          toast.error(message);
+          throw error;
         }
       }
     }),
