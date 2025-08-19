@@ -1,3 +1,4 @@
+// app/api/weaviate/validate-predication/route.ts
 import { NextResponse } from "next/server";
 import { AppwriteAnalyticsService } from "@/app/services/AppwriteAnalyticsService";
 

@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {Progress} from "@/components/ui/progress";
+import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card";
 import { Download, Filter, RefreshCw, TrendingUp, BarChart3, Settings2, Target, Brain, AlertCircle, RotateCcw } from "lucide-react";
@@ -38,7 +38,6 @@ import RankingBarChartSkeleton from "@/components/loaders/RankingBarChartSkeleto
 import PerformanceChartsSkeleton from "@/components/loaders/PerformanceChartsSkeleton";
 import QueryPerformanceStatsTableSkeleton from "@/components/loaders/QueryPerformanceStatsTableSkeleton";
 import DomainAnalysisSkeleton from "@/components/loaders/DomainAnalysisSkeleton";
-import { string } from "zod";
 
 const AnalyticsAPIs = dynamic(() => import("@/components/analytics/AnalyticsAPIs").then(mod => mod.AnalyticsAPIs), {
   loading: () => <AnalyticsAPIsSkeleton />,
@@ -77,9 +76,25 @@ type DeduplicationStrategy = 'latest' | 'average' | 'best' | 'worst' | 'none';
 
 export default function Analytics() {
   const { user } = useAuth();
+  const userId = user?.$id;
 
-  const { analytics, isLoading: analyticsLoading, dataSource, setDataSource, fetchAnalytics, error: analyticsError } = useAnalyticsStore();
-  const { queries, isLoading: queriesLoading, fetchQueries, syncWithWeaviate } = useQueriesStore();
+  const {
+    analytics,
+    isLoading: analyticsLoading,
+    dataSource,
+    setDataSource,
+    fetchAnalytics,
+    error: analyticsError
+  } = useAnalyticsStore();
+  console.log("[Analytics] Loaded analytics dataSource:", dataSource);
+ 
+  const {
+    queries,
+    isLoading: queriesLoading,
+    fetchQueries,
+    syncWithWeaviate
+  } = useQueriesStore();
+
   const {
     isConnected,
     connectionStatus,
@@ -89,10 +104,17 @@ export default function Analytics() {
     error: weaviateError,
     getSemanticAnalytics,
     syncData,
+    assessDataQuality,
     syncQueries,
     getConnectionHealth,
   } = useWeaviateStore();
-  const { allSnapshots, isLoadingAnalytics: isLoadingSnapshots, fetchAllSnapshots, checkAndRefreshIfEmpty } = useSnapshotsStore();
+
+  const {
+    allSnapshots,
+    isLoadingAnalytics: isLoadingSnapshots,
+    fetchAllSnapshots,
+    checkAndRefreshIfEmpty
+  } = useSnapshotsStore();
 
   const isMountedRef = useRef(true);
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -105,8 +127,8 @@ export default function Analytics() {
   const [queryTypeFilter, setQueryTypeFilter] = useState("");
   const [domainFilter, setDomainFilter] = useState("");
   const [dataLoaded, setDataLoaded] = useState(false);
-const userId = user?.$id;
 
+ 
   const filters = useMemo(() => ({
     queryType: queryTypeFilter || "",
     domain: domainFilter || ""
@@ -125,9 +147,22 @@ const userId = user?.$id;
     return ranges[timeRange] || ranges['30d'];
   }, [timeRange]);
 
+useEffect(() => {
+  if (!userId) return;
+  fetchAnalytics(userId, timeRangeMs, queries);
+}, [fetchAnalytics, userId, queries, dataSource, timeRangeMs]);
+
+  // ✅ IMPROVED: Enhanced analytics data with vector-awareness indicators
   const analyticsData = useMemo(() => {
     if (dataSource === 'weaviate') {
-      if (analytics) return analytics;
+      if (analytics) {
+        return {
+          ...analytics,
+          // Add semantic enhancement flags
+          hasSemanticData: !!analytics.vectorsAvailable,
+          isVectorEnhanced: !!semanticInsights,
+        };
+      }
       return {
         timeRangeMs: 30 * 24 * 60 * 60 * 1000,
         filteredSnapshots: stableSnapshots,
@@ -137,18 +172,33 @@ const userId = user?.$id;
         performanceData: [],
         topPerformingQueries: [],
         queryPerformanceStats: [],
+        hasSemanticData: false,
+        isVectorEnhanced: false,
       };
     } else {
-      if (analytics) return analytics;
-      return analyticsCalculations(
+      if (analytics) {
+        return {
+          ...analytics,
+          // Indicate if Appwrite data has vectors (from Weaviate sync)
+          hasSemanticData: !!analytics.vectorsAvailable,
+          isVectorEnhanced: !!analytics.vectorsAvailable,
+        };
+      }
+      // Fallback to unified analytics calculation
+      const calculated = analyticsCalculations(
         stableQueries,
         stableSnapshots,
         timeRange,
         filters,
         deduplicationStrategy
       );
+      return {
+        ...calculated,
+        hasSemanticData: !!(analytics as any).vectorsAvailable,
+        isVectorEnhanced: !!(analytics as any).vectorsAvailable,
+      };
     }
-  }, [analytics, dataSource, stableQueries, stableSnapshots, timeRange, filters, deduplicationStrategy]);
+  }, [analytics, dataSource, stableQueries, stableSnapshots, timeRange, filters, deduplicationStrategy, semanticInsights]);
 
   const filteredSnapshotsLength = useMemo(() =>
     Array.isArray(analyticsData.filteredSnapshots) ? analyticsData.filteredSnapshots.length : 0,
@@ -160,92 +210,129 @@ const userId = user?.$id;
     [queriesLoading, isLoadingSnapshots, analyticsLoading, weaviateLoading, dataLoaded]
   );
 
- const performanceSummary = useMemo(() => {
-  try {
-    if (dataSource === 'weaviate' && enhancedMetrics) {
-      // FIXED: Handle different types of semanticStability
-      let stabilityValue = 0;
-      
-      if (typeof enhancedMetrics.semanticStability === 'number') {
-        stabilityValue = enhancedMetrics.semanticStability;
-      } else if (enhancedMetrics.semanticStability && typeof enhancedMetrics.semanticStability === 'object') {
-        // If it's a SemanticStabilityResult object, get the stabilityScore
-        stabilityValue = enhancedMetrics.semanticStability.stabilityScore || 0;
+  // ✅ IMPROVED: Enhanced performance summary with semantic metrics
+  const performanceSummary = useMemo(() => {
+    try {
+      if (dataSource === 'weaviate' && enhancedMetrics) {
+        // Handle semantic stability from enhanced metrics
+        let stabilityValue = 0;
+        let coherenceValue = 0;
+
+        if (typeof enhancedMetrics.semanticStability === 'number') {
+          stabilityValue = enhancedMetrics.semanticStability;
+        } else if (enhancedMetrics.semanticStability && typeof enhancedMetrics.semanticStability === 'object') {
+          stabilityValue = enhancedMetrics.semanticStability.stabilityScore || 0;
+        }
+
+        if (typeof enhancedMetrics.contentCoherence === 'number') {
+          coherenceValue = enhancedMetrics.contentCoherence;
+        } else if (enhancedMetrics.contentCoherence && typeof enhancedMetrics.contentCoherence === 'object') {
+          coherenceValue = enhancedMetrics.contentCoherence.overallCoherence || 0;
+        }
+
+        return {
+          avgSuccessRate: stabilityValue.toFixed(1),
+          avgResponseTime: "Vector DB",
+          contentCoherence: coherenceValue.toFixed(1),
+          diversityIndex: enhancedMetrics.diversityIndex?.toFixed(1) || "0",
+          isSemanticEnhanced: true
+        };
       }
-      
+
+      // Traditional analytics
+      if (!analyticsData?.successRateByHour ||
+        !Array.isArray(analyticsData.successRateByHour) ||
+        analyticsData.successRateByHour.length === 0) {
+        return {
+          avgSuccessRate: "0",
+          avgResponseTime: "0ms",
+          isSemanticEnhanced: analyticsData.hasSemanticData || false
+        };
+      }
+
+      const validHours = analyticsData.successRateByHour.filter(h =>
+        h &&
+        typeof h === 'object' &&
+        typeof h.successRate === 'number' &&
+        !isNaN(h.successRate)
+      );
+
+      if (validHours.length === 0) {
+        return {
+          avgSuccessRate: "0",
+          avgResponseTime: "0ms",
+          isSemanticEnhanced: analyticsData.hasSemanticData || false
+        };
+      }
+
+      const avgSuccessRate = (
+        validHours.reduce((sum, h) => sum + h.successRate, 0) / validHours.length
+      ).toFixed(1);
+
+      const rawAvgTime = (
+        validHours.reduce((sum, h) => sum + (h.avgTime || 0), 0) / validHours.length
+      ).toFixed(0);
+
+      const avgResponseTime = formatResponseTime(Number(rawAvgTime));
+
       return {
-        avgSuccessRate: stabilityValue.toFixed(1),
-        avgResponseTime: "Vector DB"
+        avgSuccessRate,
+        avgResponseTime,
+        isSemanticEnhanced: analyticsData.hasSemanticData || false
+      };
+    } catch (error) {
+      console.warn('Error calculating performance summary:', error);
+      return {
+        avgSuccessRate: "0",
+        avgResponseTime: "0ms",
+        isSemanticEnhanced: false
       };
     }
-
-    // FIXED: Add null/undefined checks
-    if (!analyticsData?.successRateByHour || 
-        !Array.isArray(analyticsData.successRateByHour) || 
-        analyticsData.successRateByHour.length === 0) {
-      return { avgSuccessRate: "0", avgResponseTime: "0ms" };
-    }
-
-    // FIXED: More robust filtering
-    const validHours = analyticsData.successRateByHour.filter(h => 
-      h && 
-      typeof h === 'object' && 
-      typeof h.successRate === 'number' && 
-      !isNaN(h.successRate)
-    );
-
-    if (validHours.length === 0) {
-      return { avgSuccessRate: "0", avgResponseTime: "0ms" };
-    }
-
-    const avgSuccessRate = (
-      validHours.reduce((sum, h) => sum + h.successRate, 0) / validHours.length
-    ).toFixed(1);
-
-    const rawAvgTime = (
-      validHours.reduce((sum, h) => sum + (h.avgTime || 0), 0) / validHours.length
-    ).toFixed(0);
-
-    const avgResponseTime = formatResponseTime(Number(rawAvgTime));
-
-    return { avgSuccessRate, avgResponseTime };
-  } catch (error) {
-    console.warn('Error calculating performance summary:', error);
-    return { avgSuccessRate: "0", avgResponseTime: "0ms" };
-  }
-}, [analyticsData?.successRateByHour, dataSource, enhancedMetrics]);
-
+  }, [analyticsData?.successRateByHour, analyticsData?.hasSemanticData, dataSource, enhancedMetrics]);
 
   const connectionHealth = useMemo(() =>
     dataSource === "weaviate" ? getConnectionHealth() : null,
     [getConnectionHealth, dataSource]
   );
 
+  // ✅ IMPROVED: Enhanced strategy info with semantic benefits
   const strategyInfo = useMemo(() => {
-    const info = {
+    const baseInfo = {
       latest: { label: "Latest per Day", description: "Uses the most recent snapshot for each query per day" },
       average: { label: "Daily Average", description: "Creates synthetic snapshots by averaging multiple daily snapshots" },
       best: { label: "Best per Day", description: "Uses the snapshot with the best (lowest) average position per day" },
       worst: { label: "Worst per Day", description: "Uses the snapshot with the worst (highest) average position per day" },
       none: { label: "No Deduplication", description: "Uses all snapshots including duplicates" }
     };
-    return info[deduplicationStrategy] || info.latest;
-  }, [deduplicationStrategy]);
+
+    const info = baseInfo[deduplicationStrategy] || baseInfo.latest;
+
+    // Add semantic enhancement note if applicable
+    if (analyticsData.hasSemanticData) {
+      info.description += " • Enhanced with vector-based semantic analysis";
+    }
+
+    return info;
+  }, [deduplicationStrategy, analyticsData.hasSemanticData]);
 
   const debouncedFetch = useCallback(async (force = false) => {
     const now = Date.now();
     const timeSinceLastFetch = now - lastFetchTimeRef.current;
     if (!force && timeSinceLastFetch < 5000) return;
     if (!userId || !isMountedRef.current) return;
+
     try {
       lastFetchTimeRef.current = now;
       const promises = [];
+
       if (fetchQueries) promises.push(fetchQueries(user.$id, force));
       if (fetchAllSnapshots) promises.push(fetchAllSnapshots(user.$id));
       if (fetchAnalytics) promises.push(fetchAnalytics(userId, timeRangeMs, stableQueries, force));
+
       if (dataSource === 'weaviate' && getSemanticAnalytics) {
         promises.push(getSemanticAnalytics(userId, timeRange));
       }
+
       await Promise.allSettled(promises);
       if (isMountedRef.current) setDataLoaded(true);
     } catch (error) {
@@ -274,10 +361,12 @@ const userId = user?.$id;
     };
   }, []);
 
+  // ✅ IMPROVED: Enhanced data source change with semantic feedback
   const handleDataSourceChange = useCallback(async (newSource: 'appwrite' | 'weaviate') => {
     if (newSource !== dataSource) {
       setDataSource(newSource);
       setDataLoaded(false);
+      console.log("[Analytics] Data source changed:", newSource);
       if (newSource === 'weaviate') {
         setIsSyncing(true);
         try {
@@ -285,14 +374,16 @@ const userId = user?.$id;
             syncData(userId ?? ''),
             syncQueries(userId ?? '')
           ]);
-          toast.success("Data synchronized with AI analytics");
+          toast.success("Data synchronized with AI analytics. Semantic insights now available!");
         } catch (error) {
           toast.error("Failed to sync with AI analytics");
         } finally {
           setIsSyncing(false);
         }
       }
-      toast.success(`Switched to ${newSource === 'weaviate' ? 'AI-powered' : 'traditional'} analytics`);
+
+      const sourceLabel = newSource === 'weaviate' ? 'AI-powered semantic' : 'traditional';
+      toast.success(`Switched to ${sourceLabel} analytics`);
     }
   }, [dataSource, setDataSource, syncData, syncQueries, userId]);
 
@@ -301,13 +392,16 @@ const userId = user?.$id;
     setIsRefreshing(true);
     try {
       await debouncedFetch(true);
-      if (isMountedRef.current) toast.success("Analytics data refreshed successfully");
+      if (isMountedRef.current) {
+        const enhancementNote = analyticsData.hasSemanticData ? " with semantic enhancements" : "";
+        toast.success(`Analytics data refreshed successfully${enhancementNote}`);
+      }
     } catch {
       if (isMountedRef.current) toast.error("Failed to refresh analytics data");
     } finally {
       if (isMountedRef.current) setIsRefreshing(false);
     }
-  }, [isRefreshing, debouncedFetch]);
+  }, [isRefreshing, debouncedFetch, analyticsData.hasSemanticData]);
 
   const handleSync = useCallback(async () => {
     if (!userId || isSyncing) return;
@@ -317,17 +411,17 @@ const userId = user?.$id;
         syncData(user.$id),
         syncQueries(user.$id)
       ]);
-      
+
       let successMessage = "Data synchronized successfully";
-      
+
       if (queriesResult.status === 'fulfilled') {
         const stats = queriesResult.value;
         successMessage += ` (${stats.synced} queries synced)`;
       }
-      
+
       toast.success(successMessage);
       await debouncedFetch(true);
-      
+
     } catch (error) {
       toast.error("Failed to sync data");
     } finally {
@@ -335,59 +429,72 @@ const userId = user?.$id;
     }
   }, [userId, isSyncing, syncData, syncQueries, debouncedFetch]);
 
+  // ✅ IMPROVED: Enhanced export with semantic data support
   const handleExport = useCallback(() => {
     try {
       let dataToExport: any[] = [];
       let headers = "";
+      let filename = "";
 
       if (dataSource === 'weaviate' && semanticInsights?.contentAnomalies) {
         dataToExport = semanticInsights.contentAnomalies;
         headers = "Type,Query ID,URL,Title,Anomaly Score,Timestamp\n";
+        filename = `Exa_Semantic_Analytics_${timeRange}_${new Date().toISOString().split('T')[0]}.csv`;
       } else if (Array.isArray(analyticsData.rankingTrendData)) {
         dataToExport = analyticsData.rankingTrendData;
         headers = "Date,Avg Position,Volatility,Predicted Position,Is Anomaly,Count\n";
+        filename = `Exa_Analytics_${dataSource}_${timeRange}_${new Date().toISOString().split('T')[0]}.csv`;
       }
 
       if (!Array.isArray(dataToExport) || dataToExport.length === 0) {
         toast.error("No data available for export");
         return;
       }
+
       let csvContent = "data:text/csv;charset=utf-8,";
       csvContent += `Analytics Export - ${new Date().toLocaleDateString()}\n`;
       csvContent += `Time Range: ${timeRange}\n`;
       csvContent += `Data Source: ${dataSource}\n`;
+      csvContent += `Semantic Enhanced: ${analyticsData.hasSemanticData ? 'Yes' : 'No'}\n`;
       csvContent += `Total Snapshots: ${filteredSnapshotsLength}\n\n`;
       csvContent += headers;
+
       if (dataSource === 'weaviate' && semanticInsights?.contentAnomalies) {
         interface ContentAnomaly {
           type: string;
           queryId: string;
           url: string;
           title: string;
-          anomalyScore: number; 
+          anomalyScore: number;
           timestamp: string;
         }
+        interface SemanticInsights {
+          contentAnomalies: ContentAnomaly[];
+        }
 
-                csvContent += (semanticInsights.contentAnomalies as ContentAnomaly[]).map((row: ContentAnomaly) =>
-                  `${row.type},${row.queryId},${row.url},${row.title},${row.anomalyScore},${row.timestamp}`
-                ).join("\n");
+        csvContent += (semanticInsights.contentAnomalies as ContentAnomaly[]).map((row: ContentAnomaly) =>
+          `${row.type},${row.queryId},${row.url},${row.title},${row.anomalyScore},${row.timestamp}`
+        ).join("\n");
       } else {
         csvContent += (Array.isArray(analyticsData.rankingTrendData) ? analyticsData.rankingTrendData : []).map(row =>
           `${row?.date || "N/A"},${row?.avgPosition || 0},${row?.volatility || 0},${row?.predictedPosition || 0},${row?.isAnomaly || false},${row?.count || 0}`
         ).join("\n");
       }
+
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
       link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `Exa_Analytics_${dataSource}_${timeRange}_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute("download", filename);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      toast.success("Analytics data exported successfully");
+
+      const exportType = analyticsData.hasSemanticData ? "semantic analytics" : "analytics";
+      toast.success(`${exportType} data exported successfully`);
     } catch {
       toast.error("Failed to export data");
     }
-  }, [timeRange, dataSource, filteredSnapshotsLength, analyticsData.rankingTrendData, semanticInsights]);
+  }, [timeRange, dataSource, filteredSnapshotsLength, analyticsData, semanticInsights]);
 
   const handleClearFilters = useCallback(() => {
     setQueryTypeFilter("");
@@ -406,6 +513,38 @@ const userId = user?.$id;
   const handleDeduplicationStrategyChange = useCallback((value: DeduplicationStrategy) => {
     if (value !== deduplicationStrategy) setDeduplicationStrategy(value);
   }, [deduplicationStrategy]);
+
+  // ✅ NEW: Render semantic enhancement indicators
+  const renderDataSourceIndicator = () => {
+    if (!analyticsData.hasSemanticData && dataSource === 'appwrite') {
+      return (
+        <Badge variant="outline" className="ml-2">
+          <BarChart3 className="w-3 h-3 mr-1" />
+          Traditional
+        </Badge>
+      );
+    }
+
+    if (analyticsData.hasSemanticData) {
+      return (
+        <Badge variant="default" className="ml-2 bg-purple-600">
+          <Brain className="w-3 h-3 mr-1" />
+          Semantic Enhanced
+        </Badge>
+      );
+    }
+
+    if (dataSource === 'weaviate') {
+      return (
+        <Badge variant="secondary" className="ml-2">
+          <Brain className="w-3 h-3 mr-1" />
+          AI-Powered
+        </Badge>
+      );
+    }
+
+    return null;
+  };
 
   // Authentication guard
   if (!user) {
@@ -495,10 +634,10 @@ const userId = user?.$id;
                 {connectionStatus === "connecting"
                   ? "Connecting..."
                   : connectionStatus === "connected"
-                  ? "Vector DB Connected"
-                  : connectionStatus === "error"
-                  ? "Connection Error"
-                  : "Disconnected"}
+                    ? "Vector DB Connected"
+                    : connectionStatus === "error"
+                      ? "Connection Error"
+                      : "Disconnected"}
               </Badge>
             )}
             {dataSource === "weaviate" && connectionHealth && (
@@ -598,23 +737,23 @@ const userId = user?.$id;
 
       {/* Main Cards */}
       <RevolutionaryStatsCard
-  analytics={analytics}
-  snapshots={stableSnapshots}
-  semanticAnalytics={dataSource === "weaviate" ? semanticInsights : undefined} // Use undefined not null
-  weaviateConnected={dataSource === "weaviate" && isConnected}
-  enhancedMetrics={dataSource === "weaviate" && enhancedMetrics ? {
-    semanticStability: typeof enhancedMetrics.semanticStability === 'number' 
-      ? enhancedMetrics.semanticStability 
-      : enhancedMetrics.semanticStability?.stabilityScore,
-    contentCoherence: typeof enhancedMetrics.contentCoherence === 'number'
-      ? enhancedMetrics.contentCoherence
-      : enhancedMetrics.contentCoherence?.score,
-    diversityIndex: enhancedMetrics.diversityIndex,
-    anomalyCount: enhancedMetrics.anomalyCount,
-    clusterQuality: enhancedMetrics.statisticalValidation?.accuracy,
-    vectorSpaceUtilization: enhancedMetrics.dataQuality?.completeness
-  } : undefined}
-/>
+        analytics={analytics}
+        snapshots={stableSnapshots}
+        semanticAnalytics={dataSource === "weaviate" ? semanticInsights : undefined} // Use undefined not null
+        weaviateConnected={dataSource === "weaviate" && isConnected}
+        enhancedMetrics={dataSource === "weaviate" && enhancedMetrics ? {
+          semanticStability: typeof enhancedMetrics.semanticStability === 'number'
+            ? enhancedMetrics.semanticStability
+            : enhancedMetrics.semanticStability?.stabilityScore,
+          contentCoherence: typeof enhancedMetrics.contentCoherence === 'number'
+            ? enhancedMetrics.contentCoherence
+            : enhancedMetrics.contentCoherence?.score,
+          diversityIndex: enhancedMetrics.diversityIndex,
+          anomalyCount: enhancedMetrics.anomalyCount,
+          clusterQuality: enhancedMetrics.statisticalValidation?.accuracy,
+          vectorSpaceUtilization: enhancedMetrics.dataQuality?.completeness
+        } : undefined}
+      />
 
       {/* Strategy Info Card */}
       {dataSource === "appwrite" && (
@@ -710,13 +849,13 @@ const userId = user?.$id;
           <div className="grid gap-6">
             {isLoading
               ? <>
-                  <RankingBarChartSkeleton />
-                  <QueryPerformanceStatsTableSkeleton />
-                </>
+                <RankingBarChartSkeleton />
+                <QueryPerformanceStatsTableSkeleton />
+              </>
               : <>
-                  <RankingBarChart data={analyticsData.rankingTrendData || []} />
-                  <QueryPerformanceStatsTable stats={analyticsData.queryPerformanceStats || []} />
-                </>
+                <RankingBarChart data={analyticsData.rankingTrendData || []} />
+                <QueryPerformanceStatsTable stats={analyticsData.queryPerformanceStats || []} />
+              </>
             }
           </div>
         </TabsContent>
@@ -725,9 +864,9 @@ const userId = user?.$id;
           {isLoading
             ? <PerformanceChartsSkeleton />
             : <PerformanceCharts
-                performanceData={analyticsData.performanceData || []}
-                successRateByHour={analyticsData.successRateByHour || []}
-              />
+              performanceData={analyticsData.performanceData || []}
+              successRateByHour={analyticsData.successRateByHour || []}
+            />
           }
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
@@ -799,16 +938,16 @@ const userId = user?.$id;
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div>
                           <div className="text-2xl font-bold text-purple-600">
-                            {(typeof enhancedMetrics.semanticStability === 'number' 
-                              ? enhancedMetrics.semanticStability 
+                            {(typeof enhancedMetrics.semanticStability === 'number'
+                              ? enhancedMetrics.semanticStability
                               : enhancedMetrics.semanticStability?.stabilityScore || 0).toFixed(1)}%
                           </div>
                           <div className="text-sm text-gray-500">Semantic Stability</div>
                         </div>
                         <div>
                           <div className="text-2xl font-bold text-blue-600">
-                            {(typeof enhancedMetrics.contentCoherence === 'number' 
-                              ? enhancedMetrics.contentCoherence 
+                            {(typeof enhancedMetrics.contentCoherence === 'number'
+                              ? enhancedMetrics.contentCoherence
                               : enhancedMetrics.contentCoherence?.score || 0).toFixed(1)}%
                           </div>
                           <div className="text-sm text-gray-500">Content Coherence</div>
@@ -828,166 +967,126 @@ const userId = user?.$id;
                       </div>
                     </CardContent>
                   </Card>
-                  {/* Add this section after the existing enhanced metrics card */}
-<Card>
-  <CardHeader>
-    <CardTitle className="flex items-center gap-2">
-      <BarChart3 className="h-5 w-5 text-blue-600" />
-      Statistical Validation Dashboard
-    </CardTitle>
-    <CardDescription>
-      Enterprise-grade statistical analysis with confidence intervals and significance testing
-    </CardDescription>
-  </CardHeader>
-  <CardContent>
-    <div className="grid gap-6 lg:grid-cols-2">
-      {/* Model Performance Metrics */}
-      <div className="space-y-4">
-        <h4 className="font-semibold">Prediction Model Performance</h4>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="text-center p-3 bg-green-50 rounded-lg">
-            <div className="text-2xl font-bold text-green-600">
-              {enhancedMetrics?.statisticalValidation?.accuracy?.toFixed(1) || "N/A"}%
-            </div>
-            <div className="text-sm text-green-700">Model Accuracy</div>
-          </div>
-          <div className="text-center p-3 bg-blue-50 rounded-lg">
-            <div className="text-2xl font-bold text-blue-600">
-              {enhancedMetrics?.statisticalValidation?.mape?.toFixed(2) || "N/A"}
-            </div>
-            <div className="text-sm text-blue-700">Mean Error Rate</div>
-          </div>
-          <div className="text-center p-3 bg-purple-50 rounded-lg">
-            <div className="text-2xl font-bold text-purple-600">
-              {enhancedMetrics?.statisticalValidation?.f1Score?.toFixed(2) || "N/A"}
-            </div>
-            <div className="text-sm text-purple-700">F1 Score</div>
-          </div>
-          <div className="text-center p-3 bg-indigo-50 rounded-lg">
-            <div className="text-2xl font-bold text-indigo-600">95%</div>
-            <div className="text-sm text-indigo-700">Confidence Level</div>
-          </div>
-        </div>
-        
-        {enhancedMetrics?.statisticalValidation && (
-          <div className="mt-4">
-            <div className="flex justify-between text-sm mb-2">
-              <span>Model Reliability</span>
-              <span>{enhancedMetrics.statisticalValidation.accuracy.toFixed(1)}%</span>
-            </div>
-            <Progress value={enhancedMetrics.statisticalValidation.accuracy} className="h-2" />
-            <div className="text-xs text-gray-500 mt-1">
-              Last validated: {new Date(enhancedMetrics.statisticalValidation.lastValidated).toLocaleDateString()}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Data Quality Metrics */}
-      <div className="space-y-4">
-        <h4 className="font-semibold">Data Quality Assessment</h4>
-        {enhancedMetrics?.dataQuality ? (
-          <div className="space-y-3">
-            {Object.entries(enhancedMetrics.dataQuality).map(([key, value]) => {
-              if (key === 'assessedAt') return null;
-              const label = key.charAt(0).toUpperCase() + key.slice(1);
-              const numValue = typeof value === 'number' ? value : 0;
-              const displayValue = key === 'anomalyCount' ? value : `${numValue.toFixed(1)}%`;
-              
-              return (
-                <div key={key} className="space-y-1">
-                  <div className="flex justify-between text-sm">
-                    <span>{label}</span>
-                    <span className={`font-medium ${
-                      key === 'anomalyCount' ? 
-                      (numValue > 5 ? 'text-red-600' : 'text-green-600') :
-                      (numValue > 80 ? 'text-green-600' : numValue > 60 ? 'text-yellow-600' : 'text-red-600')
-                    }`}>
-                      {displayValue}
-                    </span>
-                  </div>
-                  {key !== 'anomalyCount' && (
-                    <Progress 
-                      value={numValue} 
-                      className={`h-2 ${
-                        numValue > 80 ? 'text-green-600' : 
-                        numValue > 60 ? 'text-yellow-600' : 'text-red-600'
-                      }`} 
-                    />
-                  )}
-                </div>
-              );
-            })}
-            <div className="text-xs text-gray-500 pt-2 border-t">
-              Data quality assessed: {new Date(enhancedMetrics.dataQuality.assessedAt).toLocaleDateString()}
-            </div>
-          </div>
-        ) : (
-          <div className="text-center py-8 text-gray-500">
-            <AlertCircle className="h-8 w-8 mx-auto mb-2" />
-            <div className="text-sm">Data quality assessment not available</div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="mt-2"
-              onClick={async () => {
-                try {
-                  await assessDataQuality(user.$id);
-                  toast.success("Data quality assessment completed");
-                } catch (error) {
-                  toast.error("Failed to assess data quality");
-                }
-              }}
-            >
-              Run Assessment
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  </CardContent>
-</Card>
-
-{/* Real-time Processing Status */}
-<Card>
-  <CardHeader>
-    <CardTitle className="flex items-center gap-2">
-      <Zap className="h-5 w-5 text-yellow-600" />
-      Real-time Analytics Processing
-    </CardTitle>
-  </CardHeader>
-  <CardContent>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div className="text-center p-4 bg-yellow-50 rounded-lg">
-        <div className="text-2xl font-bold text-yellow-600">
-          {realTimeMetrics?.processingLatency || "N/A"}ms
-        </div>
-        <div className="text-sm text-yellow-700">Processing Latency</div>
-      </div>
-      <div className="text-center p-4 bg-green-50 rounded-lg">
-        <div className="text-2xl font-bold text-green-600">
-          {realTimeMetrics?.throughput || "N/A"}
-        </div>
-        <div className="text-sm text-green-700">Queries/Second</div>
-      </div>
-      <div className="text-center p-4 bg-blue-50 rounded-lg">
-        <div className="text-2xl font-bold text-blue-600">
-          {realTimeMetrics?.vectorSearchPerformance?.averageResponseTime || "N/A"}ms
-        </div>
-        <div className="text-sm text-blue-700">Vector Search Time</div>
-      </div>
-    </div>
-    
-    <div className="mt-4 flex items-center justify-between">
-      <span className="text-sm text-gray-600">Real-time processing status</span>
-      <Badge variant={realTimeMetrics?.subscribed ? "default" : "secondary"}>
-        {realTimeMetrics?.subscribed ? "Active" : "Inactive"}
-      </Badge>
-    </div>
-  </CardContent>
-</Card>
-
                 )}
+                {/* Add this section after the existing enhanced metrics card */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="h-5 w-5 text-blue-600" />
+                      Statistical Validation Dashboard
+                    </CardTitle>
+                    <CardDescription>
+                      Enterprise-grade statistical analysis with confidence intervals and significance testing
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-6 lg:grid-cols-2">
+                      {/* Model Performance Metrics */}
+                      <div className="space-y-4">
+                        <h4 className="font-semibold">Prediction Model Performance</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="text-center p-3 bg-green-50 rounded-lg">
+                            <div className="text-2xl font-bold text-green-600">
+                              {enhancedMetrics?.statisticalValidation?.accuracy?.toFixed(1) || "N/A"}%
+                            </div>
+                            <div className="text-sm text-green-700">Model Accuracy</div>
+                          </div>
+                          <div className="text-center p-3 bg-blue-50 rounded-lg">
+                            <div className="text-2xl font-bold text-blue-600">
+                              {enhancedMetrics?.statisticalValidation?.mape?.toFixed(2) || "N/A"}
+                            </div>
+                            <div className="text-sm text-blue-700">Mean Error Rate</div>
+                          </div>
+                          <div className="text-center p-3 bg-purple-50 rounded-lg">
+                            <div className="text-2xl font-bold text-purple-600">
+                              {enhancedMetrics?.statisticalValidation?.f1Score?.toFixed(2) || "N/A"}
+                            </div>
+                            <div className="text-sm text-purple-700">F1 Score</div>
+                          </div>
+                          <div className="text-center p-3 bg-indigo-50 rounded-lg">
+                            <div className="text-2xl font-bold text-indigo-600">95%</div>
+                            <div className="text-sm text-indigo-700">Confidence Level</div>
+                          </div>
+                        </div>
+
+                        {enhancedMetrics?.statisticalValidation && (
+                          <div className="mt-4">
+                            <div className="flex justify-between text-sm mb-2">
+                              <span>Model Reliability</span>
+                              <span>{enhancedMetrics.statisticalValidation.accuracy.toFixed(1)}%</span>
+                            </div>
+                            <Progress value={enhancedMetrics.statisticalValidation.accuracy} className="h-2" />
+                            <div className="text-xs text-gray-500 mt-1">
+                              Last validated: {new Date(enhancedMetrics.statisticalValidation.lastValidated).toLocaleDateString()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Data Quality Metrics */}
+                      <div className="space-y-4">
+                        <h4 className="font-semibold">Data Quality Assessment</h4>
+                        {enhancedMetrics?.dataQuality ? (
+                          <div className="space-y-3">
+                            {Object.entries(enhancedMetrics.dataQuality).map(([key, value]) => {
+                              if (key === 'assessedAt') return null;
+                              const label = key.charAt(0).toUpperCase() + key.slice(1);
+                              const numValue = typeof value === 'number' ? value : 0;
+                              const displayValue = key === 'anomalyCount' ? value : `${numValue.toFixed(1)}%`;
+
+                              return (
+                                <div key={key} className="space-y-1">
+                                  <div className="flex justify-between text-sm">
+                                    <span>{label}</span>
+                                    <span className={`font-medium ${key === 'anomalyCount' ?
+                                      (numValue > 5 ? 'text-red-600' : 'text-green-600') :
+                                      (numValue > 80 ? 'text-green-600' : numValue > 60 ? 'text-yellow-600' : 'text-red-600')
+                                      }`}>
+                                      {displayValue}
+                                    </span>
+                                  </div>
+                                  {key !== 'anomalyCount' && (
+                                    <Progress
+                                      value={numValue}
+                                      className={`h-2 ${numValue > 80 ? 'text-green-600' :
+                                        numValue > 60 ? 'text-yellow-600' : 'text-red-600'
+                                        }`}
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <div className="text-xs text-gray-500 pt-2 border-t">
+                              Data quality assessed: {new Date(enhancedMetrics.dataQuality.assessedAt).toLocaleDateString()}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center py-8 text-gray-500">
+                            <AlertCircle className="h-8 w-8 mx-auto mb-2" />
+                            <div className="text-sm">Data quality assessment not available</div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-2"
+                              onClick={async () => {
+                                try {
+                                  await assessDataQuality(user.$id);
+                                  toast.success("Data quality assessment completed");
+                                } catch (error) {
+                                  toast.error("Failed to assess data quality");
+                                }
+                              }}
+                            >
+                              Run Assessment
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+
               </div>
               {semanticInsights?.contentAnomalies && semanticInsights.contentAnomalies.length > 0 && (
                 <Card>
@@ -999,7 +1098,8 @@ const userId = user?.$id;
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {semanticInsights.contentAnomalies.slice(0, 5).map((anomaly, index) => (
+
+                      {semanticInsights.contentAnomalies.slice(0, 5).map((anomaly: any, index: number) => (
                         <div key={index} className="border rounded-lg p-3">
                           <div className="flex items-center justify-between mb-2">
                             <Badge variant="destructive" className="text-xs">
@@ -1012,7 +1112,7 @@ const userId = user?.$id;
                           <h4 className="font-medium text-sm mb-1">{anomaly.title}</h4>
                           <p className="text-xs text-gray-600 mb-1">{anomaly.description}</p>
                           <a href={anomaly.url} target="_blank" rel="noopener noreferrer"
-                             className="text-xs text-blue-500 hover:underline">
+                            className="text-xs text-blue-500 hover:underline">
                             {anomaly.url}
                           </a>
                         </div>
@@ -1022,7 +1122,7 @@ const userId = user?.$id;
                 </Card>
               )}
               {stableQueries.length > 0 && (
-                <SERPJourneyFlow snapshots={analyticsData.filteredSnapshots} />
+                <SERPJourneyFlow snapshots={analyticsData.filteredSnapshots || []} />
               )}
             </>
           ) : (

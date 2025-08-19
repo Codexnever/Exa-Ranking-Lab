@@ -1,3 +1,4 @@
+// app/api/weaviate/somilar-queries/route.ts
 import { NextResponse } from 'next/server';
 import { WeaviateService } from '@/app/services/weaviate-service';
 

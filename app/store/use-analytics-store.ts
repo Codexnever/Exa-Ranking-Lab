@@ -1,10 +1,8 @@
-// hooks/use-analytics-store.ts - FIXED VERSION
+// app/store/use-analytics-store.ts 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AnalyticsData, RankingSnapshot, QueryConfig } from "@/lib/type";
 import { AppwriteAnalyticsService } from "@/app/services/AppwriteAnalyticsService";
-import { WeaviateAnalyticsService } from "@/app/services/weaviate-analytics-service";
-import { WeaviateService } from "@/app/services/weaviate-service";
 
 interface AnalyticsState {
   analytics: AnalyticsData | null;
@@ -13,9 +11,8 @@ interface AnalyticsState {
   lastCalculationHash: string;
   dataSource: 'appwrite' | 'weaviate';
   
-  // Service instances
+  // Only client-safe service
   appwriteService: AppwriteAnalyticsService;
-  weaviateService: WeaviateAnalyticsService;
 }
 
 interface AnalyticsActions {
@@ -31,10 +28,82 @@ interface AnalyticsActions {
 
 type AnalyticsStore = AnalyticsState & AnalyticsActions;
 
-// Initialize services
-const weaviateServiceInstance = new WeaviateService();
+// Only initialize client-safe services
 const appwriteService = new AppwriteAnalyticsService(false);
-const weaviateService = new WeaviateAnalyticsService(false, weaviateServiceInstance);
+
+// ✅ SSR-SAFE STORAGE IMPLEMENTATION
+const createStorage = () => {
+  // Check if we're in browser environment
+  if (typeof window === 'undefined') {
+    // Server-side: return mock storage that doesn't do anything
+    return {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {}
+    };
+  }
+  
+  // Client-side: return safe localStorage wrapper
+  return {
+    getItem: (key: string) => {
+      try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : null;
+      } catch (error) {
+        console.error('[Analytics] Failed to read from localStorage:', error);
+        return null;
+      }
+    },
+    setItem: (key: string, value: any) => {
+      try {
+        const serialized = JSON.stringify(value);
+        
+        // Check size limit (localStorage ~5MB limit)
+        const sizeInBytes = new Blob([serialized]).size;
+        const sizeInMB = sizeInBytes / (1024 * 1024);
+        
+        if (sizeInMB > 4.5) {
+          console.warn(`[Analytics] Data too large for localStorage (${sizeInMB.toFixed(2)}MB), using minimal storage`);
+          
+          // Store only essential data
+          const minimalValue = {
+            dataSource: value.dataSource || 'appwrite',
+            lastCalculationHash: value.lastCalculationHash || '',
+          };
+          localStorage.setItem(key, JSON.stringify(minimalValue));
+          return;
+        }
+        
+        localStorage.setItem(key, serialized);
+      } catch (error) {
+        console.error('[Analytics] LocalStorage error:', error);
+        
+        // Try to clear space and store minimal data
+        try {
+          localStorage.removeItem(key);
+          localStorage.removeItem('snapshots');
+          localStorage.removeItem('queries');
+          
+          const minimalValue = {
+            dataSource: value.dataSource || 'appwrite'
+          };
+          localStorage.setItem(key, JSON.stringify(minimalValue));
+        } catch (retryError) {
+          console.error('[Analytics] Failed to recover localStorage:', retryError);
+        }
+      }
+    },
+    removeItem: (key: string) => {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(key);
+        }
+      } catch (error) {
+        console.error('[Analytics] Failed to remove from localStorage:', error);
+      }
+    }
+  };
+};
 
 export const useAnalyticsStore = create<AnalyticsStore>()(
   persist(
@@ -45,22 +114,22 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
       lastCalculationHash: "",
       dataSource: 'appwrite',
       
-      // Service instances
       appwriteService,
-      weaviateService,
 
       setDataSource: (source: 'appwrite' | 'weaviate') => {
+        console.log(`[Analytics] Switching data source to: ${source}`);
         set({ dataSource: source });
+        
         // Clear analytics when switching to trigger fresh fetch
         if (source !== get().dataSource) {
           set({ analytics: null, lastCalculationHash: "" });
         }
       },
 
-      fetchAnalytics: async (userId?: string, timeRangeMs?: number, queries: QueryConfig[] = [], forceRefetch = false) => {
+      fetchAnalytics: async (userId?: string, timeRangeMs?: number, queries: QueryConfig[] = [], forceRefresh = false) => {
         const { analytics, dataSource } = get();
         
-        if (analytics && !forceRefetch) return;
+        if (analytics && !forceRefresh) return;
         
         set({ isLoading: true, error: null });
         
@@ -68,10 +137,10 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
           let analyticsData: AnalyticsData;
 
           if (dataSource === 'weaviate') {
-            // Use Weaviate analytics service
+            // Use API proxy for Weaviate
             analyticsData = await get().getWeaviateAnalytics(userId || '', timeRangeMs, queries);
           } else {
-            // Use Appwrite analytics service
+            // Use Appwrite analytics service (client-safe)
             if (userId && timeRangeMs) {
               analyticsData = await get().getAppwriteAnalytics(userId, timeRangeMs, queries);
             } else {
@@ -93,7 +162,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
           const message = error instanceof Error ? error.message : "Failed to fetch analytics";
           set({ error: message, isLoading: false });
           
-          // ✅ FIXED: Proper client-side check and error handling
+          // Client-side error handling
           if (typeof window !== 'undefined') {
             // Dynamic import for client-side only
             import('sonner').then(({ toast }) => {
@@ -116,9 +185,45 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
         return await appwriteService.getAnalytics(userId, timeRangeMs, queries);
       },
 
-      getWeaviateAnalytics: async (userId: string, timeRangeMs: number = 30 * 24 * 60 * 60 * 1000, queries: QueryConfig[] = []) => {
-        const { weaviateService } = get();
-        return await weaviateService.getSemanticAnalyticsMerged(userId, timeRangeMs, queries);
+      // ✅ FIXED: Correct API endpoint
+      getWeaviateAnalytics: async (
+        userId: string,
+        timeRangeMs: number = 30 * 24 * 60 * 60 * 1000,
+        queries: QueryConfig[] = []
+      ) => {
+        try {
+          console.log(`[Store] Fetching Weaviate analytics via API proxy for user: ${userId}`);
+
+          // ✅ CORRECT API ENDPOINT
+          const response = await fetch('/api/weaviate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userId,
+              timeRangeMs,
+              queries
+            })
+          });
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+          }
+
+          if (!result.success || !result.data) {
+            throw new Error(result.error || 'No data received from Weaviate API');
+          }
+
+          console.log(`[Store] Successfully fetched Weaviate analytics for user: ${userId}`);
+          return result.data;
+
+        } catch (error) {
+          console.error('[Store] Weaviate analytics fetch failed:', error);
+          throw error;
+        }
       },
 
       clearAnalytics: () => {
@@ -135,7 +240,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
           }
 
           const { appwriteService } = get();
-          const analytics = appwriteService.calculateAnalyticsFromSnapshots(snapshots, queries);
+          const analytics = appwriteService.calculateAnalyticsFromSnapshots(snapshots);
           
           set({ 
             analytics, 
@@ -171,11 +276,56 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
     }),
     {
       name: 'analytics-storage',
-      partialize: (state) => ({ 
-        analytics: state.analytics,
-        lastCalculationHash: state.lastCalculationHash,
-        dataSource: state.dataSource
-      }),
+      
+      // ✅ SSR-SAFE STORAGE
+      storage: createStorage(),
+      
+      // ✅ OPTIMIZED: Only persist lightweight data
+      partialize: (state) => {
+        // Only persist essential, lightweight data
+        const essentialData = {
+          dataSource: state.dataSource,
+          lastCalculationHash: state.lastCalculationHash,
+          // Don't persist full analytics object to avoid quota issues
+          analyticsSummary: state.analytics ? {
+            rankingStability: state.analytics.rankingStability,
+            volatilityIndex: state.analytics.volatilityIndex,
+            domainDiversity: state.analytics.domainDiversity,
+            timeRangeMs: state.analytics.timeRangeMs,
+          } : null
+        };
+        
+        return essentialData;
+      },
+
+      // ✅ HANDLE HYDRATION MISMATCH
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          console.log('[Analytics] Store rehydrated successfully');
+        }
+      },
+      
+      // ✅ SKIP HYDRATION ON SERVER
+      skipHydration: typeof window === 'undefined',
     }
   )
 );
+
+// ✅ EXPORT HOOK WITH SSR SAFETY
+export const useAnalyticsStoreSSR = () => {
+  // Only use the store on client-side to avoid hydration mismatches
+  if (typeof window === 'undefined') {
+    return {
+      analytics: null,
+      isLoading: false,
+      error: null,
+      dataSource: 'appwrite' as const,
+      setDataSource: () => {},
+      fetchAnalytics: async () => {},
+      clearAnalytics: () => {},
+      // ... other default methods
+    };
+  }
+  
+  return useAnalyticsStore();
+};

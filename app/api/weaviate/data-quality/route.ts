@@ -1,3 +1,4 @@
+// app/api/weaviate/data-quality/route.ts
 import { NextResponse } from "next/server";
 import { AppwriteAnalyticsService } from "@/app/services/AppwriteAnalyticsService";
 

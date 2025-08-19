@@ -1,10 +1,9 @@
 // app/services/enhanced-analytics-service.ts
 import { AnalyticsService } from "./analytics-service";
 import { EnhancedAnalyticsData } from "@/lib/type";
-import type { WeaviateService } from "./weaviate-service"
-import {   ContentCoherenceResult,
-  SemanticStabilityResult } from "@/lib/type";
-import { 
+import type { WeaviateService } from "./weaviate-service";
+import { ContentCoherenceResult, SemanticStabilityResult } from "@/lib/type";
+import {
   calculateUMassCoherence,
   calculateSemanticStability,
   calculateLinearRegression,
@@ -40,12 +39,9 @@ export interface SemanticInsights {
 }
 
 export interface EnhancedMetrics {
-  // Enterprise-level semantic metrics
   semanticStability: SemanticStabilityResult | number;
   contentCoherence: ContentCoherenceResult | number;
   diversityIndex: number;
-  
-  // Statistical validation
   statisticalValidation?: {
     accuracy: number;
     precision: number;
@@ -55,8 +51,6 @@ export interface EnhancedMetrics {
     confidenceLevel: number;
     lastValidated: number;
   };
-  
-  // Data quality metrics
   dataQuality?: {
     completeness: number;
     accuracy: number;
@@ -66,8 +60,6 @@ export interface EnhancedMetrics {
     anomalyCount: number;
     assessedAt: number;
   };
-  
-  // Performance insights
   performanceInsights?: {
     anomalyDetectionAccuracy: number;
     clusteringQuality: number;
@@ -84,17 +76,12 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     this.weaviateService = weaviateService;
   }
 
-  /**
-   * ENHANCED: Get comprehensive semantic analytics with enterprise-level calculations
-   */
   async getSemanticAnalytics(userId: string, timeRangeMs: number): Promise<EnhancedAnalyticsData> {
     try {
       console.log(`[EnhancedAnalytics] Starting comprehensive analysis for user: ${userId}`);
-      
-      // Get enhanced traditional analytics as base (using our new method)
-      const traditional = await this.calculateEnhancedAnalyticsFromSnapshots(
-        await this.getSnapshotsForUser(userId, timeRangeMs)
-      );
+
+      const snapshots = await this.getSnapshotsForUser(userId, timeRangeMs);
+      const traditional = await this.calculateEnhancedAnalyticsFromSnapshots(snapshots);
 
       // Run semantic analysis in parallel
       const [contentAnomalies, semanticClusters, contentEvolution] = await Promise.all([
@@ -103,7 +90,6 @@ export class EnhancedAnalyticsService extends AnalyticsService {
         this.analyzeContentEvolution(userId, timeRangeMs),
       ]);
 
-      // Build comprehensive semantic insights
       const semanticInsights: SemanticInsights = {
         contentAnomalies: {
           count: contentAnomalies.length,
@@ -121,11 +107,12 @@ export class EnhancedAnalyticsService extends AnalyticsService {
         },
         weaviateMetrics: this.weaviateService.getCacheStats(),
       };
-        const enhancedMetrics = await this.calculateEnterpriseEnhancedMetrics({
+
+      const enhancedMetrics = await this.calculateEnterpriseEnhancedMetrics({
         contentAnomalies,
         semanticClusters,
         contentEvolution,
-        snapshots: traditional.filteredSnapshots || [],
+        snapshots,
         userId
       });
 
@@ -137,15 +124,14 @@ export class EnhancedAnalyticsService extends AnalyticsService {
         dataSourceType: 'weaviate',
         calculatedAt: new Date().toISOString(),
       };
-
     } catch (err) {
       console.error("[EnhancedAnalytics] Semantic analytics failed:", err);
       const fallback = await this.calculateEnhancedAnalyticsFromSnapshots(
         await this.getSnapshotsForUser(userId, timeRangeMs)
       );
-      return { 
-        ...fallback, 
-        semanticInsights: undefined, 
+      return {
+        ...fallback,
+        semanticInsights: undefined,
         enhancedMetrics: undefined,
         error: "Semantic analysis unavailable",
         dataSourceType: 'appwrite'
@@ -153,108 +139,107 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     }
   }
 
-  /**
-   * NEW: Calculate enterprise-level enhanced metrics using actual calculations
-   */
- private async calculateEnterpriseEnhancedMetrics({
-  contentAnomalies,
-  semanticClusters,
-  contentEvolution,
-  snapshots,
-  userId
-}: {
-  contentAnomalies: any[];
-  semanticClusters: any[];
-  contentEvolution: any;
-  snapshots: any[];
-  userId: string;
-}): Promise<EnhancedMetrics> {
-  try {
-      // 1. SEMANTIC STABILITY - Using enterprise calculation
+  // -- Advanced enterprise metric calculations: --
+  private async calculateEnterpriseEnhancedMetrics({
+    contentAnomalies,
+    semanticClusters,
+    contentEvolution,
+    snapshots,
+    userId
+  }: {
+    contentAnomalies: any[];
+    semanticClusters: any[];
+    contentEvolution: any;
+    snapshots: any[];
+    userId: string;
+  }): Promise<EnhancedMetrics> {
+    try {
       let semanticStability: SemanticStabilityResult | number;
-      
       if (contentEvolution.periods && contentEvolution.periods.length > 1) {
         const timeSeriesData = contentEvolution.periods.map((period: any) => ({
           timestamp: new Date(period.startDate).getTime(),
           content: period.themes?.map((t: any) => t.theme).join(' ') || ''
         })).filter((item: any) => item.content.length > 0);
 
-        if (timeSeriesData.length > 1) {
-          semanticStability = calculateSemanticStability(timeSeriesData);
-        } else {
-          semanticStability = this.calculateSemanticStabilityFallback(contentAnomalies, semanticClusters);
-        }
+        semanticStability = timeSeriesData.length > 1
+          ? calculateSemanticStability(timeSeriesData)
+          : this.calculateSemanticStabilityFallback(contentAnomalies, semanticClusters);
       } else {
         semanticStability = this.calculateSemanticStabilityFallback(contentAnomalies, semanticClusters);
       }
 
-      // 2. CONTENT COHERENCE - Using enterprise calculation
       let contentCoherence: ContentCoherenceResult | number;
-      
       const documents = this.extractDocumentsFromClusters(semanticClusters);
-      if (documents.length > 0) {
-        contentCoherence = calculateUMassCoherence(documents, 'umass');
-      } else {
-        contentCoherence = this.calculateContentCoherenceFallback(semanticClusters);
-      }
+      contentCoherence = documents.length > 0
+        ? calculateUMassCoherence(documents, 'umass')
+        : this.calculateContentCoherenceFallback(semanticClusters);
 
-      // 3. DIVERSITY INDEX - Enhanced calculation
       const diversityIndex = this.calculateAdvancedDiversityIndex(semanticClusters, contentAnomalies);
 
-      // 4. STATISTICAL VALIDATION - Based on actual performance
       const statisticalValidation = await this.calculateStatisticalValidation(
-        contentAnomalies, 
+        contentAnomalies,
         semanticClusters,
         snapshots
       );
 
-      // 5. DATA QUALITY - Enhanced assessment
       const dataQuality = this.calculateEnhancedDataQuality(
         contentAnomalies,
         semanticClusters,
         snapshots
       );
 
-      // 6. PERFORMANCE INSIGHTS - Weaviate-specific metrics
       const performanceInsights = this.calculatePerformanceInsights(
         contentAnomalies,
         semanticClusters
       );
 
       return {
-      semanticStability,
-      contentCoherence,
-      diversityIndex,
-      statisticalValidation,
-      dataQuality,
-      performanceInsights
-    };
-
-   } catch (error) {
-    console.error("[EnhancedAnalytics] Enterprise metrics calculation failed:", error);
-      
-      // Fallback to basic calculations
-     return {
-      semanticStability: this.calculateSemanticStabilityFallback(contentAnomalies, semanticClusters),
-      contentCoherence: this.calculateContentCoherenceFallback(semanticClusters),
-      diversityIndex: this.calculateSemanticDiversity(semanticClusters),
-      // Don't include undefined optional properties
-    };
+        semanticStability,
+        contentCoherence,
+        diversityIndex,
+        statisticalValidation,
+        dataQuality,
+        performanceInsights
+      };
+    } catch (error) {
+      console.error("[EnhancedAnalytics] Enterprise metrics calculation failed:", error);
+      return {
+        semanticStability: this.calculateSemanticStabilityFallback(contentAnomalies, semanticClusters),
+        contentCoherence: this.calculateContentCoherenceFallback(semanticClusters),
+        diversityIndex: this.calculateSemanticDiversity(semanticClusters),
+      };
     }
   }
 
-  /**
-   * NEW: Extract documents from semantic clusters for coherence calculation
-   */
-  private extractDocumentsFromClusters(clusters: any[]): Array<{title: string, content: string}> {
-    const documents: Array<{title: string, content: string}> = [];
+  // ✅ NEW: Missing method implementations
+  private calculateSemanticStabilityFallback(contentAnomalies: any[], semanticClusters: any[]): number {
+    if (!contentAnomalies.length) return 100;
     
-    clusters.forEach(cluster => {
+    const anomalyRate = Math.min(contentAnomalies.length / 100, 1);
+    const avgCoherence = semanticClusters.length > 0
+      ? semanticClusters.reduce((sum, cluster) => sum + (cluster.coherence || 0), 0) / semanticClusters.length
+      : 0.8;
+    
+    return Math.round((1 - anomalyRate) * avgCoherence * 100);
+  }
+
+  private calculateContentCoherenceFallback(semanticClusters: any[]): number {
+    if (!semanticClusters.length) return 80;
+    
+    const avgCoherence = semanticClusters.reduce((sum, cluster) => sum + (cluster.coherence || 0), 0) / semanticClusters.length;
+    return avgCoherence * 100;
+  }
+
+  private extractDocumentsFromClusters(semanticClusters: any[]): Array<{ title: string; content: string; vector?: number[] }> {
+    const documents: Array<{ title: string; content: string; vector?: number[] }> = [];
+    
+    semanticClusters.forEach(cluster => {
       cluster.items?.forEach((item: any) => {
-        if (item.title && (item.snippet || item.description)) {
+        if (item.title && (item.snippet || item.description || item.content)) {
           documents.push({
             title: item.title,
-            content: item.snippet || item.description || ''
+            content: item.snippet || item.description || item.content || '',
+            vector: item.vector
           });
         }
       });
@@ -263,22 +248,29 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     return documents;
   }
 
-  /**
-   * NEW: Calculate statistical validation based on actual performance
-   */
+  private calculateAdvancedDiversityIndex(semanticClusters: any[], contentAnomalies: any[]): number {
+    if (semanticClusters.length <= 1) return 0;
+
+    // Shannon entropy for theme diversity
+    const shannonDiversity = this.calculateSemanticDiversity(semanticClusters);
+
+    // Anomaly distribution diversity
+    const anomalyThemes = contentAnomalies.map(anomaly => this.extractTheme(anomaly.title || ""));
+    const anomalyDiversity = this.calculateThemeDiversity(anomalyThemes);
+
+    // Cluster size distribution (Gini coefficient)
+    const sizes = semanticClusters.map(cluster => cluster.size || 0);
+    const giniDiversity = this.calculateGiniDiversity(sizes);
+
+    // Weighted combination
+    return (shannonDiversity * 0.4 + anomalyDiversity * 0.3 + giniDiversity * 0.3);
+  }
+
   private async calculateStatisticalValidation(
     contentAnomalies: any[],
     semanticClusters: any[],
     snapshots: any[]
-  ): Promise<{
-    accuracy: number;
-    precision: number;
-    recall: number;
-    f1Score: number;
-    mape: number;
-    confidenceLevel: number;
-    lastValidated: number;
-  }> {
+  ) {
     // Calculate accuracy based on anomaly detection effectiveness
     const totalItems = contentAnomalies.length + semanticClusters.reduce((sum, cluster) => sum + (cluster.size || 0), 0);
     const accurateDetections = contentAnomalies.filter(anomaly => anomaly.anomalyScore > 1).length;
@@ -316,22 +308,11 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     };
   }
 
-  /**
-   * NEW: Enhanced data quality calculation
-   */
   private calculateEnhancedDataQuality(
     contentAnomalies: any[],
     semanticClusters: any[],
     snapshots: any[]
-  ): {
-    completeness: number;
-    accuracy: number;
-    consistency: number;
-    freshness: number;
-    validity: number;
-    anomalyCount: number;
-    assessedAt: number;
-  } {
+  ) {
     const now = Date.now();
     
     // Completeness: How much data we have vs expected
@@ -369,18 +350,10 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     };
   }
 
-  /**
-   * NEW: Calculate performance insights for Weaviate operations
-   */
   private calculatePerformanceInsights(
     contentAnomalies: any[],
     semanticClusters: any[]
-  ): {
-    anomalyDetectionAccuracy: number;
-    clusteringQuality: number;
-    semanticSearchEfficiency: number;
-    vectorCacheHitRate: number;
-  } {
+  ) {
     // Anomaly detection accuracy
     const highConfidenceAnomalies = contentAnomalies.filter(anomaly => anomaly.anomalyScore > 2).length;
     const anomalyDetectionAccuracy = contentAnomalies.length > 0 
@@ -413,30 +386,7 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     };
   }
 
-  /**
-   * NEW: Advanced diversity index using multiple factors
-   */
-  private calculateAdvancedDiversityIndex(semanticClusters: any[], contentAnomalies: any[]): number {
-    if (semanticClusters.length <= 1) return 0;
-
-    // Shannon entropy for theme diversity
-    const shannonDiversity = this.calculateSemanticDiversity(semanticClusters);
-
-    // Anomaly distribution diversity
-    const anomalyThemes = contentAnomalies.map(anomaly => this.extractTheme(anomaly.title || ""));
-    const anomalyDiversity = this.calculateThemeDiversity(anomalyThemes);
-
-    // Cluster size distribution (Gini coefficient)
-    const sizes = semanticClusters.map(cluster => cluster.size || 0);
-    const giniDiversity = this.calculateGiniDiversity(sizes);
-
-    // Weighted combination
-    return (shannonDiversity * 0.4 + anomalyDiversity * 0.3 + giniDiversity * 0.3);
-  }
-
-  /**
-   * NEW: Calculate theme diversity using Shannon entropy
-   */
+  // ✅ NEW: Additional helper methods
   private calculateThemeDiversity(themes: string[]): number {
     if (themes.length <= 1) return 0;
 
@@ -455,9 +405,6 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     return maxEntropy > 0 ? entropy / maxEntropy : 0;
   }
 
-  /**
-   * NEW: Calculate Gini diversity coefficient
-   */
   private calculateGiniDiversity(values: number[]): number {
     if (values.length <= 1) return 0;
 
@@ -476,33 +423,6 @@ export class EnhancedAnalyticsService extends AnalyticsService {
     return Math.abs(gini); // Return as diversity (0 = equal distribution, 1 = maximum inequality)
   }
 
-  /**
-   * NEW: Fallback semantic stability calculation
-   */
-  private calculateSemanticStabilityFallback(contentAnomalies: any[], semanticClusters: any[]): number {
-    if (!contentAnomalies.length) return 100;
-
-    const anomalyRate = Math.min(contentAnomalies.length / 100, 1);
-    const avgCoherence = semanticClusters.length > 0
-      ? semanticClusters.reduce((sum, cluster) => sum + (cluster.coherence || 0), 0) / semanticClusters.length
-      : 0.8;
-
-    return Math.round((1 - anomalyRate) * avgCoherence * 100);
-  }
-
-  /**
-   * NEW: Fallback content coherence calculation
-   */
-  private calculateContentCoherenceFallback(semanticClusters: any[]): number {
-    if (!semanticClusters.length) return 80;
-    
-    const avgCoherence = semanticClusters.reduce((sum, cluster) => sum + (cluster.coherence || 0), 0) / semanticClusters.length;
-    return avgCoherence * 100;
-  }
-
-  /**
-   * NEW: Get snapshots for user (helper method)
-   */
   private async getSnapshotsForUser(userId: string, timeRangeMs: number) {
     try {
       const analytics = await this.getAnalytics(userId, timeRangeMs);
@@ -512,9 +432,6 @@ export class EnhancedAnalyticsService extends AnalyticsService {
       return [];
     }
   }
-
-  // ... Keep all your existing methods (analyzeSemanticClusters, analyzeContentEvolution, etc.) ...
-  // They are already well-implemented and don't need changes
 
   /**
    * ENHANCED: Override the default analytics to include enterprise metrics

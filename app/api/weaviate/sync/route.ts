@@ -1,6 +1,8 @@
+// app/api/weaviate/sync/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { databases, DATABASE_ID, COLLECTIONS } from '@/app/server/appwrite';
 import { Query } from 'appwrite';
+import { WeaviateService } from '@/app/services/weaviate-service'; // ✅ Add this import
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,6 +19,10 @@ export async function POST(request: NextRequest) {
 
     console.log(`[WeaviateSync] Starting data sync for user: ${userId}`);
 
+    // ✅ Initialize Weaviate service
+    const weaviateService = new WeaviateService();
+    await weaviateService.initialize();
+
     // Fetch snapshots from Appwrite
     const snapshotsResponse = await databases.listDocuments(
       DATABASE_ID,
@@ -24,7 +30,7 @@ export async function POST(request: NextRequest) {
       [
         Query.equal('userId', userId),
         Query.orderDesc('timestamp'),
-        Query.limit(500) // Reasonable limit for sync
+        Query.limit(500)
       ]
     );
 
@@ -47,98 +53,129 @@ export async function POST(request: NextRequest) {
     const errors: string[] = [];
     const syncResults: any[] = [];
 
-    // Process snapshots in batches to avoid overwhelming Weaviate
-    const batchSize = 20;
+    // Process snapshots in batches
+    const batchSize = 10; // ✅ Reduced batch size for stability
     for (let i = 0; i < snapshots.length; i += batchSize) {
       const batch = snapshots.slice(i, i + batchSize);
+      console.log('=== SNAPSHOT DEBUG ===');
+snapshots.slice(0, 3).forEach(snapshot => {
+  console.log(`Snapshot ID: ${snapshot.$id}`);
+  console.log(`Results type: ${typeof snapshot.results}`);
+  console.log(`Results length: ${snapshot.results?.length || 'N/A'}`);
+  console.log(`Results value:`, JSON.stringify(snapshot.results, null, 2));
+  console.log(`Full snapshot keys:`, Object.keys(snapshot));
+  console.log('---');
+});
+      const results = await Promise.allSettled(
+  batch.map(async (snapshot) => {
+    try {
+      // ✅ PARSE JSON STRING TO ARRAY
+      let results = snapshot.results;
+      if (typeof results === 'string') {
+        try {
+          results = JSON.parse(results);
+        } catch (error) {
+          console.error(`[WeaviateSync] Failed to parse results for snapshot ${snapshot.$id}:`, error);
+          skippedCount++;
+          return { success: false, reason: 'invalid_json' };
+        }
+      }
+
+      // Validate parsed results
+      if (!results || !Array.isArray(results) || results.length === 0) {
+        console.warn(`[WeaviateSync] Skipping snapshot ${snapshot.$id}: No valid results after parsing`);
+        skippedCount++;
+        return { success: false, reason: 'no_valid_results' };
+      }
+
+      // Transform to RankingSnapshot format
+      const rankingSnapshot = {
+        id: snapshot.$id,
+        userId: snapshot.userId,
+        queryId: snapshot.queryId,
+        timestamp: new Date(snapshot.timestamp),
+        results: results.map((result: any, index: number) => ({
+          id: `${snapshot.$id}_${index}`,
+          url: result.url || '',
+          title: result.title || '',
+          snippet: result.snippet || '',
+          position: result.position || index + 1,
+          domain: result.domain || '',
+          contentType: result.contentType || 'article',
+          score: result.score || 0,
+          timestamp: new Date(snapshot.timestamp),
+          contentHash: result.contentHash || `${snapshot.$id}_${index}`,
+        })),
+        metadata: {
+          totalResults: results.length,
+          responseTime: snapshot.metadata?.responseTime || 0,
+          executedAt: snapshot.metadata?.executedAt || snapshot.$createdAt,
+        },
+        queryType: snapshot.queryType || 'web',
+      };
+
+      // ACTUAL Weaviate sync
+      await weaviateService.syncSnapshot(rankingSnapshot);
       
-      await Promise.allSettled(
-        batch.map(async (snapshot) => {
-          try {
-            // Transform snapshot data for Weaviate
-            const weaviateSnapshot = {
-              id: snapshot.$id,
-              userId: snapshot.userId,
-              queryId: snapshot.queryId,
-              timestamp: snapshot.timestamp,
-              results: Array.isArray(snapshot.results) ? snapshot.results.map(result => ({
-                url: result.url || '',
-                title: result.title || '',
-                position: result.position || 0,
-                domain: result.domain || '',
-                contentType: result.contentType || '',
-                snippet: result.snippet || '',
-                publishedDate: result.publishedDate || null
-              })) : [],
-              metadata: {
-                responseTime: snapshot.metadata?.responseTime || 0,
-                executedAt: snapshot.metadata?.executedAt || snapshot.$createdAt,
-                totalResults: snapshot.results?.length || 0,
-                avgPosition: snapshot.results?.length > 0 
-                  ? snapshot.results.reduce((sum, r) => sum + (r.position || 0), 0) / snapshot.results.length 
-                  : 0
-              },
-              createdAt: snapshot.$createdAt,
-              updatedAt: snapshot.$updatedAt,
-            };
+      console.log(`[WeaviateSync] Successfully synced snapshot: ${snapshot.$id} with ${results.length} results`);
+      
+      syncResults.push({
+        snapshotId: snapshot.$id,
+        status: 'synced',
+        resultsCount: results.length
+      });
+      
+      syncedCount++;
+      return { success: true };
+      
+    } catch (error) {
+      console.error(`[WeaviateSync] Failed to sync snapshot ${snapshot.$id}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Snapshot ${snapshot.$id}: ${errorMessage}`);
+      errorCount++;
+      
+      syncResults.push({
+        snapshotId: snapshot.$id,
+        status: 'error',
+        error: errorMessage
+      });
+      
+      return { success: false, error: errorMessage };
+    }
+  })
+);
 
-            // TODO: Replace with actual Weaviate sync logic when ready
-            // For now, we'll simulate the sync operation
-            // await weaviateService.upsertSnapshot(weaviateSnapshot);
-            
-            console.log(`[WeaviateSync] Synced snapshot: ${weaviateSnapshot.id}`);
-            
-            syncResults.push({
-              snapshotId: snapshot.$id,
-              status: 'synced',
-              resultsCount: weaviateSnapshot.results.length
-            });
-            
-            syncedCount++;
-          } catch (error) {
-            console.error(`[WeaviateSync] Failed to sync snapshot ${snapshot.$id}:`, error);
-            errors.push(`Snapshot ${snapshot.$id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            errorCount++;
-            
-            syncResults.push({
-              snapshotId: snapshot.$id,
-              status: 'error',
-              error: error instanceof Error ? error.message : 'Unknown error'
-            });
-          }
-        })
-      );
 
-      // Add small delay between batches to avoid rate limiting
+      // ✅ Add delay between batches to avoid rate limiting
       if (i + batchSize < snapshots.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Increased delay
       }
     }
 
-    // Calculate additional statistics
+    // Calculate statistics
     const totalResults = syncResults.reduce((sum, result) => 
       sum + (result.resultsCount || 0), 0);
 
     const response = {
       success: true,
-      message: `Data sync completed. Synced: ${syncedCount}, Errors: ${errorCount}`,
+      message: `Data sync completed. Synced: ${syncedCount}, Errors: ${errorCount}, Skipped: ${skippedCount}`,
       synced: syncedCount,
       skipped: skippedCount,
       errors: errorCount,
       total: snapshots.length,
       totalResults,
-      details: errors.length > 0 ? errors.slice(0, 10) : undefined, // Limit error details
+      details: errors.length > 0 ? errors.slice(0, 10) : undefined,
       timestamp: new Date().toISOString(),
       statistics: {
         avgResultsPerSnapshot: snapshots.length > 0 ? totalResults / snapshots.length : 0,
         successRate: snapshots.length > 0 ? (syncedCount / snapshots.length) * 100 : 0,
-        processingTimeMs: Date.now() - Date.now() // Would be calculated properly
       }
     };
 
     console.log(`[WeaviateSync] Data sync completed for user ${userId}:`, {
       synced: syncedCount,
       errors: errorCount,
+      skipped: skippedCount,
       total: snapshots.length,
       totalResults
     });

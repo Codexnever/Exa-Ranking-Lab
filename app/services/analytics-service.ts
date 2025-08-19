@@ -1,32 +1,38 @@
 // app/services/analytics-service.ts
+
 import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite";
 import { Query } from "appwrite";
-import type { 
-  EnhancedAnalyticsData, 
-  AnalyticsData, 
-  RankingSnapshot, 
-  StatisticalValidationResult, 
+import { calculateStandardDeviation } from "@/lib/analytics-calculations";
+import type {
+  EnhancedAnalyticsData,
+  AnalyticsData,
+  RankingSnapshot,
+  StatisticalValidationResult,
   DataQualityResult,
   ResponseTimeStats,
   ExecutionFrequency,
   DataFreshness,
-  ComplexityMetrics
+  ComplexityMetrics,
+  HourlyStats
 } from "@/lib/type";
 import { loadFromStorage, transformSnapshotDocument } from "./db-utils";
-import { 
-  calculateUMassCoherence,
-  calculateSemanticStability,
-  calculateStandardDeviation,   
-} from "@/lib/analytics-calculations";
+import { analyticsCalculations } from "@/app/logic/analyticsLogic";
+
+function fixHourlyStats(arr: any[]): HourlyStats[] {
+  // Ensures confidenceInterval is a [number, number] tuple
+  return (arr || []).map((h: any) => ({
+    ...h,
+    confidenceInterval: Array.isArray(h.confidenceInterval) && h.confidenceInterval.length === 2
+      ? [Number(h.confidenceInterval[0]), Number(h.confidenceInterval)]
+      : [0, 0]
+  }));
+}
 
 export class AnalyticsService {
   private isLocal: boolean;
-  
   constructor(isLocal: boolean) {
     this.isLocal = isLocal;
   }
-
-  // FIXED: Remove getTimeRangeString from interface, make it a regular method
   protected getTimeRangeString(timeRangeMs: number): string {
     const days = Math.floor(timeRangeMs / (24 * 60 * 60 * 1000));
     if (days >= 365) return '1y';
@@ -35,11 +41,9 @@ export class AnalyticsService {
     if (days >= 7) return '7d';
     return '24h';
   }
-
   async getAnalytics(userId?: string, timeRangeMs?: number): Promise<EnhancedAnalyticsData> {
     try {
       let snapshots: RankingSnapshot[] = [];
-
       if (this.isLocal) {
         snapshots = loadFromStorage<RankingSnapshot>("snapshots");
         if (userId) snapshots = snapshots.filter((s) => s.userId === userId);
@@ -53,8 +57,7 @@ export class AnalyticsService {
           const cutoff = new Date(Date.now() - timeRangeMs).toISOString();
           queries.push(Query.greaterThan("timestamp", cutoff));
         }
-        
-        const tempid = "683382eb0006b9130dc5";
+        const tempid = COLLECTIONS.SNAPSHOTS || "683382eb0006b9130dc5";
         const response = await databases.listDocuments(DATABASE_ID, tempid, queries);
         snapshots = response.documents
           .map((doc) => {
@@ -67,9 +70,7 @@ export class AnalyticsService {
           })
           .filter((snap): snap is RankingSnapshot => snap !== null);
       }
-
       console.log(`[AnalyticsService] Fetched ${snapshots.length} snapshots for user ${userId || 'all'}`);
-
       return this.calculateEnhancedAnalyticsFromSnapshots(snapshots);
     } catch (error) {
       console.error("Failed to get analytics:", error);
@@ -77,8 +78,10 @@ export class AnalyticsService {
     }
   }
 
+
+
   /**
-   * Enhanced analytics calculation with enterprise-level metrics
+   * Enhanced analytics calculation using the unified logic
    */
   calculateEnhancedAnalyticsFromSnapshots(snapshots: RankingSnapshot[]): EnhancedAnalyticsData {
     if (!snapshots || snapshots.length === 0) {
@@ -86,114 +89,86 @@ export class AnalyticsService {
       return this.getDefaultEnhancedAnalytics();
     }
 
-    // Get base analytics first
-    const baseAnalytics = this.calculateAnalyticsFromSnapshots(snapshots);
-    
-    // Calculate enhanced enterprise metrics
-    const enhancedMetrics = this.calculateEnterpriseMetrics(snapshots);
-    
-    // FIXED: Properly spread and combine all properties
-    return {
-      ...baseAnalytics,
-      ...enhancedMetrics,
-      // Add required properties for EnhancedAnalyticsData
-      timeRangeMs: 0, // Will be set by caller if needed
-      filteredSnapshots: snapshots,
-      rankingTrendData: [],
-      categoryDistribution: [],
-      successRateByHour: [],
-      performanceData: [],
-      topPerformingQueries: [],
-      queryPerformanceStats: [],
-      calculatedAt: new Date().toISOString(),
-      dataSourceType: 'appwrite'
-    };
-  }
+    // Use central analytics engine, provides all core metrics
+    const timeRangeStr = snapshots.length ? this.getTimeRangeString(
+      Date.now() - new Date(snapshots[0].timestamp).getTime()
+    ) : '30d';
 
-  /**
-   * Calculate enterprise-level metrics
-   */
-protected calculateEnterpriseMetrics(snapshots: RankingSnapshot[]): Partial<EnhancedAnalyticsData> {
-  try {
-    // Content Coherence Calculation
-    const documents = this.extractDocumentsFromSnapshots(snapshots);
-    const contentCoherence = documents.length > 0 ? 
-      calculateUMassCoherence(documents) : undefined; // FIXED: Use undefined instead of null
+    // Only queries parameter needs to be passed from upper layer if available
+    const analytics = analyticsCalculations([], snapshots, timeRangeStr);
 
-    // Semantic Stability Calculation
-    const timeSeriesData = this.extractTimeSeriesFromSnapshots(snapshots);
-    const semanticStability = timeSeriesData.length > 1 ? 
-      calculateSemanticStability(timeSeriesData) : undefined; // FIXED: Use undefined instead of null
+    // Fix hourly stats to ensure proper confidence interval format on all outputs
+    const successRateByHour = fixHourlyStats(analytics.successRateByHour);
+    const performanceData = fixHourlyStats(analytics.performanceData);
 
-    // Data Quality Assessment
+     function fixTopPerformingQueries(arr: any[]): any[] {
+  return (arr || []).map(item => {
+    const validTrends = ['up', 'down', 'stable'];
+    const trend: 'up' | 'down' | 'stable' = validTrends.includes(item.trend) ? item.trend : 'stable';
+    return { ...item, trend };
+  });
+}
+const topPerformingQueries = fixTopPerformingQueries(analytics.topPerformingQueries);
+    // Data Quality Assessment and Appwrite-specific metadata
     const dataQuality = this.assessDataQuality(snapshots);
-
-    // Statistical Performance Metrics
-    const responseTimeStats = this.calculateResponseTimeStatistics(snapshots);
+    const responseTimeStats = analytics.performanceData ?
+      this.calculateResponseTimeStatistics(snapshots)
+      : { min: 0, max: 0, mean: 0, median: 0, stdDev: 0, percentile95: 0 };
     const executionFrequency = this.calculateExecutionFrequency(snapshots);
     const dataFreshness = this.calculateDataFreshness(snapshots);
     const complexityMetrics = this.calculateComplexityMetrics(snapshots);
-
     return {
-      contentCoherence,
-      semanticStability,
+      ...analytics,
+      successRateByHour,
+      topPerformingQueries,
+      performanceData,
       dataQuality,
       responseTimeStats,
       executionFrequency,
       dataFreshness,
       complexityMetrics,
-      isAppwriteSource: true
+      isAppwriteSource: true,
+      timeRangeMs: 0,
+      calculatedAt: new Date().toISOString(),
+      dataSourceType: 'appwrite'
     };
-  } catch (error) {
-    console.error("[AnalyticsService] Enterprise metrics calculation failed:", error);
-    return {};
   }
-}
 
-  /**
-   * Extract documents for coherence calculation
-   */
-// Add to your extractDocumentsFromSnapshots method
-protected extractDocumentsFromSnapshots(snapshots: RankingSnapshot[]): Array<{title: string, content: string, vector?: number[]}> {
-  const documents: Array<{title: string, content: string, vector?: number[]}> = [];
-  
-  snapshots.forEach(snapshot => {
-    snapshot.results?.forEach(result => {
-      if (result.title && result.snippet) {
-        documents.push({
-          title: result.title,
-          content: result.snippet,
-          vector: result.vector // Include vector if available from Weaviate
-        });
-      }
+  // ---- Utility and statistical functions are unchanged below ----
+
+  protected extractDocumentsFromSnapshots(snapshots: RankingSnapshot[]): Array<{ title: string, content: string, vector?: number[] }> {
+    const documents: Array<{ title: string, content: string, vector?: number[] }> = [];
+    snapshots.forEach(snapshot => {
+      snapshot.results?.forEach(result => {
+        if (result.title && result.snippet) {
+          documents.push({
+            title: result.title,
+            content: result.snippet,
+            vector: result.vector // If available
+          });
+        }
+      });
     });
-  });
-  
-  return documents;
-}
-
-// Update extractTimeSeriesFromSnapshots to include vectors
-protected extractTimeSeriesFromSnapshots(snapshots: RankingSnapshot[]): Array<{timestamp: number, content: string, vectors?: number[][]}> {
-  return snapshots
-    .map(snapshot => {
-      const content = snapshot.results
-        ?.map(result => `${result.title || ''} ${result.snippet || ''}`)
-        .join(' ') || '';
-      
-      const vectors = snapshot.results
-        ?.map(result => result.vector)
-        .filter(Boolean) as number[][] || [];
-      
-      return {
-        timestamp: new Date(snapshot.timestamp).getTime(),
-        content: content.trim(),
-        vectors: vectors.length > 0 ? vectors : undefined
-      };
-    })
-    .filter(item => item.content.length > 0)
-    .sort((a, b) => a.timestamp - b.timestamp);
-}
-
+    return documents;
+  }
+  protected extractTimeSeriesFromSnapshots(snapshots: RankingSnapshot[]): Array<{ timestamp: number, content: string, vectors?: number[][] }> {
+    return snapshots
+      .map(snapshot => {
+        const content = snapshot.results
+          ?.map(result => `${result.title || ''} ${result.snippet || ''}`)
+          .join(' ') || '';
+        const vectors = snapshot.results
+          ?.map(result => result.vector)
+          .filter(Boolean) as number[][] || [];
+        return {
+          timestamp: new Date(snapshot.timestamp).getTime(),
+          content: content.trim(),
+          vectors: vectors.length > 0 ? vectors : undefined
+        };
+      })
+      .filter(item => item.content.length > 0)
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
   /**
    * Assess data quality
    */
@@ -203,44 +178,31 @@ protected extractTimeSeriesFromSnapshots(snapshots: RankingSnapshot[]): Array<{t
     let completeSnapshots = 0;
     let consistentSnapshots = 0;
     let anomalyCount = 0;
-    
     const ages: number[] = [];
-    
     snapshots.forEach(snapshot => {
-      // Validity check
       if (snapshot.results && Array.isArray(snapshot.results)) {
         validSnapshots++;
       }
-      
-      // Completeness check
       if (snapshot.results?.length > 0 && 
           snapshot.results.every(r => r.url && r.title)) {
         completeSnapshots++;
       }
-      
-      // Consistency check (proper position ordering)
       if (snapshot.results?.every((result, index) => 
           result.position === index + 1 || result.position > 0)) {
         consistentSnapshots++;
       }
-      
-      // Age calculation
       ages.push(now - new Date(snapshot.timestamp).getTime());
-      
-      // Simple anomaly detection (unusual result counts)
       if (snapshot.results && (snapshot.results.length === 0 || snapshot.results.length > 50)) {
         anomalyCount++;
       }
     });
-    
     const totalSnapshots = snapshots.length;
     const avgAge = ages.length > 0 ? ages.reduce((sum, age) => sum + age, 0) / ages.length : 0;
-    
     return {
       completeness: totalSnapshots > 0 ? (completeSnapshots / totalSnapshots) * 100 : 0,
       accuracy: totalSnapshots > 0 ? (validSnapshots / totalSnapshots) * 100 : 0,
       consistency: totalSnapshots > 0 ? (consistentSnapshots / totalSnapshots) * 100 : 0,
-      freshness: Math.max(0, 100 - (avgAge / (24 * 60 * 60 * 1000)) * 10), // Deduct 10 points per day
+      freshness: Math.max(0, 100 - (avgAge / (24 * 60 * 60 * 1000)) * 10),
       validity: totalSnapshots > 0 ? (validSnapshots / totalSnapshots) * 100 : 0,
       anomalyCount,
       assessedAt: now
@@ -254,15 +216,12 @@ protected extractTimeSeriesFromSnapshots(snapshots: RankingSnapshot[]): Array<{t
     const responseTimes = snapshots
       .map(s => s.metadata?.responseTime)
       .filter((time): time is number => typeof time === 'number');
-
     if (responseTimes.length === 0) {
       return { min: 0, max: 0, mean: 0, median: 0, stdDev: 0, percentile95: 0 };
     }
-
     const sorted = [...responseTimes].sort((a, b) => a - b);
     const mean = responseTimes.reduce((sum, val) => sum + val, 0) / responseTimes.length;
     const stdDev = calculateStandardDeviation(responseTimes);
-
     return {
       min: sorted[0],
       max: sorted[sorted.length - 1],

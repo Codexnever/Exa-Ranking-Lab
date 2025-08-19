@@ -1,3 +1,4 @@
+// /app/api/weaviate/calculate-coherance
 import { NextResponse } from "next/server";
 import { calculateUMassCoherence } from "@/lib/analytics-calculations";
 

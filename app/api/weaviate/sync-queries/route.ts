@@ -1,3 +1,4 @@
+//  app/api/weaviate/sync-queries/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { databases, DATABASE_ID, COLLECTIONS } from '@/app/server/appwrite';
 import { Query } from 'appwrite';

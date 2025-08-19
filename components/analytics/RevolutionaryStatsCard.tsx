@@ -60,7 +60,7 @@ export function RevolutionaryStatsCard({
       enhancedMetrics?.contentCoherence ?? 
       semanticAnalytics?.enhancedMetrics?.contentCoherence ?? 
       null;
-      
+      console.log("[CONTENT COHERANCE]:",contentCoherence)
     const diversityIndex = 
       enhancedMetrics?.diversityIndex ?? 
       semanticAnalytics?.enhancedMetrics?.diversityIndex ?? 

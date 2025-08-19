@@ -1,3 +1,4 @@
+// app/api/semantic-analytics/route.ts
 import { NextResponse } from "next/server";
 import { WeaviateService } from "@/app/services/weaviate-service";
 import { EnhancedAnalyticsService } from "@/app/services/enhanced-analytics-service";

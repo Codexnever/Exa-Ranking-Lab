@@ -1,3 +1,4 @@
+// /app/store/weaviate-store
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { 
@@ -253,6 +254,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
           throw error;
         }
       },
+
 
       validatePredictionAccuracy: async (userId) => {
         const operationType = 'prediction-validation';
