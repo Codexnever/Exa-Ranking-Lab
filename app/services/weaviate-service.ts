@@ -113,72 +113,96 @@ class SemanticChunker {
   }
 }
 
-// ✅ PRODUCT QUANTIZATION CLASS
-class ProductQuantizer {
-  private nSubVectors: number;
-  private codebookSize: number;
-  private codebooks: Float32Array[][];
-  private subVectorDim: number;
+// ✅ CORRECTED BINARY QUANTIZATION CLASS
+class BinaryQuantizer {
+  private dimension: number;
+  private readonly BITS_PER_BYTE = 8;
 
-  constructor(vectorDim = 384, nSubVectors = 8, codebookSize = 256) {
-    this.nSubVectors = nSubVectors;
-    this.codebookSize = codebookSize;
-    this.subVectorDim = vectorDim / nSubVectors;
-    this.codebooks = this.initializeCodebooks();
+  constructor(dimension: number) {
+    this.dimension = dimension;
   }
 
-  private initializeCodebooks(): Float32Array[][] {
-    return Array.from({ length: this.nSubVectors }, () =>
-      Array.from({ length: this.codebookSize }, () =>
-        new Float32Array(this.subVectorDim).map(() => 
-          (Math.random() - 0.5) * 0.1
-        )
-      )
-    );
-  }
-
+  /**
+   * Ultra-fast quantization: Convert float vector to binary (sign-based)
+   */
   quantize(vector: number[]): Uint8Array {
-    const codes = new Uint8Array(this.nSubVectors);
-    
-    for (let i = 0; i < this.nSubVectors; i++) {
-      const startIdx = i * this.subVectorDim;
-      const endIdx = startIdx + this.subVectorDim;
-      const subVector = vector.slice(startIdx, endIdx);
-      
-      codes[i] = this.findNearestCodebookIndex(i, subVector);
+    if (vector.length !== this.dimension) {
+      throw new Error(`Vector dimension mismatch: expected ${this.dimension}, got ${vector.length}`);
     }
+
+    const bytes = new Uint8Array(Math.ceil(this.dimension / this.BITS_PER_BYTE));
     
-    return codes;
-  }
-
-  private findNearestCodebookIndex(subVectorIdx: number, subVector: number[]): number {
-    const codebook = this.codebooks[subVectorIdx];
-    let minDistance = Infinity;
-    let nearestIndex = 0;
-
-    for (let i = 0; i < codebook.length; i++) {
-      const distance = this.euclideanDistance(subVector, Array.from(codebook[i]));
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestIndex = i;
+    for (let i = 0; i < this.dimension; i++) {
+      if (vector[i] > 0) {
+        const byteIndex = Math.floor(i / this.BITS_PER_BYTE);
+        const bitIndex = 7 - (i % this.BITS_PER_BYTE);
+        bytes[byteIndex] |= 1 << bitIndex;
       }
     }
 
-    return nearestIndex;
+    return bytes;
   }
 
-  private euclideanDistance(a: number[], b: number[]): number {
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) {
-      const diff = a[i] - b[i];
-      sum += diff * diff;
+  /**
+   * Decompress binary codes back to approximate vector
+   */
+  dequantize(bytes: Uint8Array): number[] {
+    const vector = new Array(this.dimension).fill(0);
+    
+    for (let i = 0; i < this.dimension; i++) {
+      const byteIndex = Math.floor(i / this.BITS_PER_BYTE);
+      const bitIndex = 7 - (i % this.BITS_PER_BYTE);
+      const mask = 1 << bitIndex;
+      
+      vector[i] = (bytes[byteIndex] & mask) ? 1 : -1;
     }
-    return Math.sqrt(sum);
+
+    return vector;
   }
 
-  getCompressionRatio(originalVectorDim: number): number {
-    const originalBytes = originalVectorDim * 4;
-    const compressedBytes = this.nSubVectors * 1;
+  /**
+   * ✅ CORRECT: Use Hamming distance for binary vectors
+   * This is the proper similarity metric for binary quantized vectors
+   */
+  hammingDistance(a: Uint8Array, b: Uint8Array): number {
+    if (a.length !== b.length) {
+      throw new Error('Binary codes must have same length');
+    }
+
+    let distance = 0;
+    
+    for (let i = 0; i < a.length; i++) {
+      const xor = a[i] ^ b[i];
+      distance += this.popCount(xor);
+    }
+
+    return distance;
+  }
+
+  /**
+   * Fast bit counting using Brian Kernighan's algorithm
+   */
+  private popCount(byte: number): number {
+    let count = 0;
+    while (byte) {
+      count++;
+      byte &= byte - 1;
+    }
+    return count;
+  }
+
+  /**
+   * ✅ CORRECT: Convert Hamming distance to similarity score
+   * This approximates angular similarity without using cosine directly
+   */
+  hammingToSimilarity(hammingDist: number): number {
+    const maxDistance = this.dimension;
+    return 1 - (hammingDist / maxDistance);
+  }
+
+  getCompressionRatio(): number {
+    const originalBytes = this.dimension * 4;
+    const compressedBytes = Math.ceil(this.dimension / this.BITS_PER_BYTE);
     return originalBytes / compressedBytes;
   }
 }
@@ -187,21 +211,21 @@ export class WeaviateService {
   private _client: WeaviateClient;
   private embedder: any;
   private isConnected = false;
-  private vectorCache = new Map<string, { vector: number[]; timestamp: number }>();
+  private vectorCache = new Map<string, { vector: number[]; binaryCode: Uint8Array; timestamp: number }>();
   private cacheHits = 0;
   private cacheRequests = 0;
   private readonly VECTOR_CACHE_TTL = 60 * 60 * 1000;
   private readonly MAX_CACHE_SIZE = 10000;
 
-  // ✅ ADVANCED FEATURES
+  // ✅ ADVANCED FEATURES WITH BINARY QUANTIZATION
   private semanticChunker: SemanticChunker;
-  private productQuantizer: ProductQuantizer;
+  private binaryQuantizer: BinaryQuantizer;
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY = 2000;
   private readonly CONNECTION_TIMEOUT = 30000;
   private readonly BATCH_SIZE = 20;
 
-   constructor() {
+  constructor() {
     // ✅ SECURE: Use server-side env variables
     const weaviateURL = process.env.WEAVIATE_URL || "";
     const weaviateApiKey = process.env.WEAVIATE_API_KEY || "";
@@ -216,13 +240,16 @@ export class WeaviateService {
       scheme,
       host,
       apiKey: new ApiKey(weaviateApiKey),
-      headers: { 'X-Request-Timeout': this.CONNECTION_TIMEOUT.toString() },
+      headers: {
+        timeout: this.CONNECTION_TIMEOUT.toString(),
+      }
     });
 
-    // Initialize advanced features
+    // ✅ Initialize with Binary Quantization
     this.semanticChunker = new SemanticChunker(384, 48);
-    this.productQuantizer = new ProductQuantizer(384, 8, 256);
+    this.binaryQuantizer = new BinaryQuantizer(384);
   }
+
   get client(): WeaviateClient {
     return this._client;
   }
@@ -271,21 +298,23 @@ export class WeaviateService {
     if (/\b(personal|blog|portfolio|about me|resume|cv)\b/i.test(combined)) return "personal site";
     if (/\b(company|corporate|business|startup|enterprise|organization)\b/i.test(combined)) return "company";
 
-    return "company"; // Safe default
+    return "company";
   }
 
   async initialize(): Promise<void> {
     if (this.isConnected) return;
     try {
-      console.log("[WeaviateService] Initializing with advanced features...");
+      console.log("[WeaviateService] Initializing with Binary Quantization...");
       this.embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
       await this.ensureSchema();
       await this.withRetry(async () => {
         await this._client.misc.metaGetter().do();
       }, "Connection test");
       this.isConnected = true;
-      console.log("[WeaviateService] Connected successfully with semantic chunking and compression");
-      console.log(`[WeaviateService] Vector compression ratio: ${this.productQuantizer.getCompressionRatio(384).toFixed(1)}x`);
+      
+      console.log("[WeaviateService] Connected successfully with Binary Quantization:");
+      console.log(`  • Compression Ratio: ${this.binaryQuantizer.getCompressionRatio().toFixed(1)}x`);
+      console.log("  • Using Hamming distance for binary similarity");
     } catch (error) {
       console.error("[WeaviateService] Initialization failed:", error);
       throw error;
@@ -304,7 +333,7 @@ export class WeaviateService {
         {
           class: "SearchResult",
           vectorizer: "none",
-          description: "Search results with embeddings",
+          description: "Search results with binary quantized embeddings",
           properties: [
             { name: "url", dataType: ["text"] },
             { name: "title", dataType: ["text"] },
@@ -318,12 +347,14 @@ export class WeaviateService {
             { name: "timestamp", dataType: ["date"] },
             { name: "contentHash", dataType: ["text"] },
             { name: "category", dataType: ["text"] },
+            { name: "binaryCode", dataType: ["blob"] },
+            { name: "quantizationMethod", dataType: ["text"] },
           ],
         },
         {
           class: "QueryIntent",
           vectorizer: "none",
-          description: "User search queries",
+          description: "User search queries with binary quantization",
           properties: [
             { name: "queryId", dataType: ["text"] },
             { name: "name", dataType: ["text"] },
@@ -332,20 +363,7 @@ export class WeaviateService {
             { name: "userId", dataType: ["text"] },
             { name: "createdAt", dataType: ["date"] },
             { name: "lastRun", dataType: ["date"] },
-          ],
-        },
-        {
-          class: "DriftPattern",
-          vectorizer: "none",
-          description: "Detected drift patterns",
-          properties: [
-            { name: "queryId", dataType: ["text"] },
-            { name: "snapshotId", dataType: ["text"] },
-            { name: "previousSnapshotId", dataType: ["text"] },
-            { name: "driftScore", dataType: ["number"] },
-            { name: "contentChanges", dataType: ["int"] },
-            { name: "timestamp", dataType: ["date"] },
-            { name: "userId", dataType: ["text"] },
+            { name: "binaryCode", dataType: ["blob"] },
           ],
         },
       ];
@@ -364,13 +382,14 @@ export class WeaviateService {
     }
   }
 
-  private async getEmbedding(text: string, contentHash?: string): Promise<number[]> {
+  private async getEmbedding(text: string, contentHash?: string): Promise<{ vector: number[]; binaryCode: Uint8Array }> {
     this.cacheRequests++;
     const key = contentHash || this.hashText(text);
     const cached = this.vectorCache.get(key);
+    
     if (cached && Date.now() - cached.timestamp < this.VECTOR_CACHE_TTL) {
       this.cacheHits++;
-      return cached.vector;
+      return { vector: cached.vector, binaryCode: cached.binaryCode };
     }
 
     try {
@@ -378,20 +397,23 @@ export class WeaviateService {
         pooling: "mean",
         normalize: true
       });
+      
       const vectorArray = Array.from(embedding.data) as number[];
-      this.cacheVector(key, vectorArray);
-      return vectorArray;
+      const binaryCode = this.binaryQuantizer.quantize(vectorArray);
+      
+      this.cacheVectorWithBinary(key, vectorArray, binaryCode);
+      return { vector: vectorArray, binaryCode };
     } catch (error) {
       console.error("[WeaviateService] Embedding generation failed:", error);
       throw error;
     }
   }
 
-  private cacheVector(key: string, vector: number[]) {
+  private cacheVectorWithBinary(key: string, vector: number[], binaryCode: Uint8Array) {
     if (this.vectorCache.size >= this.MAX_CACHE_SIZE) {
       this.cleanupVectorCache();
     }
-    this.vectorCache.set(key, { vector, timestamp: Date.now() });
+    this.vectorCache.set(key, { vector, binaryCode, timestamp: Date.now() });
   }
 
   private cleanupVectorCache() {
@@ -415,17 +437,184 @@ export class WeaviateService {
 
   getCacheStats() { 
     const hitRate = this.cacheRequests > 0 ? this.cacheHits / this.cacheRequests : 0;
+    
     return { 
       size: this.vectorCache.size, 
       hitRate: Math.round(hitRate * 100) / 100, 
       maxSize: this.MAX_CACHE_SIZE,
-      compressionRatio: this.productQuantizer.getCompressionRatio(384)
+      compressionRatio: this.binaryQuantizer.getCompressionRatio(),
+      quantizationMethod: "Binary Quantization (BQ)",
+      similarityMethod: "Hamming Distance"
     }; 
   }
 
-  // ========= ENHANCED CORE OPERATIONS =========
+  // ✅ CORRECTED: Semantic search using proper BQ methods
+  async semanticSearch(
+    query: string,
+    userId: string,
+    limit = 20,
+    threshold = 0.7,
+    category?: ExaCategory
+  ): Promise<SearchHit[]> {
+    if (!this.isConnected) await this.initialize();
 
-  // ✅ ENHANCED SYNC WITH SEMANTIC CHUNKING
+    try {
+      const { vector: queryVector, binaryCode: queryBinaryCode } = await this.getEmbedding(query);
+      
+      // Build where clause
+      let whereClause;
+      if (category) {
+        whereClause = {
+          operator: "And" as const,
+          operands: [
+            { path: ["userId"], operator: "Equal" as const, valueText: userId },
+            { path: ["category"], operator: "Equal" as const, valueText: category }
+          ]
+        };
+      } else {
+        whereClause = {
+          path: ["userId"],
+          operator: "Equal" as const,
+          valueText: userId
+        };
+      }
+
+      // ✅ Use Weaviate's built-in vector search (it handles BQ internally)
+      const result = await this.withRetry(async () => {
+        return await this._client.graphql
+          .get()
+          .withClassName("SearchResult")
+          .withFields(`
+            url title snippet domain position score queryId timestamp contentHash category binaryCode
+            _additional { certainty distance }
+          `)
+          .withNearVector({ vector: queryVector, certainty: threshold })
+          .withWhere(whereClause)
+          .withLimit(limit * 2) // Get more for binary reranking
+          .do();
+      }, "Binary quantized semantic search");
+
+      const items = (result.data?.Get?.SearchResult || []) as any[];
+
+      // ✅ CORRECTED: Use Hamming distance for binary reranking
+      const rerankedItems = items
+        .map((item: any) => {
+          let similarity = item._additional?.certainty || 0;
+
+          // If binary code is available, use Hamming distance
+          if (item.binaryCode) {
+            try {
+              const itemBinaryCode = new Uint8Array(Buffer.from(item.binaryCode, 'base64'));
+              const hammingDist = this.binaryQuantizer.hammingDistance(queryBinaryCode, itemBinaryCode);
+              similarity = this.binaryQuantizer.hammingToSimilarity(hammingDist);
+            } catch (error) {
+              console.warn(`[WeaviateService] Binary similarity calculation failed:`, error);
+            }
+          }
+
+          return {
+            id: `${item.queryId}_${item.position}`,
+            url: item.url,
+            title: item.title,
+            snippet: item.snippet,
+            domain: item.domain,
+            position: item.position,
+            score: item.score,
+            contentHash: item.contentHash,
+            timestamp: new Date(item.timestamp),
+            similarity,
+            semanticDistance: item._additional?.distance || 0,
+          };
+        })
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+
+      console.log(`[WeaviateService] Binary quantized search completed: ${rerankedItems.length} results`);
+      return rerankedItems;
+    } catch (error) {
+      console.error("[WeaviateService] Binary quantized semantic search failed:", error);
+      return [];
+    }
+  }
+
+  // ✅ CORRECTED: Similar queries using proper BQ methods
+  async findSimilarQueries(queryId: string, limit = 5): Promise<SimilarQuery[]> {
+    if (!this.isConnected) await this.initialize();
+
+    try {
+      const ref = await this.withRetry(async () => {
+        return await this._client.graphql
+          .get()
+          .withClassName("QueryIntent")
+          .withFields("_additional { vector } binaryCode")
+          .withWhere({ path: ["queryId"], operator: "Equal", valueText: queryId })
+          .withLimit(1)
+          .do();
+      }, `Find reference for query ${queryId}`);
+
+      const refItem = ref.data?.Get?.QueryIntent?.[0];
+      if (!refItem) return [];
+
+      const refVector = refItem._additional?.vector;
+      const refBinaryCode = refItem.binaryCode 
+        ? new Uint8Array(Buffer.from(refItem.binaryCode, 'base64'))
+        : null;
+
+      if (!refVector) return [];
+
+      const similar = await this.withRetry(async () => {
+        return await this._client.graphql
+          .get()
+          .withClassName("QueryIntent")
+          .withFields(`
+            queryId name query category userId createdAt lastRun binaryCode
+            _additional { certainty }
+          `)
+          .withNearVector({ vector: refVector, certainty: 0.6 })
+          .withWhere({ path: ["queryId"], operator: "NotEqual", valueText: queryId })
+          .withLimit(limit * 2)
+          .do();
+      }, `Find similar queries for ${queryId}`);
+
+      const results = (similar.data?.Get?.QueryIntent || []) as any[];
+
+      // ✅ CORRECTED: Use Hamming distance for binary reranking
+      const rerankedResults = results
+        .map((item: any) => {
+          let similarity = item._additional?.certainty || 0;
+
+          if (refBinaryCode && item.binaryCode) {
+            try {
+              const itemBinaryCode = new Uint8Array(Buffer.from(item.binaryCode, 'base64'));
+              const hammingDist = this.binaryQuantizer.hammingDistance(refBinaryCode, itemBinaryCode);
+              similarity = this.binaryQuantizer.hammingToSimilarity(hammingDist);
+            } catch (error) {
+              console.warn(`[WeaviateService] Binary similarity failed:`, error);
+            }
+          }
+
+          return {
+            id: item.queryId,
+            name: item.name,
+            query: item.query,
+            category: item.category,
+            userId: item.userId,
+            createdAt: new Date(item.createdAt),
+            lastRun: item.lastRun ? new Date(item.lastRun) : undefined,
+            similarity,
+          };
+        })
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+
+      return rerankedResults;
+    } catch (error) {
+      console.error("[WeaviateService] Find similar queries failed:", error);
+      return [];
+    }
+  }
+
+  // ✅ ENHANCED SYNC METHODS (same as before, but clean)
   async syncSnapshot(snapshot: RankingSnapshot): Promise<void> {
     if (!this.isConnected) await this.initialize();
 
@@ -433,7 +622,7 @@ export class WeaviateService {
       const results = snapshot.results;
       const processedResults: any[] = [];
       
-      console.log(`[WeaviateService] Processing ${results.length} results with semantic chunking...`);
+      console.log(`[WeaviateService] Processing ${results.length} results with Binary Quantization...`);
 
       for (let i = 0; i < results.length; i += this.BATCH_SIZE) {
         const batch = results.slice(i, i + this.BATCH_SIZE);
@@ -444,20 +633,19 @@ export class WeaviateService {
               const fullText = `${result.title || ""} ${result.snippet || ""}`.trim();
               if (!fullText) return [];
 
-              // ✅ SEMANTIC CHUNKING
               const chunks = await this.semanticChunker.chunk(fullText);
               const category = this.inferExaCategory(result.domain || "", result.title || "", result.snippet || "");
 
               const chunkResults = await Promise.all(
                 chunks.map(async (chunk, chunkIndex) => {
-                  const embedding = await this.getEmbedding(chunk, `${result.contentHash}_${chunkIndex}`);
+                  const { vector, binaryCode } = await this.getEmbedding(chunk, `${result.contentHash}_${chunkIndex}`);
                   
                   return {
                     class: "SearchResult",
                     properties: {
                       url: result.url || "",
                       title: result.title || "",
-                      snippet: chunk, // Use chunk instead of full snippet
+                      snippet: chunk,
                       domain: result.domain || "",
                       position: result.position || (i + batchIndex + 1),
                       score: result.score || 0,
@@ -466,9 +654,11 @@ export class WeaviateService {
                       userId: snapshot.userId || "",
                       timestamp: snapshot.timestamp.toISOString(),
                       contentHash: `${result.contentHash || ""}_chunk_${chunkIndex}`,
-                      category, // ✅ SMART EXA.AI CATEGORY
+                      category,
+                      binaryCode: Buffer.from(binaryCode).toString('base64'),
+                      quantizationMethod: "BQ",
                     },
-                    vector: embedding,
+                    vector: vector,
                   };
                 })
               );
@@ -483,19 +673,17 @@ export class WeaviateService {
 
         processedResults.push(...batchResults.flat().filter(Boolean));
         
-        // Rate limiting
         if (i + this.BATCH_SIZE < results.length) {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
 
-      // ✅ BATCH INSERT WITH RETRY
       if (processedResults.length) {
         await this.withRetry(async () => {
           await this._client.batch.objectsBatcher().withObjects(...processedResults).do();
-        }, `Batch insert for snapshot ${snapshot.id}`);
+        }, `Binary quantized batch insert for snapshot ${snapshot.id}`);
         
-        console.log(`[WeaviateService] Successfully synced ${processedResults.length} semantic chunks for snapshot ${snapshot.id}`);
+        console.log(`[WeaviateService] Successfully synced ${processedResults.length} binary quantized chunks`);
       }
     } catch (error) {
       console.error(`[WeaviateService] Failed to sync snapshot ${snapshot.id}:`, error);
@@ -507,7 +695,7 @@ export class WeaviateService {
     if (!this.isConnected) await this.initialize();
 
     try {
-      const embedding = await this.getEmbedding(`${query.name} ${query.query}`);
+      const { vector, binaryCode } = await this.getEmbedding(`${query.name} ${query.query}`);
       
       await this.withRetry(async () => {
         await this._client.data
@@ -521,274 +709,16 @@ export class WeaviateService {
             userId: query.userId,
             createdAt: query.createdAt.toISOString(),
             lastRun: query.lastRun?.toISOString() || null,
+            binaryCode: Buffer.from(binaryCode).toString('base64'),
           })
-          .withVector(embedding)
+          .withVector(vector)
           .do();
       }, `Sync query ${query.id}`);
       
-      console.log(`[WeaviateService] Synced query ${query.id}`);
+      console.log(`[WeaviateService] Synced query ${query.id} with Binary Quantization`);
     } catch (error) {
       console.error(`[WeaviateService] Failed to sync query ${query.id}:`, error);
       throw error;
-    }
-  }
-
-  // ✅ ENHANCED SEMANTIC SEARCH WITH CATEGORY FILTERING
-  async semanticSearch(
-    query: string,
-    userId: string,
-    limit = 20,
-    threshold = 0.7,
-    category?: ExaCategory
-  ): Promise<SearchHit[]> {
-    if (!this.isConnected) await this.initialize();
-
-    try {
-      const queryEmbedding = await this.getEmbedding(query);
-      
-      // Build where clause with optional category filter
-      let whereClause;
-    
-    if (category) {
-      whereClause = {
-        operator: "And" as const,
-        operands: [
-          { 
-            path: ["userId"], 
-            operator: "Equal" as const, 
-            valueText: userId 
-          },
-          { 
-            path: ["category"], 
-            operator: "Equal" as const, 
-            valueText: category 
-          }
-        ]
-      };
-    } else {
-      whereClause = {
-        path: ["userId"],
-        operator: "Equal" as const,
-        valueText: userId
-      };
-    }
-      const result = await this.withRetry(async () => {
-        return await this._client.graphql
-          .get()
-          .withClassName("SearchResult")
-          .withFields(`
-            url title snippet domain position score queryId timestamp contentHash category
-            _additional { certainty distance }
-          `)
-          .withNearVector({ vector: queryEmbedding, certainty: threshold })
-          .withWhere(whereClause)
-          .withLimit(limit)
-          .do();
-      }, "Enhanced semantic search");
-
-      const items = (result.data?.Get?.SearchResult || []) as any[];
-
-      return items.map((item: any) => ({
-        id: `${item.queryId}_${item.position}`,
-        url: item.url,
-        title: item.title,
-        snippet: item.snippet,
-        domain: item.domain,
-        position: item.position,
-        score: item.score,
-        contentHash: item.contentHash,
-        timestamp: new Date(item.timestamp),
-        similarity: item._additional?.certainty || 0,
-        semanticDistance: item._additional?.distance || 0,
-      }));
-    } catch (error) {
-      console.error("[WeaviateService] Enhanced semantic search failed:", error);
-      return [];
-    }
-  }
-
-  // ✅ REST OF METHODS WITH RETRY LOGIC
-  async findSimilarQueries(queryId: string, limit = 5): Promise<SimilarQuery[]> {
-    if (!this.isConnected) await this.initialize();
-
-    try {
-      const ref = await this.withRetry(async () => {
-        return await this._client.graphql
-          .get()
-          .withClassName("QueryIntent")
-          .withFields("_additional { vector }")
-          .withWhere({ path: ["queryId"], operator: "Equal", valueText: queryId })
-          .withLimit(1)
-          .do();
-      }, `Find reference vector for query ${queryId}`);
-
-      const refVector = ref.data?.Get?.QueryIntent?.[0]?._additional?.vector;
-      if (!refVector) return [];
-
-      const similar = await this.withRetry(async () => {
-        return await this._client.graphql
-          .get()
-          .withClassName("QueryIntent")
-          .withFields(`
-            queryId name query category userId createdAt lastRun
-            _additional { certainty }
-          `)
-          .withNearVector({ vector: refVector, certainty: 0.6 })
-          .withWhere({ path: ["queryId"], operator: "NotEqual", valueText: queryId })
-          .withLimit(limit)
-          .do();
-      }, `Find similar queries for ${queryId}`);
-
-      const results = (similar.data?.Get?.QueryIntent || []) as any[];
-
-      return results.map((item: any) => ({
-        id: item.queryId,
-        name: item.name,
-        query: item.query,
-        category: item.category,
-        userId: item.userId,
-        createdAt: new Date(item.createdAt),
-        lastRun: item.lastRun ? new Date(item.lastRun) : undefined,
-        similarity: item._additional?.certainty || 0,
-      }));
-    } catch (error) {
-      console.error("[WeaviateService] Find similar queries failed:", error);
-      return [];
-    }
-  }
-
-  async detectContentAnomalies(userId: string, timeRangeMs: number): Promise<any[]> {
-    if (!this.isConnected) await this.initialize();
-
-    try {
-      const cutoffDate = new Date(Date.now() - timeRangeMs).toISOString();
-      
-      const result = await this.withRetry(async () => {
-        return await this._client.graphql
-          .get()
-          .withClassName("SearchResult")
-          .withFields(`
-            url title snippet position timestamp queryId
-            _additional { vector certainty }
-          `)
-          .withWhere({
-            operator: "And",
-            operands: [
-              { path: ["userId"], operator: "Equal", valueText: userId },
-              { path: ["timestamp"], operator: "GreaterThan", valueDate: cutoffDate },
-            ],
-          })
-          .withLimit(1000)
-          .do();
-      }, "Detect content anomalies");
-
-      const results = (result.data?.Get?.SearchResult || []) as any[];
-      if (results.length < 10) return [];
-
-      return this.analyzeVectorAnomalies(results);
-    } catch (error) {
-      console.error("[WeaviateService] Content anomaly detection failed:", error);
-      return [];
-    }
-  }
-
-  private analyzeVectorAnomalies(results: any[]): any[] {
-    try {
-      const groups = new Map<string, any[]>();
-      results.forEach(result => {
-        if (!result.queryId) return;
-        if (!groups.has(result.queryId)) {
-          groups.set(result.queryId, []);
-        }
-        groups.get(result.queryId)!.push(result);
-      });
-
-      const anomalies: any[] = [];
-      groups.forEach((items, queryId) => {
-        if (items.length < 3) return;
-
-        const pairwise: number[] = [];
-        for (let i = 0; i < items.length - 1; i++) {
-          for (let j = i + 1; j < items.length; j++) {
-            const sim = this.cosineSimilarity(
-              items[i]._additional?.vector || [],
-              items[j]._additional?.vector || []
-            );
-            if (sim > 0) pairwise.push(sim);
-          }
-        }
-
-        if (!pairwise.length) return;
-
-        const mean = pairwise.reduce((sum, val) => sum + val, 0) / pairwise.length;
-        const variance = pairwise.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / pairwise.length;
-        const stdDev = Math.sqrt(variance);
-
-        items.forEach(item => {
-          const others = items.filter(x => x !== item);
-          const similarities = others.map(other =>
-            this.cosineSimilarity(
-              item._additional?.vector || [],
-              other._additional?.vector || []
-            )
-          ).filter(sim => sim > 0);
-
-          if (similarities.length === 0) return;
-
-          const avgSimilarity = similarities.reduce((sum, sim) => sum + sim, 0) / similarities.length;
-
-          if (avgSimilarity < mean - 2 * stdDev) {
-            anomalies.push({
-              type: "content_anomaly",
-              queryId,
-              url: item.url,
-              title: item.title,
-              position: item.position,
-              timestamp: item.timestamp,
-              anomalyScore: stdDev > 0 ? (mean - avgSimilarity) / stdDev : 0,
-              avgSimilarity,
-              expectedSimilarity: mean,
-            });
-          }
-        });
-      });
-
-      return anomalies.sort((a, b) => b.anomalyScore - a.anomalyScore);
-    } catch (error) {
-      console.error("[WeaviateService] Vector anomaly analysis failed:", error);
-      return [];
-    }
-  }
-
-  private cosineSimilarity(a: number[], b: number[]): number {
-    if (!a?.length || !b?.length || a.length !== b.length) return 0;
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-    return denominator > 0 ? dotProduct / denominator : 0;
-  }
-
-  private async getQueryCategory(queryId: string): Promise<string> {
-    try {
-      return await this.withRetry(async () => {
-        const result = await this._client.graphql
-          .get()
-          .withClassName("QueryIntent")
-          .withFields("category")
-          .withWhere({ path: ["queryId"], operator: "Equal", valueText: queryId })
-          .withLimit(1)
-          .do();
-        return result.data?.Get?.QueryIntent?.[0]?.category || "";
-      }, `Get query category for ${queryId}`);
-    } catch (error) {
-      console.error(`[WeaviateService] Failed to get category for query ${queryId}:`, error);
-      return "";
     }
   }
 }
