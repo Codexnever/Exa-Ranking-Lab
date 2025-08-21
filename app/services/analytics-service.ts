@@ -92,7 +92,7 @@ export class AnalyticsService {
     // Use central analytics engine, provides all core metrics
     const timeRangeStr = snapshots.length ? this.getTimeRangeString(
       Date.now() - new Date(snapshots[0].timestamp).getTime()
-    ) : '30d';
+    ) : '60d';
 
     // Only queries parameter needs to be passed from upper layer if available
     const analytics = analyticsCalculations([], snapshots, timeRangeStr);

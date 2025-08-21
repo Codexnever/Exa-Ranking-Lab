@@ -107,7 +107,13 @@ export default function Analytics() {
     assessDataQuality,
     syncQueries,
     getConnectionHealth,
+    calculateContentCoherence,
   } = useWeaviateStore();
+
+  console.log("semanticInsights:", semanticInsights);
+console.log("enhancedMetrics:", enhancedMetrics);
+console.log("ContentCoherence:", calculateContentCoherence);
+console.log("isConnected:", isConnected, "connectionStatus:", connectionStatus);
 
   const {
     allSnapshots,
@@ -147,10 +153,10 @@ export default function Analytics() {
     return ranges[timeRange] || ranges['30d'];
   }, [timeRange]);
 
-useEffect(() => {
-  if (!userId) return;
-  fetchAnalytics(userId, timeRangeMs, queries);
-}, [fetchAnalytics, userId, queries, dataSource, timeRangeMs]);
+  useEffect(() => {
+    if (!userId) return;
+    fetchAnalytics(userId, timeRangeMs, queries);
+  }, [fetchAnalytics, userId, queries, dataSource, timeRangeMs]);
 
   // ✅ IMPROVED: Enhanced analytics data with vector-awareness indicators
   const analyticsData = useMemo(() => {
@@ -926,7 +932,7 @@ useEffect(() => {
                 <SemanticHeatmap
                   snapshots={analyticsData.filteredSnapshots || []}
                   queries={stableQueries}
-                  semanticAnalytics={semanticInsights}
+                  semanticAnalytics={semanticInsights ?? undefined}
                 />
                 {enhancedMetrics && (
                   <Card>

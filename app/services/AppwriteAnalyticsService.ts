@@ -45,7 +45,6 @@ export class AppwriteAnalyticsService extends AnalyticsService {
       // Use unified analytics engine (vector-aware)
       const timeRange = timeRangeMs ? this.getTimeRangeString(timeRangeMs) : '30d';
       const unifiedAnalytics = analyticsCalculations(queries, snapshots, timeRange);
-
       // ✅ Fix tuple typing issues
       const successRateByHour = fixHourlyStats(unifiedAnalytics.successRateByHour);
       const performanceData = fixHourlyStats(unifiedAnalytics.performanceData);

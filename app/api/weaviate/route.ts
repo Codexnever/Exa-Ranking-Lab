@@ -1,4 +1,4 @@
-// app/api/analytics/weaviate/route.ts
+// app/api/weaviate/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { WeaviateService } from '@/app/services/weaviate-service';
 import { WeaviateAnalyticsService } from '@/app/services/weaviate-analytics-service';
