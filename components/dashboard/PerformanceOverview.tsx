@@ -2,7 +2,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { BarChart3, TrendingUp, Clock, Target } from "lucide-react"
-import type { AnalyticsData, RankingSnapshot } from "@/lib/type"
+import type { AnalyticsData, RankingSnapshot } from "@/types/type"
 import { useMemo } from "react"
 import { formatResponseTime } from "@/hooks/format-response-time"
 // ✅ Updated interface to include new props

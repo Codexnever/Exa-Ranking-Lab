@@ -1,6 +1,6 @@
 "use client"
 
-import type { DriftTimelinePoint } from "@/lib/type";
+import type { DriftTimelinePoint } from "@/types/type";
 import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts"
 import { format } from "date-fns"
 

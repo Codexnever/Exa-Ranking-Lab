@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import type { RankingSnapshot } from "@/lib/type"
+import type { RankingSnapshot } from "@/types/type"
 
 /**
  * Calculates the average response time improvement between the first and last periods.

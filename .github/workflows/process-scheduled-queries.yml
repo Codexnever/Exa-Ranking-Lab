@@ -1,0 +1,55 @@
+# .github/workflows/process-scheduled-queries.yml
+#
+# Triggers /api/cron/process-scheduled every 30 minutes.
+#
+# ─── Setup ──────────────────────────────────────────────────────────────────
+# 1. Add two repository secrets (Settings → Secrets and variables → Actions):
+#      APP_URL     = https://your-app.vercel.app   (no trailing slash)
+#      CRON_SECRET = <same value as CRON_SECRET in your app's env vars>
+#
+# 2. Commit this file to your default branch — GitHub Actions schedules
+#    only run from the default branch.
+#
+# 3. GitHub Actions cron is UTC and "best-effort" — under load it may fire
+#    a few minutes late. That's fine here since process-scheduled checks
+#    `frequency` windows (hourly/daily/weekly), not exact timestamps.
+#
+# 4. To trigger manually for testing, go to Actions tab → this workflow →
+#    "Run workflow" (enabled by workflow_dispatch below).
+
+name: Process Scheduled Queries
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 minutes, UTC
+  workflow_dispatch: {}        # manual trigger from the Actions UI
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call process-scheduled endpoint
+        env:
+          APP_URL:     ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -e
+
+          response=$(curl --silent --show-error --fail-with-body \
+            --max-time 120 \
+            -w "\n%{http_code}" \
+            -X GET "${APP_URL}/api/cron/process-scheduled" \
+            -H "Authorization: Bearer ${CRON_SECRET}")
+
+          # Split body and status code (last line)
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "HTTP status: $http_code"
+          echo "Response body:"
+          echo "$body" | jq . 2>/dev/null || echo "$body"
+
+          if [ "$http_code" -ge 400 ]; then
+            echo "::error::Request failed with status $http_code"
+            exit 1
+          fi

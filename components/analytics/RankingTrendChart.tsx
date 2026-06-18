@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, Dot } from "recharts";
 import { AlertTriangle, TrendingUp, TrendingDown, Activity } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { TrendPoint } from "@/lib/type";
+import type { TrendPoint } from "@/types/type";
 
 // Custom dot component for anomaly indicators
 const AnomalyDot = ({ cx, cy, payload }: any) => {

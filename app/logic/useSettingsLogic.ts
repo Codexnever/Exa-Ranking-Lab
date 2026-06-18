@@ -4,9 +4,9 @@ import { toast } from "sonner"
 import { saveAs } from "file-saver"
 import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store"
 import { useSettingsStore } from "@/app/store"
-import { useAuth } from "@/lib/contexts/auth-context"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
 
-// ✅ Enhanced TypeScript interfaces
+//  Enhanced TypeScript interfaces
 interface ExportData {
   exportDate: string
   exportVersion: string
@@ -21,7 +21,7 @@ interface ExportData {
     totalSnapshots: number
     totalResults: number
     dateRange: {
-          earliest: string | Date  // ✅ Allow both types
+          earliest: string | Date  //  Allow both types
       latest: string | Date 
     } | null
     categories: string[]

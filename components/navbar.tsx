@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, Plus, Search, User, Loader2 } from "lucide-react"
-import { useAuth } from "@/lib/contexts/auth-context"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
 import { usePathname } from "next/navigation"
 
 export default function Navbar() {

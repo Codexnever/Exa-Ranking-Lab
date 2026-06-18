@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { useSettingsLogic } from "../../app/logic/useSettingsLogic"
 import { useQueriesStore } from "@/app/store"
 import { useSnapshotsStore } from "@/app/store" // ✅ Use store directly
-import { useAuth } from "@/lib/contexts/auth-context"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
 
 export function SettingsDataManagement() {
   const { handleExportData, handleClearData, isExporting, isClearing } = useSettingsLogic()

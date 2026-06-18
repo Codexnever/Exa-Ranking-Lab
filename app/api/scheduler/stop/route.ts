@@ -1,6 +1,6 @@
 // app/api/scheduler/stop/route.ts  
 import { NextResponse } from "next/server"
-import { schedulerService } from "@/app/services/scheduler-service"
+import { schedulerService } from "@/app/services/scheduler/scheduler-service"
 
 export async function POST() {
   try {

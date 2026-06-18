@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { formatResponseTime } from "@/hooks/format-response-time"
 import React from "react"
-import type { QueryConfig, RankingSnapshot } from "@/lib/type"
+import type { QueryConfig, RankingSnapshot } from "@/types/type"
 
 function formatTimeAgo(date: Date | string) {
   const now = new Date()

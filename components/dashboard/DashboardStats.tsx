@@ -6,7 +6,7 @@ import { formatResponseTime } from "@/hooks/format-response-time"
 import React from "react"
 import { useAvgResponseTimeImprovement } from "@/app/logic/useAvgResponseTimeImprovement"
 import { useSnapshotsStore } from "@/app/store"
-import type { QueryConfig, AnalyticsData } from "@/lib/type"
+import type { QueryConfig, AnalyticsData } from "@/types/type"
 
 // ✅ Updated interface to include new props
 interface DashboardStatsProps {

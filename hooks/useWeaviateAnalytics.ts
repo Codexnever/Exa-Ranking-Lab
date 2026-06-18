@@ -1,7 +1,7 @@
 // app/hooks/useWeaviateAnalytics.ts
 import { useState, useCallback } from 'react';
-import type { QueryConfig } from '@/lib/type';
-import type { WeaviateAnalyticsData } from '@/app/services/weaviate-analytics-service';
+import type { QueryConfig } from '@/types/type';
+import type { WeaviateAnalyticsData } from '@/app/services/weaviate/analytics/weaviate-analytics-service';
 
 interface UseWeaviateAnalyticsResult {
   data: WeaviateAnalyticsData | null;

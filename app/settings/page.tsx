@@ -22,7 +22,7 @@ import SettingsNotificationsSkeleton from "@/components/loaders/SettingsNotifica
 import SettingsPreferencesSkeleton from "@/components/loaders/SettingsPreferencesSkeleton"
 import SettingsDataManagementSkeleton from "@/components/loaders/SettingsDataManagementSkeleton"
 import SettingsSecuritySkeleton from "@/components/loaders/SettingsSecuritySkeleton"
-import { useAuth } from "@/lib/contexts/auth-context"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 
 export default function SettingsPage() {

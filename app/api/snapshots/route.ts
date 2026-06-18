@@ -1,120 +1,160 @@
-// /app/api/snapshots
+// app/api/snapshots/route.ts
 import { type NextRequest, NextResponse } from "next/server"
-import { databaseService } from "@/app/services/database-service"
-import { getCurrentUser } from "@/app/server/auth"
+import { databaseService } from "@/app/services/database/database-service"
+import { getCurrentUser } from "@/lib/middleware/authentication/auth"
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const DEFAULT_LIMIT = 100
+const MIN_LIMIT     = 1
+const MAX_LIMIT     = 1000
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+/** Parse and clamp the ?limit= query param. Returns a safe integer. */
+function parseLimit(raw: string | null): number {
+  if (!raw) return DEFAULT_LIMIT
+  const n = parseInt(raw, 10)
+  if (isNaN(n)) return DEFAULT_LIMIT
+  return Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, n))
+}
+
+/**
+ * Parse x-user-agent header set by middleware.
+ * Never throws — returns safe defaults on any failure.
+ */
+function parseUserAgent(raw: string | null) {
+  const defaults = {
+    browser: "unknown", version: "unknown",
+    deviceType: "unknown", os: "unknown", isBot: false,
+  }
+  if (!raw) return defaults
+  try {
+    const p = JSON.parse(raw)
+    return {
+      browser:    typeof p.browser    === "string"  ? p.browser    : defaults.browser,
+      version:    typeof p.version    === "string"  ? p.version    : defaults.version,
+      deviceType: typeof p.deviceType === "string"  ? p.deviceType : defaults.deviceType,
+      os:         typeof p.os         === "string"  ? p.os         : defaults.os,
+      isBot:      typeof p.isBot      === "boolean" ? p.isBot      : defaults.isBot,
+    }
+  } catch { return defaults }
+}
+
+// ─── GET /api/snapshots ───────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const { searchParams } = new URL(request.url)
-    const queryId = searchParams.get("queryId")
-    const userId = searchParams.get("userId") || user.$id
-    const limitParam = searchParams.get("limit")
-    
-    // ✅ Allow custom limit, default to 100
-    const limit = limitParam ? parseInt(limitParam, 10) : 100
-    
-    console.log('[Snapshots API] Fetching snapshots with params:', { queryId, userId, limit })
+    const queryId = searchParams.get("queryId") ?? undefined
+
+    // ✅ userId ALWAYS comes from auth token — never from query string
+    //    Accepting ?userId= from the client would let any user read
+    //    another user's snapshots by passing their ID.
+    const userId = user.$id
+
+    // ✅ Validated and clamped limit — never NaN, never negative, never huge
+    const limit = parseLimit(searchParams.get("limit"))
+
+    console.log("[Snapshots API] GET:", { queryId, userId, limit })
 
     const snapshots = await databaseService.snapshotService.getSnapshots(
-      queryId || undefined, 
-      userId || undefined,
+      queryId,
+      userId,
       limit
     )
-    
-    console.log(`[Snapshots API] Retrieved ${snapshots.length} snapshots from service`)
+    // ✅ Removed redundant sort — getSnapshots already applies orderDesc("timestamp")
 
-    // Sort by newest first (additional safety)
-    snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-
+    console.log(`[Snapshots API] Returning ${snapshots.length} snapshots`)
     return NextResponse.json(snapshots)
-  } catch (error) {
-    console.error("Failed to fetch snapshots:", error)
-    return NextResponse.json(
-      {
-        error: "Failed to fetch snapshots",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 }
-    )
+  } catch (err) {
+    console.error("[GET /api/snapshots] Failed:", err)
+    // ✅ No internal details exposed to client
+    return NextResponse.json({ error: "Failed to fetch snapshots" }, { status: 500 })
   }
 }
 
+// ─── POST /api/snapshots ──────────────────────────────────────────────────────
+
 export async function POST(request: NextRequest) {
   try {
-    // 🔐 Validate JWT and get user
     const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+    // ✅ Separate JSON parse error (400) from server errors (500)
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
     }
-    
-    console.log(`[Snapshots API] Manual snapshot creation by user: ${user.$id}`)
-    
-    // 🛠 Proceed to snapshot creation
-    const snapshot = await request.json()
-    
-    // ✅ Enhanced snapshot creation with source tracking
+
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Request body must be a JSON object" }, { status: 400 })
+    }
+
+    const b = body as Record<string, unknown>
+
+    // ✅ Validate queryId — required and must belong to this user
+    if (typeof b.queryId !== "string" || !b.queryId.trim()) {
+      return NextResponse.json({ error: "'queryId' is required" }, { status: 400 })
+    }
+
+    const ownedQuery = await databaseService.queryService.getQuery(b.queryId)
+    if (!ownedQuery || ownedQuery.userId !== user.$id) {
+      // 404 — don't reveal whether the query exists at all
+      return NextResponse.json({ error: "Query not found" }, { status: 404 })
+    }
+
+    // ✅ Validate results — must be an array
+    if (!Array.isArray(b.results)) {
+      return NextResponse.json({ error: "'results' must be an array" }, { status: 400 })
+    }
+
+    console.log(`[Snapshots API] Manual snapshot by user: ${user.$id}, query: ${b.queryId}`)
+
+    const providedMetadata = typeof b.metadata === "object" && b.metadata !== null ? b.metadata as Record<string, unknown> : {}
+    const responseTime = typeof providedMetadata.responseTime === "number" ? providedMetadata.responseTime : 0
+
     const newSnapshot = await databaseService.snapshotService.createSnapshot({
-      ...snapshot,
-      userId: user.$id, // Attach correct user to snapshot
+      queryId:   b.queryId,
+      results:   b.results,
+      // ✅ userId always from auth — never from body
+      userId:    user.$id,
       timestamp: new Date(),
       metadata: {
-        ...snapshot.metadata,
-        executionType: 'manual',
-        source: 'snapshots_api' // ✅ Track which API created this
-      }
+        // Safe merge of caller-provided metadata with required overrides
+        ...providedMetadata,
+        totalResults:  (b.results as unknown[]).length,
+        responseTime,
+        executedAt:    new Date().toISOString(),
+        executionType: "manual",
+        source:        "snapshots_api",
+      },
     })
 
-    console.log(`[Snapshots API] Manual snapshot created: ${newSnapshot.id}`)
+    console.log(`[Snapshots API] Snapshot created: ${newSnapshot.id}`)
 
-    // Access log
-    const ip = request.headers.get("x-real-ip") || "unknown"
-    const uaRaw = request.headers.get("x-user-agent") || "{}"
-    let userAgentInfo: {
-      browser: string;
-      version: string;
-      deviceType: string;
-      os: string;
-      isBot: boolean;
-    } = {
-      browser: "unknown",
-      version: "unknown",
-      deviceType: "unknown",
-      os: "unknown",
-      isBot: false,
-    }
-    try {
-      const parsed = JSON.parse(uaRaw)
-      userAgentInfo = {
-        browser: parsed.browser || "unknown",
-        version: parsed.version || "unknown",
-        deviceType: parsed.deviceType || "unknown",
-        os: parsed.os || "unknown",
-        isBot: parsed.isBot || false,
-      }
-    } catch {}
-    
+    // ✅ Trimmed access log — no full snapshot object with all results
+    const ip            = request.headers.get("x-real-ip") ?? "unknown"
+    const userAgentInfo = parseUserAgent(request.headers.get("x-user-agent"))
+
     await databaseService.accessLogService.logAccess(
       user.$id,
       "create_snapshot",
-      { snapshot: newSnapshot },
+      { snapshotId: newSnapshot.id, queryId: newSnapshot.queryId },
       ip,
       userAgentInfo
     )
-    
-    return NextResponse.json(newSnapshot)
-  } catch (error) {
-    console.error("Failed to create snapshot:", error)
-    return NextResponse.json(
-      {
-        error: "Failed to create snapshot",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 }
-    )
+
+    // ✅ 201 Created
+    return NextResponse.json(newSnapshot, { status: 201 })
+  } catch (err) {
+    console.error("[POST /api/snapshots] Failed:", err)
+    // ✅ No internal details exposed to client
+    return NextResponse.json({ error: "Failed to create snapshot" }, { status: 500 })
   }
 }

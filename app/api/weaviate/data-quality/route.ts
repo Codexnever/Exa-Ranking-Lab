@@ -1,49 +1,42 @@
 // app/api/weaviate/data-quality/route.ts
-import { NextResponse } from "next/server";
-import { AppwriteAnalyticsService } from "@/app/services/AppwriteAnalyticsService";
+import { NextRequest, NextResponse } from "next/server"
+import { getCurrentUser } from "@/lib/middleware/authentication/auth"
+import { AppwriteAnalyticsService } from "@/app/services/appwrite/analytics/AppwriteAnalyticsService"
 
-export async function GET(req: Request) {
+// ─── Singleton ────────────────────────────────────────────────────────────────
+const analyticsService = new AppwriteAnalyticsService(false)
+
+// ─── GET /api/weaviate/data-quality ──────────────────────────────────────────
+
+export async function GET(request: NextRequest) {
   try {
-    const url = new URL(req.url);
-    const userId = url.searchParams.get("userId");
-    
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Missing userId." },
-        { status: 400 }
-      );
+    // ✅ Auth required — userId always from session
+    const user = await getCurrentUser()
+    if (!user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+
+    console.log(`[DataQuality] Assessing for user: ${user.$id}`)
+
+    // ✅ userId from auth session only — not from query string
+    const analytics = await analyticsService.getAnalytics(user.$id)
+
+    const dataQuality = analytics.dataQuality ?? {
+      completeness: 0,
+      accuracy:     0,
+      consistency:  0,
+      freshness:    0,
+      validity:     0,
+      anomalyCount: 0,
+      assessedAt:   Date.now(),
     }
 
-    console.log(`[API] Assessing data quality for user: ${userId}`);
-    
-    // Use your analytics service to assess data quality
-    const analyticsService = new AppwriteAnalyticsService(false);
-    const analytics = await analyticsService.getAnalytics(userId);
-    
-    // Extract data quality metrics from your analytics
-    const dataQuality = analytics.dataQuality || {
-      completeness: 0,
-      accuracy: 0,
-      consistency: 0,
-      freshness: 0,
-      validity: 0,
-      anomalyCount: 0,
-      assessedAt: Date.now()
-    };
-
-    return NextResponse.json({
-      success: true,
-      ...dataQuality
-    });
-    
-  } catch (error) {
-    console.error("[API] Data quality assessment failed:", error);
+    // ✅ Named key instead of spread — explicit response shape
+    return NextResponse.json({ success: true, dataQuality })
+  } catch (err) {
+    console.error("[DataQuality] Failed:", err)
+    // ✅ No internal error details exposed to client
     return NextResponse.json(
-      { 
-        success: false, 
-        error: error instanceof Error ? error.message : "Internal error." 
-      },
+      { success: false, error: "Failed to assess data quality" },
       { status: 500 }
-    );
+    )
   }
 }

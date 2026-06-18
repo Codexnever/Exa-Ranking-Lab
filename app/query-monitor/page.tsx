@@ -12,10 +12,10 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { useQueriesStore } from "@/app/store"
 import { useSnapshotsStore } from "@/app/store"
-import { useAuth } from "@/lib/contexts/auth-context"
-import { useSecureApi } from '@/lib/use-secureApi'
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
+import { useSecureApi } from '@/lib/api/use-secureApi'
 import { toast } from "sonner"
-import type { MonitorStats, SchedulerConfig, QueryExecution } from "@/lib/type"
+import type { MonitorStats, SchedulerConfig, QueryExecution } from "@/types/type"
 import { 
   Play, 
   Pause, 

@@ -1,8 +1,8 @@
 // app/logic/feedbackLogic.ts
 import { useState, useMemo, useCallback } from "react"
 import { toast } from "sonner"
-import { useAuth } from "@/lib/contexts/auth-context"
-import type { RankingSnapshot } from "@/lib/type"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
+import type { RankingSnapshot } from "@/types/type"
 
 interface FeedbackData {
   resultUrl: string
@@ -28,7 +28,7 @@ export function useFeedbackLogic(snapshots: RankingSnapshot[]) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [feedback, setFeedback] = useState<FeedbackData>(initialFeedback)
 
-  // ✅ Filter snapshots by selected query with memoization
+  //  Filter snapshots by selected query with memoization
   const filteredSnapshots = useMemo(() => {
     if (!selectedQuery) return []
     return snapshots
@@ -36,27 +36,27 @@ export function useFeedbackLogic(snapshots: RankingSnapshot[]) {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   }, [snapshots, selectedQuery])
 
-  // ✅ Get selected snapshot data with memoization
+  //  Get selected snapshot data with memoization
   const selectedSnapshotData = useMemo(() => {
     if (!selectedSnapshot) return null
     return filteredSnapshots.find(snapshot => snapshot.id === selectedSnapshot)
   }, [filteredSnapshots, selectedSnapshot])
 
-  // ✅ Reset form function
+  //  Reset form function
   const resetForm = useCallback(() => {
     setFeedback(initialFeedback)
     setSelectedSnapshot("")
     setSelectedQuery("")
   }, [])
 
-  // ✅ Enhanced query change handler
+  //  Enhanced query change handler
   const handleQueryChange = useCallback((queryId: string) => {
     setSelectedQuery(queryId)
     setSelectedSnapshot("")
     setFeedback(prev => ({ ...prev, resultUrl: "" }))
   }, [])
 
-  // ✅ Enhanced submit feedback with validation
+  //  Enhanced submit feedback with validation
   const handleSubmitFeedback = useCallback(async () => {
     if (!user) {
       toast.error("Please log in to submit feedback")

@@ -1,3 +1,4 @@
+// components/sidebar.tsx
 "use client"
 
 import Link from "next/link"
@@ -23,9 +24,9 @@ import {
   Brain, // ADDED: For AI features
   Target, // ADDED: For vector DB
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@/utils/utils"
 import { Badge } from "@/components/ui/badge"
-import { useConnectionHealth } from "@/components/providers/ConnectionHealthProvider"
+import { useConnectionHealth } from "@/monitoring/healthcheck/ConnectionHealthProvider"
 import { useWeaviateStore } from "@/app/store/weaviate-store" // ADDED: Weaviate store
 import { useState, useEffect } from "react"
 

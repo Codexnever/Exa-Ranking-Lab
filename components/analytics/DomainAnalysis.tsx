@@ -2,7 +2,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { LucidePieChart } from "lucide-react";
 import { useDomainAnalysis } from "@/app/logic/domainAnalysisLogic";
-import type { RankingSnapshot } from "@/lib/type";
+import type { RankingSnapshot } from "@/types/type";
 
 interface DomainAnalysisProps {
   snapshots: RankingSnapshot[];

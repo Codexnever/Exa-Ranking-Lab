@@ -11,11 +11,11 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Star, MessageSquare, ThumbsUp, Loader2, RefreshCw, AlertCircle } from "lucide-react"
-import type { RankingSnapshot, SearchResult, QueryConfig } from "@/lib/type"
-import { useAuth } from "@/lib/contexts/auth-context"
+import type { RankingSnapshot, SearchResult, QueryConfig } from "@/types/type"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import type { FeedbackFormData } from "@/lib/type"
+import type { FeedbackFormData } from "@/types/type"
 
 
 const formatDate = (dateString: string | Date) => {
@@ -49,7 +49,7 @@ export default function Feedback() {
   const fetchAllSnapshots = useSnapshotsStore(state => state.fetchAllSnapshots)
   const isLoadingSnapshots = useSnapshotsStore(state => state.isLoadingAnalytics)
 
-  // ✅ Memoized user data filtering for better performance
+  //  Memoized user data filtering for better performance
   const { userQueries, userSnapshots } = useMemo(() => {
     if (!user) return { userQueries: [], userSnapshots: [] }
     
@@ -59,7 +59,7 @@ export default function Feedback() {
     }
   }, [queries, allSnapshots, user])
 
-  // ✅ Enhanced feedback logic with proper error handling
+  //  Enhanced feedback logic with proper error handling
   const {
     selectedQuery,
     setSelectedQuery,
@@ -135,10 +135,10 @@ export default function Feedback() {
     }
   }, [user?.$id, fetchQueries, fetchAllSnapshots])
 
-  // ✅ Loading state computation
+  //  Loading state computation
   const isLoading = queriesLoading || isLoadingSnapshots || !isInitialized
 
-  // ✅ Enhanced loading state
+  //  Enhanced loading state
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -168,7 +168,7 @@ export default function Feedback() {
     )
   }
 
-  // ✅ Authentication guard
+  //  Authentication guard
   if (!user) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -185,7 +185,7 @@ export default function Feedback() {
 
   return (
     <div className="space-y-6">
-      {/* ✅ Enhanced header with refresh button */}
+      {/*  Enhanced header with refresh button */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Feedback & Annotations</h1>

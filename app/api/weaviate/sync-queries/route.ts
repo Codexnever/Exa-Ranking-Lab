@@ -1,149 +1,153 @@
-//  app/api/weaviate/sync-queries/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { databases, DATABASE_ID, COLLECTIONS } from '@/app/server/appwrite';
-import { Query } from 'appwrite';
+// app/api/weaviate/sync-queries/route.ts
+import { NextRequest, NextResponse } from "next/server"
+import { getCurrentUser } from "@/lib/middleware/authentication/auth"
+import { databaseService } from "@/app/services/database/database-service"
+import type { SimilarQuery } from "@/app/services/weaviate/weaviate-service"
+
+// ─── Weaviate singleton ───────────────────────────────────────────────────────
+
+let _weaviateService: import("@/app/services/weaviate/weaviate-service").WeaviateService | null = null
+
+async function getWeaviateService() {
+  if (!_weaviateService) {
+    const { WeaviateService } = await import("@/app/services/weaviate/weaviate-service")
+    _weaviateService = new WeaviateService()
+  }
+  return _weaviateService
+}
+
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+
+const ALLOWED_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+
+// ─── POST /api/weaviate/sync-queries ─────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const { searchParams } = new URL(request.url);
-    const userId = body.userId || searchParams.get('userId');
-
-    if (!userId) {
-      return NextResponse.json({
-        success: false,
-        error: 'User ID is required'
-      }, { status: 400 });
+    //  Auth required — userId always from session
+    const user = await getCurrentUser()
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    console.log(`[SyncQueries] Starting sync for user: ${userId}`);
+    // Body is optional — no body means sync all queries for the authenticated user
+    let maxQueries = 100
 
-    const queriesResponse = await databases.listDocuments(
-      DATABASE_ID,
-      COLLECTIONS.QUERIES,
-      [
-        Query.equal('userId', userId),
-        Query.orderDesc('$createdAt'),
-        Query.limit(100)
-      ]
-    );
+    const contentType = request.headers.get("content-type") ?? ""
+    if (contentType.includes("application/json")) {
+      let raw: unknown
+      try { raw = await request.json() } catch {
+        return NextResponse.json({ success: false, error: "Invalid JSON body" }, { status: 400 })
+      }
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        const b = raw as Record<string, unknown>
+        if (typeof b.maxQueries === "number" && b.maxQueries > 0) {
+          maxQueries = Math.min(500, b.maxQueries)
+        }
+      }
+    }
 
-    const queries = queriesResponse.documents;
+    console.log(`[SyncQueries] Starting sync for user: ${user.$id}, max: ${maxQueries}`)
+
+    // ✅ Use QueryService (with proper field mapping + category reverse-map)
+    //    instead of databases.listDocuments with raw Appwrite field names
+    const allQueries = await databaseService.queryService.getQueries(user.$id)
+    const queries    = allQueries.slice(0, maxQueries)
 
     if (queries.length === 0) {
       return NextResponse.json({
         success: true,
-        message: 'No queries found to sync',
-        synced: 0,
-        skipped: 0,
-        errors: 0,
-        totalQueries: 0
-      });
+        message: "No queries found to sync",
+        synced: 0, skipped: 0, errors: 0, totalQueries: 0,
+      })
     }
 
-    let syncedCount = 0;
-    let skippedCount = 0;
-    let errorCount = 0;
-    const errors: string[] = [];
-    const syncResults: any[] = [];
+    console.log(`[SyncQueries] Syncing ${queries.length} queries`)
 
-    const batchSize = 10;
-    for (let i = 0; i < queries.length; i += batchSize) {
-      const batch = queries.slice(i, i + batchSize);
-      
-      await Promise.allSettled(
-        batch.map(async (query) => {
-          try {
-            const weaviateQuery = {
-              id: query.$id,
-              userId: query.userId,
-              title: query.title || '',
-              query: query.query || '',
-              type: query.type || 'web',
-              numResults: query.numResults || 10,
-              includeDomains: Array.isArray(query.includeDomains) ? query.includeDomains : [],
-              excludeDomains: Array.isArray(query.excludeDomains) ? query.excludeDomains : [],
-              startCrawlDate: query.startCrawlDate || null,
-              endCrawlDate: query.endCrawlDate || null,
-              startPublishedDate: query.startPublishedDate || null,
-              endPublishedDate: query.endPublishedDate || null,
-              useAutoprompt: Boolean(query.useAutoprompt),
-              category: query.category || 'general',
-              createdAt: query.$createdAt,
-              updatedAt: query.$updatedAt,
-              queryVector: null,
-            };
+    // ✅ Initialise Weaviate once before the batch loop
+    const weaviate = await getWeaviateService()
+    await weaviate.initialize()
 
-            // TODO: Replace with actual Weaviate sync logic when ready
-            // const result = await weaviateService.upsertQuery(weaviateQuery);
-            
-            console.log(`[SyncQueries] Synced query: ${weaviateQuery.id}`);
-            
-            syncResults.push({
-              queryId: query.$id,
-              status: 'synced',
-            });
-            
-            syncedCount++;
-          } catch (error) {
-            console.error(`[SyncQueries] Failed to sync query ${query.$id}:`, error);
-            errors.push(`Query ${query.$id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            errorCount++;
-            
-            syncResults.push({
-              queryId: query.$id,
-              status: 'error',
-              error: error instanceof Error ? error.message : 'Unknown error'
-            });
+    let syncedCount  = 0
+    let errorCount   = 0
+    const errorIds:  string[] = []
+
+    const BATCH_SIZE    = 10
+    const BATCH_DELAY   = 100
+
+    for (let i = 0; i < queries.length; i += BATCH_SIZE) {
+      const batch = queries.slice(i, i + BATCH_SIZE)
+
+      const results = await Promise.allSettled(
+        batch.map(async query => {
+          // ✅ Map QueryConfig → SimilarQuery (correct field names)
+          const weaviateQuery: SimilarQuery = {
+            id:        query.id,
+            name:      query.name,
+            query:     query.query,
+            category:  query.category,
+            userId:    user.$id,           // always from auth
+            createdAt: new Date(query.createdAt),
+            lastRun:   query.lastRun ? new Date(query.lastRun) : undefined,
+            similarity: 0,
           }
-        })
-      );
 
-      if (i + batchSize < queries.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+          // ✅ Actual sync — not a TODO no-op
+          await weaviate.syncQuery(weaviateQuery)
+          console.log(`[SyncQueries] Synced: ${query.id} (${query.name})`)
+        })
+      )
+
+      results.forEach((r, idx) => {
+        if (r.status === "fulfilled") {
+          syncedCount++
+        } else {
+          errorCount++
+          errorIds.push(batch[idx].id)
+          // ✅ Log full error server-side, never send to client
+          console.error(`[SyncQueries] Failed ${batch[idx].id}:`, r.reason)
+        }
+      })
+
+      if (i + BATCH_SIZE < queries.length) {
+        await new Promise(r => setTimeout(r, BATCH_DELAY))
       }
     }
 
-    const response = {
-      success: true,
-      message: `Sync completed. Synced: ${syncedCount}, Errors: ${errorCount}`,
-      synced: syncedCount,
-      skipped: skippedCount,
-      errors: errorCount,
-      totalQueries: queries.length,
-      details: errors.length > 0 ? errors.slice(0, 5) : undefined,
-      timestamp: new Date().toISOString(),
-    };
+    console.log(`[SyncQueries] Done — synced: ${syncedCount}, errors: ${errorCount}`)
 
-    console.log(`[SyncQueries] Sync completed for user ${userId}:`, {
-      synced: syncedCount,
-      errors: errorCount,
-      total: queries.length
-    });
-
-    return NextResponse.json(response);
-
-  } catch (error) {
-    console.error('[SyncQueries] Sync operation failed:', error);
-    
     return NextResponse.json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
-      synced: 0,
-      skipped: 0,
-      errors: 1,
-      timestamp: new Date().toISOString()
-    }, { status: 500 });
+      success:      true,
+      message:      `Sync complete. ${syncedCount} synced, ${errorCount} failed.`,
+      synced:       syncedCount,
+      skipped:      0,
+      errors:       errorCount,
+      totalQueries: queries.length,
+      // ✅ No error messages in response — just IDs so client can retry
+      failedIds:    errorIds.length > 0 ? errorIds : undefined,
+      timestamp:    new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error("[SyncQueries] Unexpected error:", err)
+    // ✅ No internal error details exposed to client
+    return NextResponse.json(
+      { success: false, error: "Sync operation failed" },
+      { status: 500 }
+    )
   }
 }
 
+// ─── OPTIONS ──────────────────────────────────────────────────────────────────
+
 export async function OPTIONS() {
+  // ✅ Restricted origin — not wildcard
   return new NextResponse(null, {
-    status: 200,
+    status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      "Access-Control-Allow-Origin":  ALLOWED_ORIGIN,
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age":       "86400",
     },
-  });
+  })
 }

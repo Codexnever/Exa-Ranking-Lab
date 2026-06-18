@@ -8,7 +8,7 @@ import { CompareSetup } from "@/components/compare/CompareSetup"
 import { CompareSummary } from "@/components/compare/CompareSummary"
 import { CompareTable } from "@/components/compare/CompareTable"
 import { useCompareLogic } from "@/app/logic/compareLogic"
-import { useAuth } from "@/lib/contexts/auth-context"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
 import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
 
