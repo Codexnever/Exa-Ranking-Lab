@@ -2,7 +2,7 @@
 import { WeaviateService, COLLECTION_NAME } from "../weaviate-service"
 import { AnalyticsService } from "../../appwrite/analytics-service"
 import { analyticsCalculations } from "@/app/logic/analyticsLogic"
-import { getTimeRangeString } from "@/lib/timeRangeString"
+import { getTimeRangeString } from "@/utils/timeRangeString"
 import type {
   RankingSnapshot,
   QueryConfig,

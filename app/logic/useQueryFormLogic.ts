@@ -9,9 +9,9 @@ import type { QueryConfig, ExaCategory } from "@/types/type"
 import { useAuth } from "@/lib/middleware/authentication/auth-context"
 
 // ─── Zod schema ───────────────────────────────────────────────────────────────
-// ✅ No .transform() on domain arrays — validation is done in handleDomainAdd
+//  No .transform() on domain arrays — validation is done in handleDomainAdd
 //    so zod transforms are redundant and their errors don't surface cleanly.
-// ✅ No .default([]) — defaultValues in useForm handles initial state.
+//  No .default([]) — defaultValues in useForm handles initial state.
 
 const formSchema = z.object({
   name: z.string()
@@ -250,7 +250,7 @@ export function useQueryFormLogic(
         // tags comes from form state (single source of truth)
         tags: sanitized.tags,
       }
-
+console.log("[useQueryFormLogic] Submitting query data:", queryData)
       await onSubmit(queryData)
 
       // Reset all local state on successful create (not edit)
@@ -274,7 +274,7 @@ export function useQueryFormLogic(
 
   return {
     form,
-    // ✅ selectedTags is derived from form state — single source of truth
+    //  selectedTags is derived from form state — single source of truth
     selectedTags,
     domainInput,
     setDomainInput,
@@ -290,4 +290,4 @@ export function useQueryFormLogic(
   }
 }
 
-export { CATEGORY_MAP, CATEGORY_MAP_REVERSE } from "@/lib/category-map"
+export { CATEGORY_MAP, CATEGORY_MAP_REVERSE } from "@/constants/category-map"

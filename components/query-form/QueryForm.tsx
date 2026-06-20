@@ -123,11 +123,11 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit, Quer
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                 {QueryCategory?.options?.map((option: string) => (
-  <SelectItem key={option} value={option}>
-    {option.charAt(0).toUpperCase() + option.slice(1)}
-  </SelectItem>
-))}
+                  {QueryCategory?.options?.map((option: string) => (
+                    <SelectItem key={option} value={option}>
+                      {option.charAt(0).toUpperCase() + option.slice(1)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -250,10 +250,10 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit, Quer
                   </FormControl>
                   <SelectContent>
                     {QueryFrequency?.options?.map((option: string) => (
-  <SelectItem key={option} value={option}>
-    {option.charAt(0).toUpperCase() + option.slice(1)}
-  </SelectItem>
-))}
+                      <SelectItem key={option} value={option}>
+                        {option.charAt(0).toUpperCase() + option.slice(1)}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <FormMessage />

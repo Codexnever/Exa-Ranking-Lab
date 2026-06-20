@@ -14,12 +14,12 @@ import type { ExaCategory } from "@/types/type"
  * controls those — callers cannot inject them.
  */
 function parseCreateBody(body: unknown): {
-  name:      string
-  query:     string
-  category:  ExaCategory
-  filters:   Record<string, unknown>
-  schedule:  { enabled: boolean; frequency: "daily" | "hourly" | "weekly"; times?: string[] }
-  tags:      string[]
+  name: string
+  query: string
+  category: ExaCategory
+  filters: Record<string, unknown>
+  schedule: { enabled: boolean; frequency: "daily" | "hourly" | "weekly"; times?: string[] }
+  tags: string[]
 } {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw Object.assign(new Error("Request body must be a JSON object"), { status: 400 })
@@ -60,17 +60,17 @@ function parseCreateBody(body: unknown): {
   }
 
   return {
-    name:     (b.name     as string).trim(),
-    query:    (b.query    as string).trim(),
-    category: b.category  as ExaCategory,
-    // ✅ Only pass known safe fields — strip id, createdAt, userId, unknown fields
-    filters:  (b.filters  && typeof b.filters  === "object" && !Array.isArray(b.filters))
-                ? b.filters  as Record<string, unknown>
-                : {},
+    name: (b.name as string).trim(),
+    query: (b.query as string).trim(),
+    category: b.category as ExaCategory,
+    // Only pass known safe fields — strip id, createdAt, userId, unknown fields
+    filters: (b.filters && typeof b.filters === "object" && !Array.isArray(b.filters))
+      ? b.filters as Record<string, unknown>
+      : {},
     schedule,
-    tags:     Array.isArray(b.tags)
-                ? (b.tags as unknown[]).filter(t => typeof t === "string").slice(0, 10)
-                : [],
+    tags: Array.isArray(b.tags)
+      ? (b.tags as unknown[]).filter(t => typeof t === "string").slice(0, 10)
+      : [],
   }
 }
 
@@ -80,11 +80,11 @@ function parseCreateBody(body: unknown): {
  */
 function parseUserAgent(raw: string | null) {
   const defaults = {
-    browser:    "unknown",
-    version:    "unknown",
+    browser: "unknown",
+    version: "unknown",
     deviceType: "unknown",
-    os:         "unknown",
-    isBot:      false,
+    os: "unknown",
+    isBot: false,
   }
 
   if (!raw) return defaults
@@ -92,11 +92,11 @@ function parseUserAgent(raw: string | null) {
   try {
     const parsed = JSON.parse(raw)
     return {
-      browser:    typeof parsed.browser    === "string"  ? parsed.browser    : defaults.browser,
-      version:    typeof parsed.version    === "string"  ? parsed.version    : defaults.version,
-      deviceType: typeof parsed.deviceType === "string"  ? parsed.deviceType : defaults.deviceType,
-      os:         typeof parsed.os         === "string"  ? parsed.os         : defaults.os,
-      isBot:      typeof parsed.isBot      === "boolean" ? parsed.isBot      : defaults.isBot,
+      browser: typeof parsed.browser === "string" ? parsed.browser : defaults.browser,
+      version: typeof parsed.version === "string" ? parsed.version : defaults.version,
+      deviceType: typeof parsed.deviceType === "string" ? parsed.deviceType : defaults.deviceType,
+      os: typeof parsed.os === "string" ? parsed.os : defaults.os,
+      isBot: typeof parsed.isBot === "boolean" ? parsed.isBot : defaults.isBot,
     }
   } catch {
     return defaults
@@ -123,11 +123,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // ✅ Auth inside try/catch
+    //  Auth inside try/catch
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    // ✅ Separate JSON parse error (400) from service errors (500)
+    //  Separate JSON parse error (400) from service errors (500)
     let rawBody: unknown
     try {
       rawBody = await request.json()
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
     }
 
-    // ✅ Validate and strip protected fields — id, createdAt, userId cannot be injected
+    //  Validate and strip protected fields — id, createdAt, userId cannot be injected
     let validated: ReturnType<typeof parseCreateBody>
     try {
       validated = parseCreateBody(rawBody)
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Access log — trim to essential fields, not full query object
-    const ip            = request.headers.get("x-real-ip") ?? "unknown"
+    const ip = request.headers.get("x-real-ip") ?? "unknown"
     const userAgentInfo = parseUserAgent(request.headers.get("x-user-agent"))
 
     await databaseService.accessLogService.logAccess(

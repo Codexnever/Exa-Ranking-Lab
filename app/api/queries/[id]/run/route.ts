@@ -143,17 +143,29 @@ async function executeQuery(
     const exaClient = new ExaClient(apiKey)
 
     console.log(`[QueryRun] Executing search for query: ${queryId}`)
+console.log(
+  "[QueryRun] Query filters:",
+  JSON.stringify(filters, null, 2)
+)
 
+console.log(
+  "[QueryRun] Sending to Exa:",
+  JSON.stringify({
+    results: filters.numResults,
+    numResults: filters.numResults,
+  }, null, 2)
+)
     const exaResponse = await exaClient.search({
       query:          query.query,
       category:       query.category,
+      results:        filters.numResults,
       includeDomains: filters.includeDomains,
       excludeDomains: filters.excludeDomains,
       startDate:      filters.startDate,
       endDate:        filters.endDate,
       numResults:     filters.numResults,
     })
-
+console.log(`[QueryRun] Exa response received for query: ${queryId} exaResponse:${JSON.stringify(exaResponse)}`) 
     // FIX: Use searchTime (ms, server-side from Exa) as the canonical response
     //      time stored in snapshot metadata and returned to the client.
     //      Previous code measured wall-clock ms here independently, creating a
@@ -198,7 +210,7 @@ async function executeQuery(
       `[QueryRun] ${mappedResults.length} results for query: ${queryId} ` +
       `(Exa searchTime: ${searchTime}ms, RTT: ${responseTime}ms)`
     )
-
+//here wrong result came 
     const snapshot = await databaseService.snapshotService.createSnapshot({
       queryId:  query.id,
       userId:   user.$id,

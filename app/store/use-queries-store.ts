@@ -8,7 +8,7 @@ import type { QueryConfig } from "@/types/type"
 
 const safeStorage = createJSONStorage(() => {
   if (typeof window === "undefined") {
-    return { getItem: () => null, setItem: () => {}, removeItem: () => {} } as Storage
+    return { getItem: () => null, setItem: () => {}, removeItem: () => {} } as unknown as Storage
   }
   return {
     getItem: (key: string) => {
@@ -150,7 +150,6 @@ export const useQueriesStore = create<QueriesStoreType>()(
             credentials: "include",
             body:        JSON.stringify(query),
           })
-
           if (res.status === 401) throw new Error("Session expired. Please log in again")
           if (!res.ok) {
             const err = await res.json().catch(() => ({}))
@@ -158,7 +157,8 @@ export const useQueriesStore = create<QueriesStoreType>()(
           }
 
           const newQuery = await res.json() as QueryConfig
-          // ✅ No explicit return type on setter — avoids type mismatch
+          //  No explicit return type on setter — avoids type mismatch
+         console.log("[QueriesStore] Created query:", newQuery)
           set(state => ({
             queries:   [newQuery, ...state.queries],
             isLoading: false,
@@ -182,11 +182,12 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const local = get().queries.find(q => q.id === queryId)
           if (!local) throw new Error("Query not found")
 
+
           const res = await fetch(`/api/queries/${encodeURIComponent(queryId)}/run`, {
             method:      "POST",
             headers:     { "Content-Type": "application/json" },
             credentials: "include",
-            // ✅ Send full query config — API needs it to execute the search
+            //  Send full query config — API needs it to execute the search
             body:        JSON.stringify(local),
           })
 

@@ -2,7 +2,7 @@
 import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite/appwrite-server"
 import { ID, Query } from "appwrite"
 import type { QueryConfig } from "@/types/type"
-import { CATEGORY_MAP } from "@/lib/category-map"
+import { CATEGORY_MAP } from "@/constants/category-map"
 import { loadFromStorage, saveToStorage, transformQueryDocument } from "../../../utils/db-utils"
 
 export class QueryService {

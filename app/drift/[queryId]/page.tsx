@@ -24,11 +24,12 @@ import { useAuth } from "@/lib/middleware/authentication/auth-context";
 import { useSecureApi } from '@/lib/api/use-secureApi'
 import type { DriftAnalysisResult } from "@/types/type";
 
-// ✅ Enhanced interface for drift result with performance metrics
+//  Enhanced interface for drift result with performance metrics
 interface EnhancedDriftResult extends DriftAnalysisResult {
   totalContentChanges: number;
-  averageCacheHitRate: number;  
+  averageCacheHitRate: number;
   totalProcessingTime: number;
+  routeProcessingTime?: number;
 }
 
 export default function QueryDriftPage({ params }: { params: Promise<{ queryid: string }> }) {
@@ -55,10 +56,11 @@ console.log("secureCall changed");
         setError(null);
 
         console.log("Fetching enhanced drift data for queryId:", queryid);
-        const data = await secureCall<EnhancedDriftResult>("GET", `/drift/${queryid}`);
+        const response = await secureCall("GET", `/drift/${queryid}`);
+        const data = response instanceof Response ? await response.json() : response;
 
         if (data && typeof data === "object") {
-          setDriftResult(data);
+          setDriftResult(data as EnhancedDriftResult);
         } else {
           throw new Error("Invalid response format");
         }
@@ -198,91 +200,129 @@ console.log("secureCall changed");
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-6 md:grid-cols-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-blue-50">
-                <Clock className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">Total Processing Time</p>
-                <p className="text-2xl font-bold text-blue-600">
-                  {(driftResult.totalProcessingTime || 0).toFixed(0)}ms
-                </p>
-                <p className="text-xs text-gray-500">Entire analysis duration</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-green-50">
-                <Zap className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">Cache Hit Rate</p>
-                <p className="text-2xl font-bold text-green-600">
-                  {((driftResult.averageCacheHitRate || 0) * 100).toFixed(1)}%
-                </p>
-                <p className="text-xs text-gray-500">Embedding cache efficiency</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-purple-50">
-                <Activity className="w-5 h-5 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">Stability Level</p>
-                <Badge 
-                  variant={
-                    driftResult.stability === 'stable' ? 'default' :
-                    driftResult.stability === 'medium' ? 'secondary' : 'destructive'
-                  }
-                  className="text-lg px-3 py-1"
-                >
-                  {driftResult.stability || 'unknown'}
-                </Badge>
-                <p className="text-xs text-gray-500 mt-1">Overall query stability</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-amber-50">
-                <Hash className="w-5 h-5 text-amber-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">Content Efficiency</p>
-                <p className="text-2xl font-bold text-amber-600">
-                  {driftResult.totalContentChanges === 0 ? '100%' : 
-                   `${(((driftResult.driftTimeline?.length || 0) - (driftResult.totalContentChanges || 0)) / 
-                     (driftResult.driftTimeline?.length || 1) * 100).toFixed(0)}%`}
-                </p>
-                <p className="text-xs text-gray-500">Unchanged content ratio</p>
-              </div>
-            </div>
-          </div>
-
-          {/* ✅ Performance Optimization Indicators */}
-          <div className="mt-6 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
-            <h4 className="font-medium text-green-900 mb-2">Optimization Benefits</h4>
-            <div className="grid gap-2 md:grid-cols-2 text-sm">
-              <div className="flex items-center gap-2 text-green-700">
-                <Zap className="w-4 h-4" />
-                <span>Content hash optimization: {driftResult.totalContentChanges === 0 ? 'Maximum' : 'Partial'} speed boost</span>
-              </div>
-              <div className="flex items-center gap-2 text-blue-700">
-                <Clock className="w-4 h-4" />
-                <span>Processing time: {(driftResult.totalProcessingTime || 0) < 1000 ? 'Excellent' : 'Good'} performance</span>
-              </div>
-              <div className="flex items-center gap-2 text-purple-700">
-                <Gauge className="w-4 h-4" />
-                <span>Cache efficiency: {((driftResult.averageCacheHitRate || 0) * 100) > 70 ? 'High' : 'Building'} hit rate</span>
-              </div>
-              <div className="flex items-center gap-2 text-amber-700">
-                <Hash className="w-4 h-4" />
-                <span>Content stability: {driftResult.totalContentChanges || 0} hash changes detected</span>
-              </div>
-            </div>
-          </div>
-        </CardContent>
+  <div className="grid gap-6 md:grid-cols-4">
+    <div className="flex items-center gap-3">
+      <div className="p-3 rounded-lg bg-blue-50">
+        <Clock className="w-5 h-5 text-blue-600" />
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-900">Total Processing Time</p>
+        <p className="text-2xl font-bold text-blue-600">
+          {(driftResult.totalProcessingTime || 0).toFixed(0)}ms
+        </p>
+        {/* ✅ Clarify which timing this is, now that the two are separate */}
+        <p className="text-xs text-gray-500">
+          Drift computation only
+          {typeof driftResult.routeProcessingTime === "number" && (
+            <> &middot; {driftResult.routeProcessingTime.toFixed(0)}ms full request</>
+          )}
+        </p>
+      </div>
+    </div>
+ 
+    <div className="flex items-center gap-3">
+      <div className="p-3 rounded-lg bg-green-50">
+        <Zap className="w-5 h-5 text-green-600" />
+      </div>
+      <div>
+        {/* ✅ This now shows the REAL embedding cache hit rate */}
+        <p className="text-sm font-medium text-gray-900">Cache Hit Rate</p>
+        <p className="text-2xl font-bold text-green-600">
+          {((driftResult.averageCacheHitRate || 0) * 100).toFixed(1)}%
+        </p>
+        <p className="text-xs text-gray-500">Embedding cache efficiency</p>
+      </div>
+    </div>
+ 
+    <div className="flex items-center gap-3">
+      <div className="p-3 rounded-lg bg-purple-50">
+        <Activity className="w-5 h-5 text-purple-600" />
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-900">Stability Level</p>
+        <Badge
+          variant={
+            driftResult.stability === 'stable' ? 'default' :
+            driftResult.stability === 'medium' ? 'secondary' : 'destructive'
+          }
+          className="text-lg px-3 py-1"
+        >
+          {driftResult.stability || 'unknown'}
+        </Badge>
+        <p className="text-xs text-gray-500 mt-1">Overall query stability</p>
+      </div>
+    </div>
+ 
+    <div className="flex items-center gap-3">
+      <div className="p-3 rounded-lg bg-amber-50">
+        <Hash className="w-5 h-5 text-amber-600" />
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-900">Content Efficiency</p>
+        <p className="text-2xl font-bold text-amber-600">
+          {/* ✅ FIXED — was: (driftTimeline.length - totalContentChanges) /
+                driftTimeline.length * 100, mixing snapshot-pair counts with
+                individual-result-change counts → produced -220%.
+                Now: totalResultsCompared and totalContentChanges are in
+                the SAME units (individual matched-result comparisons),
+                so this ratio is always in [0, 100]. */}
+          {(driftResult.totalResultsCompared ?? 0) === 0
+            ? "100%"
+            : `${Math.min(100, Math.max(0,
+                (((driftResult.totalResultsCompared ?? 0) - (driftResult.totalContentChanges || 0))
+                  / (driftResult.totalResultsCompared ?? 0)) * 100
+              )).toFixed(0)}%`}
+        </p>
+        <p className="text-xs text-gray-500">Unchanged content ratio</p>
+      </div>
+    </div>
+  </div>
+ 
+  {/* ✅ Optional 5th stat — newly available, correctly-labeled metric.
+        This is the one that USED to be mislabeled as "Cache Hit Rate".
+        Add this if you want to show it; otherwise it's safe to omit. */}
+  {typeof driftResult.contentStabilityRate === "number" && (
+    <div className="mt-4 flex items-center gap-3">
+      <div className="p-3 rounded-lg bg-teal-50">
+        <Hash className="w-5 h-5 text-teal-600" />
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-900">Content Stability</p>
+        <p className="text-2xl font-bold text-teal-600">
+          {(driftResult.contentStabilityRate * 100).toFixed(1)}%
+        </p>
+        <p className="text-xs text-gray-500">
+          Compared results with identical content between snapshots
+        </p>
+      </div>
+    </div>
+  )}
+ 
+  {/* Optimization Benefits block — unchanged except Content Efficiency
+      now reads from the corrected totalResultsCompared/totalContentChanges
+      pair instead of implying via totalContentChanges === 0 alone */}
+  <div className="mt-6 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
+    <h4 className="font-medium text-green-900 mb-2">Optimization Benefits</h4>
+    <div className="grid gap-2 md:grid-cols-2 text-sm">
+      <div className="flex items-center gap-2 text-green-700">
+        <Zap className="w-4 h-4" />
+        <span>Content hash optimization: {driftResult.totalContentChanges === 0 ? 'Maximum' : 'Partial'} speed boost</span>
+      </div>
+      <div className="flex items-center gap-2 text-blue-700">
+        <Clock className="w-4 h-4" />
+        <span>Processing time: {(driftResult.totalProcessingTime || 0) < 1000 ? 'Excellent' : 'Good'} performance</span>
+      </div>
+      <div className="flex items-center gap-2 text-purple-700">
+        <Gauge className="w-4 h-4" />
+        <span>Cache efficiency: {((driftResult.averageCacheHitRate || 0) * 100) > 70 ? 'High' : 'Building'} hit rate</span>
+      </div>
+      <div className="flex items-center gap-2 text-amber-700">
+        <Hash className="w-4 h-4" />
+        <span>Content stability: {driftResult.totalContentChanges || 0} hash changes detected</span>
+      </div>
+    </div>
+  </div>
+</CardContent>
       </Card>
 
       {/* Timeline Visualization - Enhanced */}

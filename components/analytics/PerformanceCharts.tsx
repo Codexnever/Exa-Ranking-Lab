@@ -19,13 +19,25 @@ import {
 } from "recharts";
 import { formatResponseTime } from "@/hooks/format-response-time";
 
+interface PerformanceChartsProps {
+  performanceData: any[];
+  successRateByHour: any[];
+}
+
 export function PerformanceCharts({
   performanceData,
   successRateByHour,
-}: {
-  performanceData: any[];
-  successRateByHour: any[];
-}) {
+}: PerformanceChartsProps) {
+  // ✅ Computed once, used to gate rendering OUTSIDE ResponsiveContainer
+  //    (see note below on why this matters).
+  const hasPerformanceData   = Array.isArray(performanceData) && performanceData.length > 0;
+  // ✅ FIX: added Array.isArray guard — was `successRateByHour.length === 0`
+  //    with no null/undefined check. If successRateByHour is ever
+  //    undefined (e.g. during initial load before the parent's fetch
+  //    resolves), this threw "Cannot read property 'length' of undefined"
+  //    and crashed the whole component.
+  const hasHourlyData        = Array.isArray(successRateByHour) && successRateByHour.length > 0;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card className="shadow-xl border border-gray-200">
@@ -37,13 +49,24 @@ export function PerformanceCharts({
         </CardHeader>
         <CardContent className="pt-2">
           <div className="h-96">
-            <ResponsiveContainer width="100%" height="100%">
-             {!Array.isArray(performanceData) || performanceData.length === 0 ? (
-
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  No performance data
-                </div>
-              ) : (
+            {/* ✅ FIX: empty-state check moved OUTSIDE ResponsiveContainer.
+                Recharts' ResponsiveContainer expects exactly one chart
+                component as its child — it clones that child and injects
+                computed width/height via its internal ResizeObserver logic,
+                which assumes an SVG-rendering chart. Putting a plain <div>
+                inside it (the old `condition ? <div/> : <LineChart/>`
+                pattern) breaks that assumption: the empty-state div doesn't
+                participate in the same layout/resize lifecycle a chart
+                does, which causes inconsistent sizing and layout jank when
+                toggling between empty and populated states. The fix is to
+                decide which to render BEFORE entering ResponsiveContainer,
+                so it only ever wraps a real chart. */}
+            {!hasPerformanceData ? (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                No performance data
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={performanceData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="hour" tick={{ fontSize: 12 }} />
@@ -62,8 +85,13 @@ export function PerformanceCharts({
                   />
                   <Tooltip
                     contentStyle={{ fontSize: 14 }}
+                    // ✅ FIX: this chart's dataKeys are "responseTime" and
+                    //    "successRate" only — "avgTime" never appears here
+                    //    (that check was copy-pasted from the second
+                    //    chart's tooltip and did nothing in this context).
+                    //    Formatter now matches the actual keys used below.
                     formatter={(value: any, name: string) =>
-                      name === "responseTime" || name === "avgTime"
+                      name === "responseTime"
                         ? formatResponseTime(value)
                         : `${value}%`
                     }
@@ -88,8 +116,8 @@ export function PerformanceCharts({
                     name="Success Rate"
                   />
                 </LineChart>
-              )}
-            </ResponsiveContainer>
+              </ResponsiveContainer>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -103,12 +131,13 @@ export function PerformanceCharts({
         </CardHeader>
         <CardContent className="pt-2">
           <div className="h-96">
-            <ResponsiveContainer width="100%" height="100%">
-              {successRateByHour.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  No hourly data
-                </div>
-              ) : (
+            {/* ✅ Same fix — empty-state check outside ResponsiveContainer */}
+            {!hasHourlyData ? (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                No hourly data
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={successRateByHour}
                   margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
@@ -143,8 +172,8 @@ export function PerformanceCharts({
                     name="Avg Response Time"
                   />
                 </BarChart>
-              )}
-            </ResponsiveContainer>
+              </ResponsiveContainer>
+            )}
           </div>
         </CardContent>
       </Card>

@@ -1,7 +1,7 @@
 // app/services/db-utils.ts
 // Utility functions for localStorage and Appwrite document transformation.
 
-import { CATEGORY_MAP_REVERSE } from "@/lib/category-map"
+import { CATEGORY_MAP_REVERSE } from "@/constants/category-map"
 import type { QueryConfig, RankingSnapshot, UserFeedback } from "@/types/type"
 
 // ─── Storage key ──────────────────────────────────────────────────────────────

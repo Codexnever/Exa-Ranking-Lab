@@ -44,6 +44,7 @@ export type ExaCategory =
 export interface ExaSearchOptions {
   query:           string
   category?:       ExaCategory
+  results?:        number
   includeDomains?: string[]
   excludeDomains?: string[]
   startDate?:      string
@@ -64,8 +65,8 @@ export interface ExaSearchResult {
 export interface ExaSearchResponse {
   results:      ExaSearchResult[]
   totalResults: number
-  responseTime: number
-  searchTime: number
+  responseTime: number | string
+  searchTime: number | string
   requestId: string
   searchType?: string
 }
@@ -111,7 +112,7 @@ export interface RankingSnapshot {
   queryType?: string
   metadata: {
     totalResults:         number
-    responseTime:         number
+    responseTime:         number | string
     // ✅ Required — always set to new Date().toISOString()
     executedAt:           string
     exaVersion?:          string
@@ -593,7 +594,9 @@ export interface DriftAnalysisResult {
   driftTrend:           "improving" | "worsening" | "stable"
   totalProcessingTime:  number
   totalContentChanges:  number
-  averageCacheHitRate:  number
+   averageCacheHitRate:  number
+   totalResultsCompared?: number
+   contentStabilityRate?: number
 }
 
 export interface DriftTimelinePoint {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite/appwrite-serverte-server"
+import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite/appwrite-server"
 
 import { getCurrentUser } from "@/lib/middleware/authentication/auth"; 
 

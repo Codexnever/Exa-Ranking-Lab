@@ -1,6 +1,6 @@
 // app/services/AppwriteAnalyticsService.ts
 import { AnalyticsService } from "../analytics-service"
-import { getTimeRangeString } from "@/lib/timeRangeString"  // ✅ single source of truth
+import { getTimeRangeString } from "@/utils/timeRangeString"  // ✅ single source of truth
 import type {
   AnalyticsData,
   QueryConfig,

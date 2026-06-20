@@ -16,7 +16,7 @@ import type {
 } from "@/types/type"
 import { loadFromStorage, transformSnapshotDocument } from "../../../utils/db-utils"
 import { analyticsCalculations, predictTrend } from "@/app/logic/analyticsLogic"
-import { getTimeRangeString } from "@/lib/timeRangeString"
+import { getTimeRangeString } from "@/utils/timeRangeString"
 
 // ─── Module-level normalizers (not inside method bodies) ──────────────────────
 

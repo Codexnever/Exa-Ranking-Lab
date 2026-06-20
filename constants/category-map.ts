@@ -1,11 +1,11 @@
 export const CATEGORY_MAP = {
   "company": "company",
-  "research paper": "research_paper",
-  "news": "news",
+  "Research paper": "research paper",
+  "News": "News",
   "pdf": "pdf",
-  "github": "github",
+  "GitHub": "GitHub",
   "tweet": "tweet",
-  "personal site": "personal_site",
+  "personal site": "personal site",
   "linkedin profile": "linkedin_profile",
   "financial report": "financial_report"
 } as const;

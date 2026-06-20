@@ -9,6 +9,7 @@ import { Network, Maximize2, Download, AlertCircle } from "lucide-react";
 interface SemanticHeatmapProps {
   snapshots: Array<{
     queryId?: string;
+    timestamp?: string | Date;
     results: Array<{ url: string; position?: number }>;
   }>;
   queries: Array<{ id: string; name: string }>;
@@ -27,8 +28,18 @@ interface SemanticHeatmapProps {
           queryIds?: string[];
         }>;
       };
+      // ✅ Matches the actual shape returned by WeaviateAnalyticsService —
+      //    contentAnomalies is an OBJECT with a nested .anomalies array,
+      //    not a flat array. The old code checked semanticAnalytics
+      //    .contentAnomalies directly (wrong path + wrong shape), so it
+      //    never found anomalies that the API actually returns.
+      contentAnomalies?: {
+        count?: number;
+        anomalies?: Array<{ queryId: string; anomalyScore: number }>;
+      };
     };
-    // ADDED: Support for direct content anomalies structure
+    // Kept for backward-compat with any caller still passing this flat
+    // shape directly — checked as a fallback, not the primary path.
     contentAnomalies?: Array<{
       queryId: string;
       anomalyScore: number;
@@ -41,9 +52,16 @@ interface HeatmapData {
   queryName: string;
   domains: Record<string, number>;
   totalResults: number;
-  semanticScore: number;
-  coherence: number;
-  hasAnomalies: boolean; // ADDED: Anomaly indicator
+  coherence: number;       // ✅ single source of truth — semanticScore removed
+  hasAnomalies: boolean;
+}
+
+// CSV field escaping — wraps in quotes and doubles internal quotes if the
+// value contains a comma, quote, or newline.
+function csvEscape(value: unknown): string {
+  const str = value === null || value === undefined ? "" : String(value);
+  if (/[",\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
 }
 
 export function SemanticHeatmap({
@@ -67,59 +85,103 @@ export function SemanticHeatmap({
       ? semanticAnalytics.enhancedMetrics.contentCoherence
       : 0;
 
-  /** Build per-query coherence map from semantic clusters.queryIds */
+  /**
+   *  FIXED: true average per query, not a recency-weighted running
+   * average. Old code did `(prev + cl.coherence) / 2` repeatedly, which
+   * over-weights later clusters and under-weights earlier ones — e.g.
+   * three values [0.9, 0.5, 0.1] resolved to 0.4 instead of the true
+   * mean 0.5, with the result depending on cluster iteration order.
+   */
   const perQueryCoherence = useMemo(() => {
-    const map = new Map<string, number>();
+    const sums   = new Map<string, number>();
+    const counts = new Map<string, number>();
     const clusters = semanticAnalytics?.semanticInsights?.semanticClusters?.clusters || [];
-    
+
     for (const cl of clusters) {
       if (!cl || typeof cl.coherence !== "number" || !Array.isArray(cl.queryIds)) continue;
       for (const qid of cl.queryIds) {
-        const prev = map.get(qid);
-        map.set(qid, typeof prev === "number" ? (prev + cl.coherence) / 2 : cl.coherence);
+        sums.set(qid, (sums.get(qid) ?? 0) + cl.coherence);
+        counts.set(qid, (counts.get(qid) ?? 0) + 1);
       }
     }
-    return map;
+
+    const result = new Map<string, number>();
+    for (const [qid, sum] of sums) {
+      result.set(qid, sum / (counts.get(qid) ?? 1));
+    }
+    return result;
   }, [semanticAnalytics]);
 
-  /** ADDED: Anomaly detection per query */
+  /**
+   * ✅ FIXED: checks the correct path/shape matching what
+   * WeaviateAnalyticsService actually returns (semanticInsights
+   * .contentAnomalies.anomalies[]), with the old flat-array shape kept
+   * as a fallback for any caller still using it. Previously this only
+   * checked semanticAnalytics.contentAnomalies directly, which the real
+   * API response never populates — anomaly highlighting silently never
+   * worked.
+   */
   const queryAnomalies = useMemo(() => {
     const anomalyMap = new Map<string, boolean>();
-    
-    // From direct content anomalies
-    if (semanticAnalytics?.contentAnomalies) {
-      semanticAnalytics.contentAnomalies.forEach(anomaly => {
-        anomalyMap.set(anomaly.queryId, true);
-      });
+
+    const nested = semanticAnalytics?.semanticInsights?.contentAnomalies?.anomalies;
+    if (Array.isArray(nested)) {
+      for (const a of nested) {
+        if (a?.queryId) anomalyMap.set(a.queryId, true);
+      }
+    }
+
+    const flat = semanticAnalytics?.contentAnomalies;
+    if (Array.isArray(flat)) {
+      for (const a of flat) {
+        if (a?.queryId) anomalyMap.set(a.queryId, true);
+      }
     }
 
     return anomalyMap;
   }, [semanticAnalytics]);
 
-  /** Aggregate heatmap data for each query */
+  /**
+   * Aggregate heatmap data for each query.
+   *
+   * ✅ FIXED: only the LATEST snapshot per query is used for domain
+   * counts. Previously, domain counts accumulated across EVERY snapshot
+   * for a query — so a domain appearing in 5 historical snapshots showed
+   * count=5, inflating its apparent dominance purely because the query
+   * had been tracked longer, not because that domain genuinely holds
+   * more positions in the current SERP.
+   */
   const heatmapData = useMemo<HeatmapData[]>(() => {
     if (!snapshots?.length || !queries?.length) return [];
 
-    const dataMap = new Map<string, HeatmapData>();
-
+    // Find the latest snapshot per query first
+    const latestByQuery = new Map<string, typeof snapshots[number]>();
     for (const snapshot of snapshots) {
       const qid = snapshot.queryId;
       if (!qid || !Array.isArray(snapshot.results)) continue;
 
-      if (!dataMap.has(qid)) {
-        const rowCoherence = perQueryCoherence.get(qid) ?? globalCoherence;
-        dataMap.set(qid, {
-          queryId: qid,
-          queryName: queryNameById.get(qid) || "Unknown Query",
-          domains: {},
-          totalResults: 0,
-          semanticScore: rowCoherence,
-          coherence: rowCoherence,
-          hasAnomalies: queryAnomalies.get(qid) || false,
-        });
-      }
+      const existing = latestByQuery.get(qid);
+      const snapTime  = snapshot.timestamp ? new Date(snapshot.timestamp).getTime() : 0;
+      const existTime = existing?.timestamp ? new Date(existing.timestamp).getTime() : -1;
 
-      const row = dataMap.get(qid)!;
+      if (!existing || snapTime > existTime) {
+        latestByQuery.set(qid, snapshot);
+      }
+    }
+
+    const dataMap = new Map<string, HeatmapData>();
+
+    for (const [qid, snapshot] of latestByQuery) {
+      const rowCoherence = perQueryCoherence.get(qid) ?? globalCoherence;
+      const row: HeatmapData = {
+        queryId:      qid,
+        queryName:    queryNameById.get(qid) || "Unknown Query",
+        domains:      {},
+        totalResults: 0,
+        coherence:    rowCoherence,
+        hasAnomalies: queryAnomalies.get(qid) || false,
+      };
+
       for (const r of snapshot.results) {
         if (!r?.url) continue;
         try {
@@ -130,12 +192,14 @@ export function SemanticHeatmap({
           // Ignore invalid URLs
         }
       }
+
+      dataMap.set(qid, row);
     }
 
     return Array.from(dataMap.values());
   }, [snapshots, queries, queryNameById, perQueryCoherence, globalCoherence, queryAnomalies]);
 
-  /** ADDED: Filter data based on anomalies if needed */
+  /** Filter data based on anomalies if needed */
   const filteredHeatmapData = useMemo(() => {
     if (!showAnomaliesOnly) return heatmapData;
     return heatmapData.filter(data => data.hasAnomalies);
@@ -175,23 +239,32 @@ export function SemanticHeatmap({
     return intensity >= 0.4 ? "text-white" : "text-gray-700";
   };
 
-  /** ADDED: Export functionality */
+  /** ✅ Export — Blob-based, escaped fields, no encodeURI size limits */
   const handleExport = () => {
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Query,Total Results,Semantic Score,Coherence,Has Anomalies,Top Domain,Domain Count\n";
-    
-    filteredHeatmapData.forEach(row => {
-      const topDomain = Object.entries(row.domains).sort((a, b) => b[1] - a[1])[0];
-      csvContent += `"${row.queryName}",${row.totalResults},${row.semanticScore.toFixed(2)},${row.coherence.toFixed(2)},${row.hasAnomalies},${topDomain?.[0] || 'N/A'},${topDomain?.[1] || 0}\n`;
-    });
+    const headers = ["Query", "Total Results", "Coherence", "Has Anomalies", "Top Domain", "Domain Count"]
+      .join(",") + "\n";
 
-    const encodedUri = encodeURI(csvContent);
+    const rows = filteredHeatmapData.map(row => {
+      const topDomain = Object.entries(row.domains).sort((a, b) => b[1] - a[1])[0];
+      return [
+        row.queryName,
+        row.totalResults,
+        row.coherence.toFixed(2),
+        row.hasAnomalies,
+        topDomain?.[0] ?? "N/A",
+        topDomain?.[1] ?? 0,
+      ].map(csvEscape).join(",");
+    }).join("\n");
+
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `semantic_heatmap_${new Date().toISOString().split('T')[0]}.csv`);
+    link.href = url;
+    link.download = `semantic_heatmap_${new Date().toISOString().split("T")[0]}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   /** No-data state */
@@ -200,7 +273,7 @@ export function SemanticHeatmap({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Network className="h-5 w-5 text-indigo-600" /> 
+            <Network className="h-5 w-5 text-indigo-600" />
             Semantic Domain Heatmap
             {showAnomaliesOnly && (
               <Badge variant="destructive" className="text-xs">
@@ -212,15 +285,14 @@ export function SemanticHeatmap({
         </CardHeader>
         <CardContent>
           <div className="text-center py-8 text-gray-500">
-            {showAnomaliesOnly 
+            {showAnomaliesOnly
               ? "No anomalies detected in the current dataset."
-              : "No data available. Capture snapshots to generate the domain heatmap."
-            }
+              : "No data available. Capture snapshots to generate the domain heatmap."}
             {showAnomaliesOnly && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="mt-2" 
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
                 onClick={() => setShowAnomaliesOnly(false)}
               >
                 Show All Data
@@ -236,7 +308,7 @@ export function SemanticHeatmap({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Network className="h-5 w-5 text-indigo-600" /> 
+          <Network className="h-5 w-5 text-indigo-600" />
           Semantic Domain Heatmap
           <Badge variant="secondary" className="ml-auto bg-indigo-100 text-indigo-700">
             {filteredHeatmapData.length} queries × {topDomains.length} domains
@@ -245,7 +317,7 @@ export function SemanticHeatmap({
       </CardHeader>
       <CardContent>
 
-        {/* UPDATED: Enhanced Legend with controls */}
+        {/* Legend with controls */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
@@ -256,21 +328,20 @@ export function SemanticHeatmap({
                 <div className="w-3 h-3 bg-blue-600 rounded" /><span className="text-xs">High</span>
               </div>
             </div>
-            
-            {/* ADDED: Anomaly filter toggle */}
+
             {heatmapData.some(d => d.hasAnomalies) && (
-              <Button 
-                variant={showAnomaliesOnly ? "default" : "outline"} 
-                size="sm" 
+              <Button
+                variant={showAnomaliesOnly ? "default" : "outline"}
+                size="sm"
                 onClick={() => setShowAnomaliesOnly(!showAnomaliesOnly)}
                 className="text-xs"
               >
                 <AlertCircle className="h-3 w-3 mr-1" />
-                {showAnomaliesOnly ? 'Show All' : 'Anomalies Only'}
+                {showAnomaliesOnly ? "Show All" : "Anomalies Only"}
               </Button>
             )}
           </div>
-          
+
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="h-4 w-4 mr-2" />Export
@@ -287,7 +358,10 @@ export function SemanticHeatmap({
             {/* Header row */}
             <div className="flex mb-1">
               <div className="w-48 p-2 text-sm font-medium text-gray-700 border-r">Query</div>
-              <div className="w-20 p-2 text-xs text-center text-gray-600 border-r">Score</div>
+              {/* ✅ Renamed from "Score" — this column shows coherence,
+                  the only metric this component tracks (semanticScore
+                  was a duplicate of the same number under a different name) */}
+              <div className="w-20 p-2 text-xs text-center text-gray-600 border-r">Coherence</div>
               {topDomains.map(domain => (
                 <div
                   key={domain}
@@ -321,11 +395,11 @@ export function SemanticHeatmap({
                 </div>
 
                 <div className="w-20 p-2 text-center border-r">
-                  <div className="text-sm font-medium">{Math.round(row.semanticScore * 100)}</div>
+                  <div className="text-sm font-medium">{Math.round(row.coherence * 100)}</div>
                   <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
                     <div
                       className="bg-indigo-600 h-1 rounded-full transition-all"
-                      style={{ width: `${Math.round(row.semanticScore * 100)}%` }}
+                      style={{ width: `${Math.round(row.coherence * 100)}%` }}
                     />
                   </div>
                 </div>
@@ -347,39 +421,37 @@ export function SemanticHeatmap({
           </div>
         </div>
 
-        {/* ENHANCED: Selected query details */}
-        {selectedQuery && (
-          <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="font-medium text-blue-900">
-                {filteredHeatmapData.find(d => d.queryId === selectedQuery)?.queryName}
-              </h4>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedQuery(null)}>×</Button>
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <strong>Total Results:</strong> {filteredHeatmapData.find(d => d.queryId === selectedQuery)?.totalResults}
-              </div>
-              <div>
-                <strong>Semantic Score:</strong> {Math.round((filteredHeatmapData.find(d => d.queryId === selectedQuery)?.semanticScore || 0) * 100)}%
-              </div>
-              <div>
-                <strong>Coherence:</strong> {Math.round((filteredHeatmapData.find(d => d.queryId === selectedQuery)?.coherence || 0) * 100)}%
-              </div>
-              <div>
-                <strong>Has Anomalies:</strong> 
-                <span className={`ml-1 ${filteredHeatmapData.find(d => d.queryId === selectedQuery)?.hasAnomalies ? 'text-red-600' : 'text-green-600'}`}>
-                  {filteredHeatmapData.find(d => d.queryId === selectedQuery)?.hasAnomalies ? 'Yes' : 'No'}
-                </span>
-              </div>
-              <div className="col-span-2">
-                <strong>Top Domain:</strong> {Object.entries(filteredHeatmapData.find(d => d.queryId === selectedQuery)?.domains || {}).sort((a,b) => b[1]-a[1])[0]?.[0] || "N/A"}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Selected query details */}
+        {selectedQuery && (() => {
+          const sel = filteredHeatmapData.find(d => d.queryId === selectedQuery);
+          if (!sel) return null;
+          const topDomainEntry = Object.entries(sel.domains).sort((a, b) => b[1] - a[1])[0];
 
-        {/* ENHANCED: Global summary with anomaly info */}
+          return (
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-blue-900">{sel.queryName}</h4>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedQuery(null)}>×</Button>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><strong>Total Results:</strong> {sel.totalResults}</div>
+                <div><strong>Coherence:</strong> {Math.round(sel.coherence * 100)}%</div>
+                <div className="col-span-2">
+                  <strong>Has Anomalies:</strong>{" "}
+                  <span className={sel.hasAnomalies ? "text-red-600" : "text-green-600"}>
+                    {sel.hasAnomalies ? "Yes" : "No"}
+                  </span>
+                </div>
+                <div className="col-span-2">
+                  <strong>Top Domain:</strong> {topDomainEntry?.[0] || "N/A"}
+                  {topDomainEntry && ` (${topDomainEntry[1]} results)`}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Global summary */}
         {semanticAnalytics && (
           <div className="mt-4 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
@@ -387,11 +459,21 @@ export function SemanticHeatmap({
               <span className="text-sm font-medium text-indigo-900">Semantic Analysis Active</span>
             </div>
             <div className="text-xs text-indigo-700 space-y-1">
-              <div>Diversity Index: {semanticAnalytics.enhancedMetrics?.diversityIndex != null ? Math.round(semanticAnalytics.enhancedMetrics.diversityIndex * 100) : "N/A"}%</div>
-              <div>Content Coherence: {semanticAnalytics.enhancedMetrics?.contentCoherence != null ? Math.round(semanticAnalytics.enhancedMetrics.contentCoherence * 100) : "N/A"}%</div>
-              {semanticAnalytics.contentAnomalies && (
+              <div>
+                Diversity Index:{" "}
+                {semanticAnalytics.enhancedMetrics?.diversityIndex != null
+                  ? Math.round(semanticAnalytics.enhancedMetrics.diversityIndex)
+                  : "N/A"}%
+              </div>
+              <div>
+                Content Coherence:{" "}
+                {semanticAnalytics.enhancedMetrics?.contentCoherence != null
+                  ? Math.round(semanticAnalytics.enhancedMetrics.contentCoherence)
+                  : "N/A"}%
+              </div>
+              {(semanticAnalytics.semanticInsights?.contentAnomalies?.count ?? 0) > 0 && (
                 <div className="text-red-700">
-                  Content Anomalies: {semanticAnalytics.contentAnomalies.length} detected
+                  Content Anomalies: {semanticAnalytics.semanticInsights!.contentAnomalies!.count} detected
                 </div>
               )}
             </div>
