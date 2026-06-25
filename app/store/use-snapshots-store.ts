@@ -156,7 +156,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
 
       fetchAllSnapshots: async (userId?, queryId?) => {
         set({ isLoadingAnalytics: true, error: null })
-        // ✅ Snapshot existing data for rollback on error
+        //  Snapshot existing data for rollback on error
         const previous = get().allSnapshots
         try {
           let url = "/api/snapshots/analytics"
