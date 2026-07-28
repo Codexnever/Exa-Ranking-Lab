@@ -22,7 +22,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
-import type { QueryConfig } from "@/lib/type";
+import type { QueryConfig } from "@/types/type";
 import { useQueryFormLogic } from "../../app/logic/useQueryFormLogic";
 
 interface QueryFormProps {
@@ -30,13 +30,14 @@ interface QueryFormProps {
   editingQuery?: QueryConfig | null;
   onUpdate?: (id: string, data: Partial<QueryConfig>) => void;
   onCancelEdit?: () => void;
+  QueryFrequency?: { options: string[] };
+  selectedTags?: string
 }
 
-export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit }: QueryFormProps) {
+export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit, QueryFrequency }: QueryFormProps) {
   const {
     form,
     selectedTags,
-    setSelectedTags,
     domainInput,
     setDomainInput,
     tagInput,
@@ -46,9 +47,11 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit }: Qu
     handleTagSelect,
     handleTagRemove,
     onFormSubmit,
-    QueryCategory,
-    QueryFrequency,
   } = useQueryFormLogic(onSubmit, editingQuery);
+
+  const QueryCategory = {
+    options: ["company", "news", "research paper", "pdf", "github", "tweet", "personal site", "linkedin profile", "financial report"]
+  };
 
 
   React.useEffect(() => {
@@ -63,7 +66,7 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit }: Qu
         },
         schedule: editingQuery.schedule || { enabled: false, frequency: "daily" },
       });
-      setSelectedTags(editingQuery.tags || []);
+      // selectedTags(editingQuery.tags || []);
     }
   }, [editingQuery]);
 
@@ -120,7 +123,7 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit }: Qu
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  {QueryCategory.options.map((option: string) => (
+                  {QueryCategory?.options?.map((option: string) => (
                     <SelectItem key={option} value={option}>
                       {option.charAt(0).toUpperCase() + option.slice(1)}
                     </SelectItem>
@@ -246,7 +249,7 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit }: Qu
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    {QueryFrequency.options.map((option: string) => (
+                    {QueryFrequency?.options?.map((option: string) => (
                       <SelectItem key={option} value={option}>
                         {option.charAt(0).toUpperCase() + option.slice(1)}
                       </SelectItem>

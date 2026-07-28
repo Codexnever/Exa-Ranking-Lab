@@ -1,278 +1,394 @@
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { toast } from "sonner";
-import type { QueryConfig } from "@/lib/type";
+// app/store/use-queries-store.ts
+import { create } from "zustand"
+import { persist, createJSONStorage } from "zustand/middleware"
+import { toast } from "sonner"
+import type { QueryConfig } from "@/types/type"
+
+// ─── SSR-safe storage ─────────────────────────────────────────────────────────
+
+const safeStorage = createJSONStorage(() => {
+  if (typeof window === "undefined") {
+    return { getItem: () => null, setItem: () => {}, removeItem: () => {} } as unknown as Storage
+  }
+  return {
+    getItem: (key: string) => {
+      try { return localStorage.getItem(key) } catch { return null }
+    },
+    setItem: (key: string, value: string) => {
+      try {
+        const kb = new Blob([value]).size / 1024
+        if (kb > 4500) {
+          console.warn(`[QueriesStore] Skipping persist — too large (${kb.toFixed(0)}KB)`)
+          return
+        }
+        localStorage.setItem(key, value)
+      } catch (err) {
+        console.warn("[QueriesStore] localStorage.setItem failed:", err)
+      }
+    },
+    removeItem: (key: string) => {
+      try { localStorage.removeItem(key) } catch { /* ignore */ }
+    },
+  } as Storage
+})
+
+// ─── Cache TTL ────────────────────────────────────────────────────────────────
+
+const CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface QueriesState {
-  queries: QueryConfig[];
-  isLoading: boolean;
-  error: string | null;
+  queries:       QueryConfig[]
+  isLoading:     boolean
+  error:         string | null
+  lastFetch:     number | null
+  currentUserId: string | null
 }
 
 interface QueriesActions {
-  fetchQueries: (userId?: string) => Promise<void>; // Updated with userId
-  createQuery: (query: Omit<QueryConfig, "id" | "createdAt">) => Promise<QueryConfig>;
-  runQuery: (queryId: string) => Promise<any>;
-  updateQuery: (queryId: string, query: Partial<QueryConfig>) => Promise<void>;
-  deleteQuery: (queryId: string) => Promise<void>;
-  clearQueries: () => void;
-   getScheduledQueries: (userId?: string) => Promise<QueryConfig[]>;
-  getDueQueries: (userId?: string) => Promise<QueryConfig[]>;
-  batchRunQueries: (queryIds: string[]) => Promise<any[]>;
+  fetchQueries:        (userId?: string, forceRefresh?: boolean) => Promise<void>
+  createQuery:         (query: Omit<QueryConfig, "id" | "createdAt">) => Promise<QueryConfig>
+  runQuery:            (queryId: string) => Promise<any>
+  updateQuery:         (queryId: string, query: Partial<QueryConfig>) => Promise<void>
+  deleteQuery:         (queryId: string) => Promise<void>
+  clearQueries:        () => void
+  getScheduledQueries: (userId?: string) => Promise<QueryConfig[]>
+  getDueQueries:       (userId?: string) => Promise<QueryConfig[]>
+  batchRunQueries:     (queryIds: string[]) => Promise<any[]>
+  getQueriesByCategory:(category: string) => QueryConfig[]
+  getRecentQueries:    (limit?: number) => QueryConfig[]
+  syncWithWeaviate:    (userId: string) => Promise<void>
 }
 
-type QueriesStoreType = QueriesState & QueriesActions;
+type QueriesStoreType = QueriesState & QueriesActions
 
-const getAuthHeaders = async () => {
-  return {
-    'Content-Type': 'application/json'
-  };
-};
+// ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useQueriesStore = create<QueriesStoreType>()(
   persist(
     (set, get) => ({
-      queries: [] as QueryConfig[],
-      isLoading: false,
-      error: null as string | null,
+      // ── State ──────────────────────────────────────────────────────────────
+      queries:       [],
+      isLoading:     false,
+      error:         null,
+      lastFetch:     null,
+      currentUserId: null,
 
-      fetchQueries: async (userId?: string) => {
-        set({ isLoading: true, error: null });
+      // ── Fetch ──────────────────────────────────────────────────────────────
+
+      fetchQueries: async (userId?, forceRefresh = false) => {
+        const { lastFetch, currentUserId, queries, isLoading } = get()
+        const now = Date.now()
+        const safe = Array.isArray(queries) ? queries : []
+
+        // ✅ Cache check includes TTL — don't serve indefinitely stale data
+        const isFresh  = lastFetch !== null && now - lastFetch < CACHE_TTL_MS
+        const sameUser = userId === currentUserId
+        if (!forceRefresh && safe.length > 0 && sameUser && isFresh) {
+          console.log("[QueriesStore] Using cached queries (fresh)")
+          return
+        }
+
+        if (isLoading) {
+          console.log("[QueriesStore] Already loading, skipping")
+          return
+        }
+
+        set({ isLoading: true, error: null })
+
         try {
-          const headers = await getAuthHeaders();
-          let url = "/api/queries";
-          if (userId) url += `?userId=${encodeURIComponent(userId)}`; // Added userId support
-          const response = await fetch(url, { headers, credentials: "include" });
-          if (response.status === 401) {
-            set({ queries: [] });
-            throw new Error("Please log in to access your queries");
+          let url = "/api/queries"
+          if (userId) url += `?userId=${encodeURIComponent(userId)}`
+
+          const res = await fetch(url, {
+            headers:     { "Content-Type": "application/json" },
+            credentials: "include",
+          })
+
+          if (res.status === 401) {
+            // ✅ Preserve existing queries on auth error — don't wipe cache
+            set({ isLoading: false })
+            throw new Error("Please log in to access your queries")
           }
-          if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.details || "Failed to fetch queries");
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.details ?? "Failed to fetch queries")
           }
-          const queries = await response.json() as QueryConfig[];
-          set({ queries, isLoading: false, error: null });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to fetch queries";
-          set({ error: message, isLoading: false, queries: [] });
-          toast.error(message);
+
+          const fetched = await res.json() as QueryConfig[]
+          const sorted  = (Array.isArray(fetched) ? fetched : []).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )
+
+          set({
+            queries:       sorted,
+            isLoading:     false,
+            error:         null,
+            lastFetch:     now,
+            currentUserId: userId ?? null,
+          })
+          console.log(`[QueriesStore] Fetched ${sorted.length} queries`)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to fetch queries"
+          console.error("[QueriesStore] fetchQueries error:", err)
+          // ✅ Preserve existing queries on transient error (network blip, 500)
+          set({ error: message, isLoading: false })
+          toast.error(message)
         }
       },
 
-      createQuery: async (query: Omit<QueryConfig, "id" | "createdAt">): Promise<QueryConfig> => {
+      // ── Create ─────────────────────────────────────────────────────────────
+
+      createQuery: async (query) => {
         set({ isLoading: true, error: null })
         try {
-          const headers = await getAuthHeaders()
-
-          const response = await fetch("/api/queries", {
-            method: "POST",
-            headers,
+          const res = await fetch("/api/queries", {
+            method:      "POST",
+            headers:     { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify(query),
+            body:        JSON.stringify(query),
           })
-
-          if (response.status === 401) {
-            throw new Error("Session expired. Please log in again")
+          if (res.status === 401) throw new Error("Session expired. Please log in again")
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.details ?? "Failed to create query")
           }
 
-          if (!response.ok) {
-            const error = await response.json()
-            throw new Error(error.details || "Failed to create query")
-          } const newQuery = await response.json() as QueryConfig
-          set((state: QueriesStoreType): QueriesState => ({
-            queries: [...state.queries, newQuery],
+          const newQuery = await res.json() as QueryConfig
+          //  No explicit return type on setter — avoids type mismatch
+         console.log("[QueriesStore] Created query:", newQuery)
+          set(state => ({
+            queries:   [newQuery, ...state.queries],
             isLoading: false,
-            error: null
+            error:     null,
           }))
-
+          toast.success(`Query "${newQuery.name}" created successfully`)
           return newQuery
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to create query"
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to create query"
           set({ error: message, isLoading: false })
           toast.error(message)
-          throw error
+          throw err
         }
-      }, runQuery: async (queryId: string): Promise<any> => {
+      },
+
+      // ── Run ────────────────────────────────────────────────────────────────
+
+      runQuery: async (queryId) => {
         set({ isLoading: true, error: null })
         try {
-          // First check if query exists in local store
-          const localQuery = useQueriesStore.getState().queries.find((q: QueryConfig) => q.id === queryId)
-          if (!localQuery) {
-            throw new Error("Query not found")
-          }
+          const local = get().queries.find(q => q.id === queryId)
+          if (!local) throw new Error("Query not found")
 
-          const headers = await getAuthHeaders()
 
-          const response = await fetch(`/api/queries/${encodeURIComponent(queryId)}/run`, {
-            method: "POST",
-            headers,
+          const res = await fetch(`/api/queries/${encodeURIComponent(queryId)}/run`, {
+            method:      "POST",
+            headers:     { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify(localQuery) // Send query data to ensure server has latest version
+            //  Send full query config — API needs it to execute the search
+            body:        JSON.stringify(local),
           })
 
-          if (response.status === 401) {
-            throw new Error("Please log in to run queries")
-          }
+          if (res.status === 401) throw new Error("Please log in to run queries")
 
-          if (response.status === 404) {
-            // Remove from local store if it doesn't exist on server
-            set((state: QueriesStoreType): QueriesState => ({
-              queries: state.queries.filter((q: QueryConfig) => q.id !== queryId),
+          if (res.status === 404) {
+            set(state => ({
+              queries:   state.queries.filter(q => q.id !== queryId),
               isLoading: false,
-              error: null
+              error:     null,
             }))
             throw new Error("Query not found")
           }
 
-          if (!response.ok) {
-            const error = await response.json()
-            throw new Error(error.details || "Failed to run query")
-          } const result = await response.json()
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.details ?? "Failed to run query")
+          }
 
-          // Update the lastRun timestamp for the query
-          set((state: QueriesStoreType): QueriesState => ({
-            queries: state.queries.map((q: QueryConfig) =>
-              q.id === queryId ? { ...q, lastRun: new Date() } : q
-            ),
+          const result = await res.json()
+          set(state => ({
+            queries:   state.queries.map(q => q.id === queryId ? { ...q, lastRun: new Date() } : q),
             isLoading: false,
-            error: null
+            error:     null,
           }))
-
+          toast.success(`Query "${local.name}" executed successfully`)
           return result
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to run query"
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to run query"
           set({ error: message, isLoading: false })
           toast.error(`Failed to run query: ${message}`)
-          throw error
+          throw err
         }
-      }, updateQuery: async (queryId: string, query: Partial<QueryConfig>): Promise<void> => {
-        set({ isLoading: true, error: null })
-        try {
-          const headers = await getAuthHeaders()
-          const response = await fetch(`/api/queries/${queryId}`, {
-            method: "PATCH",
-            headers,
-            credentials: "include",
-            body: JSON.stringify(query),
-          })
-          if (!response.ok) throw new Error("Failed to update query")
-          set((state: QueriesStoreType): QueriesState => ({
-            queries: state.queries.map((q: QueryConfig) =>
-              q.id === queryId ? { ...q, ...query } : q
-            ),
-            isLoading: false,
-            error: null
-          }))
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to delete query"
-          set({ error: message, isLoading: false })
-          toast.error(`Failed to delete query: ${message}`)
-          throw error
-        }
-      }, deleteQuery: async (queryId: string): Promise<void> => {
-        set({ isLoading: true, error: null })
-        try {
-          const headers = await getAuthHeaders()
-          const response = await fetch(`/api/queries/${queryId}`, {
-            method: "DELETE",
-            headers,
-            credentials: "include"
-          })
-          if (response.status === 401) {
-            toast.error("Please log in to delete queries")
-            throw new Error("Unauthorized")
-          }
-          if (!response.ok) {
-            const error = await response.json()
-            throw new Error(error.details || "Failed to delete query")
-          }
-          set((state: QueriesStoreType): QueriesState => ({
-            queries: state.queries.filter((q: QueryConfig) => q.id !== queryId),
-            isLoading: false,
-            error: null
-          }))
-          // Recalculate analytics after delete
-          const { fetchSnapshots } = require('./use-snapshots-store')
-          const { useAnalyticsStore } = require('./use-analytics-store')
-          const userId = typeof window !== 'undefined' ? localStorage.getItem('user_id') : null
-          if (userId) {
-            // Fetch latest snapshots for user, then recalculate analytics
-            fetchSnapshots(undefined, userId).then(() => {
-              const snapshots = require('./use-snapshots-store').useSnapshotsStore.getState().snapshots
-              useAnalyticsStore.getState().calculateAnalyticsFromSnapshots(snapshots)
-            })
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to delete query"
-          set({ error: message, isLoading: false })
-          toast.error(`Failed to delete query: ${message}`)
-          throw error
-        }
-      }, clearQueries: () => {
-        set({ queries: [], error: null })
       },
-     getScheduledQueries: async (userId?: string): Promise<QueryConfig[]> => {
-  try {
-    const queries = get().queries.length > 0 ? get().queries : await get().fetchQueries(userId).then(() => get().queries);
-    return queries.filter(q => q.schedule?.enabled && (!userId || q.userId === userId));
-  } catch (error) {
-    console.error('Failed to get scheduled queries:', error);
-    return [];
-  }
-},
 
+      // ── Update ─────────────────────────────────────────────────────────────
 
-getDueQueries: async (userId?: string): Promise<QueryConfig[]> => {
-  try {
-    const scheduledQueries = await get().getScheduledQueries(userId);
-    console.log('Scheduled Queries:', scheduledQueries);  
-    const now = new Date();
-    
-    return scheduledQueries.filter(query => {
-      if (!query.lastRun) return true; // Never run before
-      
-      const lastRun = new Date(query.lastRun);
-      const diffMs = now.getTime() - lastRun.getTime();
-      
-      switch (query.schedule.frequency) {
-        case 'hourly':
-          return diffMs >= 60 * 60 * 1000; // 1 hour
-        case 'daily':
-          return diffMs >= 24 * 60 * 60 * 1000; // 1 day
-        case 'weekly':
-          return diffMs >= 7 * 24 * 60 * 60 * 1000; // 1 week
-        default:
-          return false;
-      }
-    });
-  } catch (error) {
-    console.error('Failed to get due queries:', error);
-    return [];
-  }
-},
+      updateQuery: async (queryId, query) => {
+        set({ isLoading: true, error: null })
+        try {
+          const res = await fetch(`/api/queries/${queryId}`, {
+            method:      "PATCH",
+            headers:     { "Content-Type": "application/json" },
+            credentials: "include",
+            body:        JSON.stringify(query),
+          })
+          if (!res.ok) throw new Error("Failed to update query")
+          const updated = await res.json()
+          set(state => ({
+            queries:   state.queries.map(q => q.id === queryId ? { ...q, ...updated } : q),
+            isLoading: false,
+            error:     null,
+          }))
+          toast.success("Query updated successfully")
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to update query"
+          set({ error: message, isLoading: false })
+          toast.error(message)
+          throw err
+        }
+      },
 
-batchRunQueries: async (queryIds: string[]): Promise<any[]> => {
-  const results = [];
-  for (const queryId of queryIds) {
-    try {
-      const result = await get().runQuery(queryId);
-      console.log('Batching Query Result:', result);
-      results.push({ queryId, status: 'success', result });
-    } catch (error) {
-      results.push({ 
-        queryId, 
-        status: 'error', 
-        error: error instanceof Error ? error.message : 'Unknown error' 
-      });
-    }
-  }
-  return results;
-},
+      // ── Delete ─────────────────────────────────────────────────────────────
+
+      deleteQuery: async (queryId) => {
+        set({ isLoading: true, error: null })
+        try {
+          const res = await fetch(`/api/queries/${queryId}`, {
+            method:      "DELETE",
+            headers:     { "Content-Type": "application/json" },
+            credentials: "include",
+          })
+          if (res.status === 401) throw new Error("Unauthorized")
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.details ?? "Failed to delete query")
+          }
+          const deleted = get().queries.find(q => q.id === queryId)
+          set(state => ({
+            queries:   state.queries.filter(q => q.id !== queryId),
+            isLoading: false,
+            error:     null,
+          }))
+          toast.success(`Query "${deleted?.name}" deleted successfully`)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to delete query"
+          set({ error: message, isLoading: false })
+          toast.error(message)
+          throw err
+        }
+      },
+
+      clearQueries: () =>
+        set({ queries: [], error: null, lastFetch: null, currentUserId: null }),
+
+      // ── Scheduled / due queries ────────────────────────────────────────────
+
+      getScheduledQueries: async (userId?) => {
+        try {
+          const { queries } = get()
+          const safe = Array.isArray(queries) ? queries : []
+          if (safe.length === 0) await get().fetchQueries(userId)
+          return get().queries.filter(
+            q => q.schedule?.enabled && (!userId || q.userId === userId)
+          )
+        } catch (err) {
+          console.error("[QueriesStore] getScheduledQueries failed:", err)
+          return []
+        }
+      },
+
+      getDueQueries: async (userId?) => {
+        try {
+          const scheduled = await get().getScheduledQueries(userId)
+          const now = Date.now()
+          return scheduled.filter(q => {
+            if (!q.lastRun) return true
+            const diff = now - new Date(q.lastRun).getTime()
+            switch (q.schedule?.frequency) {
+              case "hourly":  return diff >= 60 * 60 * 1000
+              case "daily":   return diff >= 24 * 60 * 60 * 1000
+              case "weekly":  return diff >= 7 * 24 * 60 * 60 * 1000
+              default:        return false
+            }
+          })
+        } catch (err) {
+          console.error("[QueriesStore] getDueQueries failed:", err)
+          return []
+        }
+      },
+
+      // ✅ Parallel execution with Promise.allSettled
+      batchRunQueries: async (queryIds) => {
+        const results = await Promise.allSettled(
+          queryIds.map(id => get().runQuery(id))
+        )
+        return results.map((r, i) =>
+          r.status === "fulfilled"
+            ? { queryId: queryIds[i], status: "success", result: r.value }
+            : { queryId: queryIds[i], status: "error",   error: r.reason instanceof Error ? r.reason.message : "Unknown error" }
+        )
+      },
+
+      // ── Read-only helpers ──────────────────────────────────────────────────
+
+      getQueriesByCategory: (category) => {
+        const { queries } = get()
+        return Array.isArray(queries) ? queries.filter(q => q.category === category) : []
+      },
+
+      /**
+       * ✅ Queries are already sorted newest-first on fetch.
+       * Just slice — no re-sort on every call.
+       */
+      getRecentQueries: (limit = 5) => {
+        const { queries } = get()
+        return Array.isArray(queries) ? queries.slice(0, limit) : []
+      },
+
+      // ── Weaviate sync ──────────────────────────────────────────────────────
+
+      syncWithWeaviate: async (userId) => {
+        try {
+          console.log("[QueriesStore] Weaviate sync for user:", userId)
+          const res = await fetch("/api/weaviate/sync-queries", {
+            method:      "POST",
+            headers:     { "Content-Type": "application/json" },
+            credentials: "include",
+            body:        JSON.stringify({ userId }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.error ?? "Failed to sync with Weaviate")
+          }
+          const result = await res.json()
+          if (result.success) {
+            toast.success(`Synced ${result.synced} queries with AI database`)
+            // ✅ Weaviate sync doesn't change client-visible query data — no refetch needed
+          } else {
+            throw new Error(result.message ?? "Sync failed")
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to sync with AI database"
+          console.error("[QueriesStore] syncWithWeaviate failed:", err)
+          toast.error(message)
+          throw err
+        }
+      },
     }),
+
     {
-      name: 'queries-storage',
-      partialize: (state: QueriesStoreType) => ({ queries: state.queries }),
+      name:    "queries-storage",
+      storage: safeStorage,
+
+      // ✅ Persist lightweight metadata only — queries array can be large
+      // Fresh fetch happens on mount; lastFetch drives the 5-min cache TTL
+      partialize: (state) => ({
+        queries:       state.queries.slice(0, 100), // cap at 100 for quota safety
+        lastFetch:     state.lastFetch,
+        currentUserId: state.currentUserId,
+      }),
     }
   )
 )

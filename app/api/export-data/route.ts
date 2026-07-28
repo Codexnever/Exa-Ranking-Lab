@@ -1,8 +1,8 @@
 // app/api/export-data/route.ts
 
 import { type NextRequest, NextResponse } from "next/server"
-import { databaseService } from "@/app/services/database-service"
-import { getCurrentUser } from "@/app/server/auth"; 
+import { databaseService } from "@/app/services/database/database-service"
+import { getCurrentUser } from "@/lib/middleware/authentication/auth"; 
 
 
 export async function GET(request: NextRequest) {

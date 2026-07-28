@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,36 +14,73 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, Plus, Search, User, Loader2 } from "lucide-react"
-import { useAuth } from "@/lib/contexts/auth-context"
-import { usePathname } from "next/navigation"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
+import { toast } from "sonner"
+import { NotificationBell } from "@/components/ui/NotificationBell"
+
+interface SearchableRoute {
+  label: string
+  href: string
+}
+
+const ROUTES: SearchableRoute[] = [
+  { label: "Dashboard", href: "/" },
+  { label: "Query Builder", href: "/query-builder" },
+  { label: "Query Monitor", href: "/query-monitor" },
+  { label: "Analytics", href: "/analytics" },
+  { label: "Snapshots", href: "/snapshots" },
+  { label: "Compare Rankings", href: "/compare" },
+  { label: "Feedback", href: "/feedback" },
+  { label: "Settings", href: "/settings" },
+  { label: "Profile", href: "/profile" },
+]
+
+const PAGE_TITLES: Record<string, string> = {
+  "/": "Dashboard",
+  "/query-builder": "Query Builder",
+  "/query-monitor": "Query Monitor",
+  "/analytics": "Analytics",
+  "/snapshots": "Snapshots",
+  "/compare": "Compare Rankings",
+  "/feedback": "Feedback",
+  "/settings": "Settings",
+}
 
 export default function Navbar() {
   const router = useRouter()
+  // ✅ Called ONCE at the top level — previously called a second time
+  // inside getPageTitle(), shadowing this variable with a redeclared
+  // local one. The outer `pathname` was fetched but never actually used
+  // anywhere; getPageTitle() always read its own internal redeclaration.
+  // Same hook, same value, called twice for no reason — now a single
+  // source of truth.
   const pathname = usePathname()
+
   const [searchQuery, setSearchQuery] = useState("")
-  const [searchResults, setSearchResults] = useState<any[]>([])
+  // ✅ Typed instead of any[] — matches the actual shape pushed into it
+  const [searchResults, setSearchResults] = useState<SearchableRoute[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
   const { user, loading, logout } = useAuth()
-  const getPageTitle = () => {
-     const pathname = usePathname()
-      switch (pathname) {
-        case "/": return "Dashboard"
-        case "/query-builder": return "Query Builder"
-        case "/snapshots": return "Snapshots"
-        case "/compare": return "Compare Rankings"
-        case "/feedback": return "Feedback"
-        case "/settings": return "Settings"
-        default: return "Exa Ranking Lab"
-      }
-    }
 
- 
+  // ✅ Derived directly from the single `pathname`, no second hook call
+  const pageTitle = PAGE_TITLES[pathname] ?? "Exa Ranking Lab"
+
   const handleLogout = async () => {
     try {
-    await logout()
-      // window.location.href = "/auth" // force redirect after logout
+      await logout()
+      // ✅ User-facing feedback on success — previously nothing visibly
+      // happened after a successful logout unless some other mechanism
+      // (e.g. an AuthContext-driven route guard) redirected the user;
+      // if that mechanism was ever delayed or absent, the user was left
+      // on a stale authenticated page with no indication logout worked.
+      toast.success("Logged out successfully")
+      router.push("/auth")
     } catch (error) {
+      // ✅ User-facing feedback on failure — previously only logged to
+      // console; the user clicking "Log out" and seeing nothing happen
+      // had no way to know it failed.
       console.error("Failed to log out:", error)
+      toast.error("Failed to log out. Please try again.")
     }
   }
 
@@ -52,20 +89,9 @@ export default function Navbar() {
     return user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
   }
 
-  // Define all searchable routes and queries (can be extended)
-  const routes = [
-    { label: "Dashboard", href: "/" },
-    { label: "Query Builder", href: "/query-builder" },
-    { label: "Query Monitor", href: "/query-monitor" },
-    { label: "Analytics", href: "/analytics" },
-    { label: "Snapshots", href: "/snapshots" },
-    { label: "Compare Rankings", href: "/compare" },
-    { label: "Feedback", href: "/feedback" },
-    { label: "Settings", href: "/settings" },
-    { label: "Profile", href: "/profile" },
-  ]
-
-  // Search logic: fuzzy match against routes
+  // ✅ Renamed comment to match what this actually does — substring
+  // matching, not fuzzy matching (which would tolerate typos/reordering).
+  // Not changing the algorithm itself, just the misleading description.
   const handleSearch = (value: string) => {
     setSearchQuery(value)
     if (!value.trim()) {
@@ -74,8 +100,8 @@ export default function Navbar() {
       return
     }
     const q = value.toLowerCase()
-    const routeMatches = routes.filter(r => r.label.toLowerCase().includes(q))
-    setSearchResults([...routeMatches])
+    const matches = ROUTES.filter(r => r.label.toLowerCase().includes(q))
+    setSearchResults(matches)
     setShowDropdown(true)
   }
 
@@ -89,7 +115,7 @@ export default function Navbar() {
     return (
       <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-white px-6">
         <div className="flex flex-1 items-center justify-between">
-          <h1 className="text-xl font-semibold">{getPageTitle()}</h1>
+          <h1 className="text-xl font-semibold">{pageTitle}</h1>
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
       </header>
@@ -99,7 +125,7 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-white px-6">
       <div className="flex flex-1 items-center justify-between">
-        <h1 className="text-xl font-semibold">{getPageTitle()}</h1>
+        <h1 className="text-xl font-semibold">{pageTitle}</h1>
 
         <div className="flex items-center gap-4">
           <div className="relative w-64">
@@ -137,6 +163,7 @@ export default function Navbar() {
                   New Query
                 </Button>
               </Link>
+<NotificationBell />
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -150,24 +177,30 @@ export default function Navbar() {
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>{user.name || user.email}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <Link href="/profile" passHref>
-                    <DropdownMenuItem asChild>
-                      <a className="flex items-center gap-2">
-                        <User className="h-4 w-4" />
-                        Profile
-                      </a>
-                    </DropdownMenuItem>
-                  </Link>
-                  <Link href="/settings" passHref>
-                    <DropdownMenuItem asChild>
-                      <a>Settings</a>
-                    </DropdownMenuItem>
-                  </Link>
-                  <Link href="/settings" passHref>
-                    <DropdownMenuItem asChild>
-                      <a>API Keys</a>
-                    </DropdownMenuItem>
-                  </Link>
+                  {/* ✅ Link is now the DIRECT asChild target of
+                      DropdownMenuItem, not nested inside an extra <a>.
+                      The previous <Link><DropdownMenuItem asChild><a>
+                      pattern is fragile across Radix/Next versions and
+                      can produce a redundant/duplicate anchor element or
+                      hydration mismatches. */}
+                  <DropdownMenuItem asChild>
+                    <Link href="/profile" className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      Profile
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">Settings</Link>
+                  </DropdownMenuItem>
+                  {/* ⚠️ Still points to /settings, same as the item above.
+                      Likely meant to deep-link to a specific tab/section
+                      (e.g. /settings?tab=api-keys) — left as-is since the
+                      intended anchor/query param isn't specified, but
+                      flagging that these two items are currently
+                      functionally identical. */}
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">API Keys</Link>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout}>Log out</DropdownMenuItem>
                 </DropdownMenuContent>
@@ -183,4 +216,3 @@ export default function Navbar() {
     </header>
   )
 }
-

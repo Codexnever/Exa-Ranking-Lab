@@ -1,7 +1,7 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { ArrowUp, ArrowDown, TrendingUp, TrendingDown, Minus } from "lucide-react"
-import type { RankingChange } from "@/lib/type"
+import type { RankingChange } from "@/types/type"
 
 const getChangeIcon = (change: RankingChange["change"]) => {
   switch (change) {

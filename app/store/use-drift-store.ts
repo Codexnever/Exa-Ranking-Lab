@@ -1,21 +1,38 @@
 // hooks/use-drift-store.ts
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { DriftAnalysisResult } from "@/lib/type";
+import type { DriftAnalysisResult } from "@/types/type";
+
+// ✅ Enhanced interface to support new drift analyzer metrics
+interface EnhancedDriftAnalysisResult extends DriftAnalysisResult {
+  totalContentChanges: number;
+  averageCacheHitRate: number;  
+  totalProcessingTime: number;
+}
 
 interface DriftStoreState {
-  driftResults: DriftAnalysisResult[];
+  driftResults: EnhancedDriftAnalysisResult[];
   lastUpdated: number | null;
   isLoading: boolean;
   error: string | null;
   cacheExpiry: number;
+  // ✅ New performance metrics
+  performanceMetrics: {
+    totalProcessingTime: number;
+    averageCacheHitRate: number;
+    totalContentChanges: number;
+    lastCalculated: number | null;
+  };
 }
 
 interface DriftStoreActions {
-  setDriftResults: (results: DriftAnalysisResult[]) => void;
+  setDriftResults: (results: EnhancedDriftAnalysisResult[]) => void;
   clearDriftResults: () => void;
   fetchDriftResults: (userId?: string, forceRefresh?: boolean) => Promise<void>;
   isCacheValid: () => boolean;
+  // ✅ New performance tracking
+  updatePerformanceMetrics: (results: EnhancedDriftAnalysisResult[]) => void;
+  getPerformanceMetrics: () => any;
 }
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -26,6 +43,12 @@ const initialState: DriftStoreState = {
   isLoading: false,
   error: null,
   cacheExpiry: CACHE_DURATION,
+  performanceMetrics: {
+    totalProcessingTime: 0,
+    averageCacheHitRate: 0,
+    totalContentChanges: 0,
+    lastCalculated: null,
+  },
 };
 
 export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
@@ -34,8 +57,11 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
       ...initialState,
       
       setDriftResults: (results) => {
-        // ✅ FIXED: Ensure we always set an array
         const safeResults = Array.isArray(results) ? results : [];
+        
+        // ✅ Update performance metrics when setting results
+        get().updatePerformanceMetrics(safeResults);
+        
         set({ 
           driftResults: safeResults, 
           lastUpdated: Date.now(),
@@ -47,7 +73,13 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
         set({ 
           driftResults: [], 
           lastUpdated: null,
-          error: null 
+          error: null,
+          performanceMetrics: {
+            totalProcessingTime: 0,
+            averageCacheHitRate: 0,
+            totalContentChanges: 0,
+            lastCalculated: null,
+          }
         }),
       
       isCacheValid: () => {
@@ -55,11 +87,32 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
         if (!lastUpdated) return false;
         return Date.now() - lastUpdated < cacheExpiry;
       },
+
+      // ✅ Enhanced performance metrics calculation
+      updatePerformanceMetrics: (results) => {
+        if (!results.length) return;
+
+        const totalProcessingTime = results.reduce((sum, r) => sum + (r.totalProcessingTime || 0), 0);
+        const averageCacheHitRate = results.reduce((sum, r) => sum + (r.averageCacheHitRate || 0), 0) / results.length;
+        const totalContentChanges = results.reduce((sum, r) => sum + (r.totalContentChanges || 0), 0);
+
+        set({
+          performanceMetrics: {
+            totalProcessingTime,
+            averageCacheHitRate,
+            totalContentChanges,
+            lastCalculated: Date.now(),
+          }
+        });
+      },
+
+      getPerformanceMetrics: () => {
+        return get().performanceMetrics;
+      },
       
       fetchDriftResults: async (userId?: string, forceRefresh = false) => {
         const { isCacheValid, driftResults } = get();
         
-        // If cache is valid and we have data, don't fetch unless forced
         if (!forceRefresh && isCacheValid() && driftResults.length > 0) {
           console.log('Using cached drift results');
           return;
@@ -70,7 +123,7 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
         try {
           const url = userId ? `/api/drift?userId=${userId}` : "/api/drift";
           const response = await fetch(url, {
-            credentials: 'include', // ✅ ADDED: Include credentials for auth
+            credentials: 'include',
           });
           
           if (!response.ok) {
@@ -79,24 +132,18 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
           
           const data = await response.json();
           
-          // ✅ FIXED: Extract the results array from API response
-          let driftResults: DriftAnalysisResult[];
+          let driftResults: EnhancedDriftAnalysisResult[];
           
           if (Array.isArray(data)) {
-            // Direct array response
             driftResults = data;
           } else if (data && Array.isArray(data.results)) {
-            // Wrapped in results object (based on your API)
             driftResults = data.results;
           } else if (data && typeof data === 'object') {
-            // Single result object (for single query endpoint)
             driftResults = [data];
           } else {
-            // Fallback to empty array
             driftResults = [];
           }
           
-          // ✅ FIXED: Set the extracted results array
           set({ 
             driftResults: driftResults, 
             lastUpdated: Date.now(), 
@@ -104,14 +151,16 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
             error: null
           });
           
+          // ✅ Update performance metrics
+          get().updatePerformanceMetrics(driftResults);
+          
           console.log(`Fetched fresh drift results: ${driftResults.length} items`);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to fetch drift";
           console.error('Drift fetch error:', error);
           
-          // ✅ FIXED: Set empty array on error to prevent filter errors
           set({ 
-            driftResults: [], // Always ensure array
+            driftResults: [], 
             error: message, 
             isLoading: false 
           });
@@ -120,23 +169,30 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
     }),
     {
       name: "drift-store",
-      // Only persist the data, not loading states
       partialize: (state) => ({
         driftResults: state.driftResults,
         lastUpdated: state.lastUpdated,
         cacheExpiry: state.cacheExpiry,
+        performanceMetrics: state.performanceMetrics, // ✅ Persist performance metrics
       }),
       
-      // ✅ ADDED: Migration for existing data
       migrate: (persistedState: any, version: number) => {
-        // Ensure driftResults is always an array
         if (persistedState && !Array.isArray(persistedState.driftResults)) {
           persistedState.driftResults = [];
+        }
+        // ✅ Ensure performance metrics exist
+        if (persistedState && !persistedState.performanceMetrics) {
+          persistedState.performanceMetrics = {
+            totalProcessingTime: 0,
+            averageCacheHitRate: 0,
+            totalContentChanges: 0,
+            lastCalculated: null,
+          };
         }
         return persistedState;
       },
       
-      version: 1, // ✅ ADDED: Version for migration
+      version: 2, // ✅ Updated version for new fields
     }
   )
 );

@@ -3,31 +3,40 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { formatResponseTime } from "@/hooks/format-response-time"
 import React from "react"
-import type { QueryConfig, RankingSnapshot } from "@/lib/type"
+import type { QueryConfig, RankingSnapshot } from "@/types/type"
 
-function formatTimeAgo(date: Date | string) {
-  const now = new Date()
+/**
+ * ✅ Validates the parsed date before computing a diff. Previously, a
+ * malformed `date` input produced an Invalid Date, and arithmetic on it
+ * silently propagated NaN all the way to the displayed string
+ * ("NaNd ago") instead of failing loudly or showing a sensible fallback.
+ */
+function formatTimeAgo(date: Date | string | undefined | null): string {
+  if (!date) return "Unknown time"
+
   const past = new Date(date)
+  if (isNaN(past.getTime())) return "Unknown time"
+
+  const now = new Date()
   const diffMs = now.getTime() - past.getTime()
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+
   if (diffHours < 1) return "Just now"
   if (diffHours < 24) return `${diffHours}h ago`
   return `${Math.floor(diffHours / 24)}d ago`
 }
 
-// ✅ Updated interface to include new props
 interface RecentQueryActivityProps {
-  recentSnapshots: RankingSnapshot[]
-  queries: QueryConfig[]
-  isLoading?: boolean // ✅ Add missing isLoading prop
+  recentSnapshots?: RankingSnapshot[]
+  queries?: QueryConfig[]
+  isLoading?: boolean
 }
 
-export default function RecentQueryActivity({ 
-  recentSnapshots, 
-  queries, 
-  isLoading = false 
+export default function RecentQueryActivity({
+  recentSnapshots = [],
+  queries = [],
+  isLoading = false
 }: RecentQueryActivityProps) {
-  // Show loading skeleton if data is loading
   if (isLoading) {
     return (
       <Card className="lg:col-span-2">
@@ -53,6 +62,12 @@ export default function RecentQueryActivity({
     )
   }
 
+  // ✅ Array.isArray guards — default params only cover explicit
+  // `undefined`; explicit `null` from a caller would bypass them and
+  // crash on .length / .find() below.
+  const safeSnapshots = Array.isArray(recentSnapshots) ? recentSnapshots : []
+  const safeQueries = Array.isArray(queries) ? queries : []
+
   return (
     <Card className="lg:col-span-2">
       <CardHeader>
@@ -61,9 +76,15 @@ export default function RecentQueryActivity({
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          {recentSnapshots.length > 0 ? (
-            recentSnapshots.map((snapshot) => {
-              const query = queries.find((q) => q.id === snapshot.queryId)
+          {safeSnapshots.length > 0 ? (
+            safeSnapshots.map((snapshot) => {
+              const query = safeQueries.find((q) => q.id === snapshot.queryId)
+              // ✅ Guarded — a snapshot with missing/malformed `results`
+              // previously threw on `.length`, aborting the render of
+              // every other (valid) snapshot in the list too, since the
+              // throw happens mid-.map().
+              const resultsCount = Array.isArray(snapshot?.results) ? snapshot.results.length : 0
+
               return (
                 <div
                   key={snapshot.id}
@@ -82,12 +103,16 @@ export default function RecentQueryActivity({
                         {formatTimeAgo(snapshot.timestamp)}
                       </span>
                       <span className="text-xs text-gray-500">
-                        {snapshot.results.length} results
+                        {resultsCount} results
                       </span>
                     </div>
                   </div>
                   <div className="text-sm font-medium text-gray-500">
-                    {formatResponseTime(snapshot.metadata.responseTime)}
+                    {/* ✅ Optional chaining — snapshot.metadata could be
+                        undefined on malformed/legacy data; previously this
+                        accessed .responseTime directly off metadata with
+                        no guard. */}
+                    {formatResponseTime(snapshot?.metadata?.responseTime ?? 0)}
                   </div>
                 </div>
               )

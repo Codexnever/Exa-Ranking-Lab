@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Play, Loader2 } from "lucide-react"
 import Link from "next/link"
 import React from "react"
-import type { QueryConfig } from "@/lib/type"
+import type { QueryConfig } from "@/types/type"
 
 function formatTimeAgo(date: Date | string) {
   const now = new Date()

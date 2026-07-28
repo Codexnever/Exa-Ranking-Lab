@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { DriftAnalysisResult } from "@/lib/type";
+import type { DriftAnalysisResult } from "@/types/type";
 
 export function useDrift(queryid: string) {
   const [driftResult, setDriftResult] = useState<DriftAnalysisResult | null>(null);

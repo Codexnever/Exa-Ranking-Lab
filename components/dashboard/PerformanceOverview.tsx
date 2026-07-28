@@ -1,23 +1,49 @@
 // components/dashboard/PerformanceOverview.tsx
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { BarChart3, TrendingUp, Clock, Target } from "lucide-react"
-import type { AnalyticsData, RankingSnapshot } from "@/lib/type"
+import { BarChart3, TrendingUp, TrendingDown, Clock, Target } from "lucide-react"
+import type { AnalyticsData, RankingSnapshot } from "@/types/type"
 import { useMemo } from "react"
 import { formatResponseTime } from "@/hooks/format-response-time"
-// ✅ Updated interface to include new props
+
 interface PerformanceOverviewProps {
   analytics: AnalyticsData | null
-  snapshots?: RankingSnapshot[] // ✅ Optional snapshots prop
-  isLoading?: boolean // ✅ Optional loading prop
+  snapshots?: RankingSnapshot[]
+  isLoading?: boolean
 }
 
-export default function PerformanceOverview({ 
-  analytics, 
-  snapshots = [], 
-  isLoading = false 
+/**
+ * ✅ Shared, defensive position extraction — replaces the same logic that
+ * was previously duplicated (with slightly different styling) inside both
+ * the avgPosition useMemo and positionChange's local calculateAvgPosition
+ * helper. A single implementation means the "what counts as a valid
+ * position" rule only needs to be correct in one place.
+ *
+ * ✅ Guards snapshot.results being undefined/non-array — the original
+ * code called `.forEach` directly on `snapshot.results` in three separate
+ * places, each of which would throw and crash the ENTIRE component if any
+ * single snapshot had malformed/missing results.
+ */
+function calculateAvgPositionSafe(snaps: RankingSnapshot[]): number {
+  let totalPos = 0
+  let count = 0
+  for (const snap of snaps) {
+    if (!Array.isArray(snap?.results)) continue
+    for (const result of snap.results) {
+      if (typeof result?.position === "number" && result.position > 0) {
+        totalPos += result.position
+        count++
+      }
+    }
+  }
+  return count > 0 ? totalPos / count : 0
+}
+
+export default function PerformanceOverview({
+  analytics,
+  snapshots = [],
+  isLoading = false
 }: PerformanceOverviewProps) {
-  // Show loading skeleton if data is loading
   if (isLoading) {
     return (
       <Card>
@@ -42,64 +68,46 @@ export default function PerformanceOverview({
     )
   }
 
-  // Calculate performance metrics
-  const totalSnapshots = snapshots.length
-  const successfulSnapshots = snapshots.filter(s => s.results.length > 0).length
+  // ✅ Array.isArray guard — the default param only covers explicit
+  // `undefined`; an explicit `null` passed by a caller would bypass it
+  // and crash every computation below.
+  const safeSnapshots = Array.isArray(snapshots) ? snapshots : []
+
+  const totalSnapshots = safeSnapshots.length
+  // ✅ `s.results.length` guarded — a malformed snapshot with missing
+  // `results` previously threw here and crashed the whole component.
+  const successfulSnapshots = safeSnapshots.filter(
+    s => Array.isArray(s?.results) && s.results.length > 0
+  ).length
   const successRate = totalSnapshots > 0 ? (successfulSnapshots / totalSnapshots) * 100 : 0
-  
-  const avgResponseTime = snapshots.length > 0 
-    ? snapshots.reduce((sum, s) => sum + (s.metadata.responseTime || 0), 0) / snapshots.length 
+
+  const avgResponseTime = totalSnapshots > 0
+    ? safeSnapshots.reduce((sum, s) => sum + (s?.metadata?.responseTime ?? 0), 0) / totalSnapshots
     : 0
 
-  // ✅ Calculate average position from snapshots since it might not be in analytics
-  const avgPosition = useMemo(() => {
-    if (snapshots.length === 0) return 0
-    
-    let totalPositions = 0
-    let totalResults = 0
-    
-    snapshots.forEach(snapshot => {
-      snapshot.results.forEach(result => {
-        if (result.position && result.position > 0) {
-          totalPositions += result.position
-          totalResults++
-        }
-      })
-    })
-    
-    return totalResults > 0 ? totalPositions / totalResults : 0
-  }, [snapshots])
+  // ✅ Now uses the shared, guarded helper instead of duplicated inline logic
+  const avgPosition = useMemo(
+    () => calculateAvgPositionSafe(safeSnapshots),
+    [safeSnapshots]
+  )
 
-  // ✅ Calculate position change from recent snapshots
   const positionChange = useMemo(() => {
-    if (snapshots.length < 2) return 0
-    
-    const sortedSnapshots = [...snapshots].sort((a, b) => 
+    if (safeSnapshots.length < 2) return 0
+
+    const sortedSnapshots = [...safeSnapshots].sort((a, b) =>
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     )
-    
-    const recentSnapshots = sortedSnapshots.slice(0, Math.floor(sortedSnapshots.length / 2))
-    const olderSnapshots = sortedSnapshots.slice(Math.floor(sortedSnapshots.length / 2))
-    
-    const calculateAvgPosition = (snaps: RankingSnapshot[]) => {
-      let totalPos = 0
-      let count = 0
-      snaps.forEach(snap => {
-        snap.results.forEach(result => {
-          if (result.position && result.position > 0) {
-            totalPos += result.position
-            count++
-          }
-        })
-      })
-      return count > 0 ? totalPos / count : 0
-    }
-    
-    const recentAvg = calculateAvgPosition(recentSnapshots)
-    const olderAvg = calculateAvgPosition(olderSnapshots)
-    
-    return olderAvg - recentAvg // Positive means improvement (lower position numbers)
-  }, [snapshots])
+
+    const mid = Math.floor(sortedSnapshots.length / 2)
+    const recentSnapshots = sortedSnapshots.slice(0, mid)
+    const olderSnapshots = sortedSnapshots.slice(mid)
+
+    const recentAvg = calculateAvgPositionSafe(recentSnapshots)
+    const olderAvg = calculateAvgPositionSafe(olderSnapshots)
+
+    // Positive means improvement (lower position numbers = better rank)
+    return olderAvg - recentAvg
+  }, [safeSnapshots])
 
   return (
     <Card>
@@ -131,7 +139,7 @@ export default function PerformanceOverview({
             <div className="text-center p-4 border rounded-lg">
               <div className="text-2xl font-bold text-blue-600 mb-1 flex items-center justify-center gap-1">
                 <Clock className="h-5 w-5" />
-              {formatResponseTime(avgResponseTime)}
+                {formatResponseTime(avgResponseTime)}
               </div>
               <div className="text-sm font-medium mb-1">Avg Response</div>
               <div className="text-xs text-gray-500">
@@ -152,18 +160,21 @@ export default function PerformanceOverview({
           </div>
         )}
 
-        {/* Additional performance insights */}
         {analytics && totalSnapshots > 0 && (
           <div className="mt-6 pt-4 border-t">
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">Performance Trend</span>
               <Badge variant={positionChange >= 0 ? "default" : "destructive"}>
+                {/* ✅ Uses the dedicated TrendingDown icon instead of a
+                    rotated TrendingUp — matches the icon convention used
+                    consistently elsewhere in the app (RankingTrendChart,
+                    SERPJourneyFlow). */}
                 {positionChange >= 0 ? (
                   <TrendingUp className="h-3 w-3 mr-1" />
                 ) : (
-                  <TrendingUp className="h-3 w-3 mr-1 rotate-180" />
+                  <TrendingDown className="h-3 w-3 mr-1" />
                 )}
-                {positionChange !== 0 
+                {positionChange !== 0
                   ? `${positionChange > 0 ? '+' : ''}${positionChange.toFixed(1)}`
                   : "No change"
                 }

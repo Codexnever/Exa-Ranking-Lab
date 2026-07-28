@@ -6,8 +6,8 @@ import { Card } from "@/components/ui/card";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store";
-import type { QueryConfig } from "@/lib/type";
-import { useAuth } from "@/lib/contexts/auth-context";
+import type { QueryConfig } from "@/types/type";
+import { useAuth } from "@/lib/middleware/authentication/auth-context";
 
 const QueryFormSkeleton = dynamic(() => import("@/components/loaders/QueryFormSkeleton"));
 const QueryTableSkeleton = dynamic(() => import("@/components/loaders/QueryTableSkeleton"));
@@ -33,9 +33,9 @@ interface Filters {
 }
 
 export default function QueryBuilder() {
-  const { user } = useAuth(); // ✅ Use user object instead of userId
+  const { user } = useAuth(); //  Use user object instead of userId
   
-  // ✅ Use individual selectors for better performance
+  //  Use individual selectors for better performance
   const queries = useQueriesStore((state) => state.queries);
   const createQuery = useQueriesStore((state) => state.createQuery);
   const runQuery = useQueriesStore((state) => state.runQuery);
@@ -44,13 +44,13 @@ export default function QueryBuilder() {
   const deleteQuery = useQueriesStore((state) => state.deleteQuery);
   const queriesLoading = useQueriesStore((state) => state.isLoading);
   
-  // ✅ Use new store structure for snapshots
+  //  Use new store structure for snapshots
   const fetchAllSnapshots = useSnapshotsStore((state) => state.fetchAllSnapshots);
   const fetchSnapshotsComplete = useSnapshotsStore((state) => state.fetchSnapshotsComplete);
   const allSnapshots = useSnapshotsStore((state) => state.allSnapshots); // ✅ Use complete dataset
   const pagination = useSnapshotsStore((state) => state.pagination);
   
-  // ✅ Analytics store
+  //  Analytics store
   const calculateAnalytics = useAnalyticsStore((state) => state.calculateAnalyticsFromSnapshots);
 
   const [editingQuery, setEditingQuery] = useState<QueryConfig | null>(null);
@@ -59,7 +59,7 @@ export default function QueryBuilder() {
     frequency: "",
   });
 
-  // ✅ Initial data fetch
+  //  Initial data fetch
   useEffect(() => {
     if (user?.$id) {
       fetchQueries(user.$id);
@@ -90,13 +90,13 @@ export default function QueryBuilder() {
       
       await createQuery({ ...newQuery, userId: user.$id });
       
-      // ✅ Refresh queries after creation
+      //  Refresh queries after creation
       await fetchQueries(user.$id);
       
-      // ✅ Refresh complete snapshots for analytics (don't need to refetch paginated)
+      //  Refresh complete snapshots for analytics (don't need to refetch paginated)
       await fetchAllSnapshots(user.$id);
       
-      // ✅ Recalculate analytics with fresh complete dataset
+      //  Recalculate analytics with fresh complete dataset
       const freshAllSnapshots = useSnapshotsStore.getState().allSnapshots;
       calculateAnalytics(freshAllSnapshots);
       
@@ -230,7 +230,7 @@ export default function QueryBuilder() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Query Builder</h1>
           <p className="text-gray-600 mt-1">Create and manage your search ranking queries</p>
-          {/* ✅ Optional: Show stats */}
+          {/* Optional: Show stats */}
           <p className="text-xs text-gray-500 mt-1">
             {queries.length} queries • {allSnapshots.length} total snapshots
           </p>

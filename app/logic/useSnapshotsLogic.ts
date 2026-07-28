@@ -1,250 +1,201 @@
-// app/logic/useSnapshotsLogic.ts
-import { useEffect, useState, useMemo } from "react"
-import { useQueriesStore } from "@/app/store"
-import { useSnapshotsStore } from "@/app/store"
-import { useAnalyticsStore } from "@/app/store"
-import { useAuth } from "@/lib/contexts/auth-context"
+// hooks/use-snapshots-logic.ts  (or lib/hooks/use-snapshots-logic.ts)
+"use client"
+
+import { useEffect, useState, useMemo, useCallback } from "react"
+import { useQueriesStore, useSnapshotsStore, useAnalyticsStore } from "@/app/store"
+import { useAuth } from "@/lib/middleware/authentication/auth-context"
 import { toast } from "sonner"
-import type { QueryConfig } from "@/lib/type"
+import type { QueryConfig } from "@/types/type"
+import { useSecureApi } from "@/lib/api/use-secureApi"
+
+// ─── Pure helpers (stable references — defined outside the hook) ──────────────
+
+export const formatDate = (date: Date | string): string => {
+  const d    = typeof date === "string" ? new Date(date) : date
+  const now  = Date.now()
+  const diff = now - d.getTime()
+  const min  = Math.floor(diff / 60_000)
+  const hr   = Math.floor(diff / 3_600_000)
+
+  if (min < 60)  return `${min}m ago`
+  if (hr  < 24)  return `${hr}h ago`
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useSnapshotsLogic() {
-  // ✅ Use new store structure with separated data flows
-  const paginatedSnapshots = useSnapshotsStore(state => state.paginatedSnapshots)
-  const allSnapshots = useSnapshotsStore(state => state.allSnapshots)
-  const pagination = useSnapshotsStore(state => state.pagination)
-  const isLoadingPaginated = useSnapshotsStore(state => state.isLoadingPaginated)
-  const isLoadingAnalytics = useSnapshotsStore(state => state.isLoadingAnalytics)
-  const fetchPaginatedSnapshots = useSnapshotsStore(state => state.fetchPaginatedSnapshots)
-  const fetchAllSnapshots = useSnapshotsStore(state => state.fetchAllSnapshots)
-  const fetchSnapshotsComplete = useSnapshotsStore(state => state.fetchSnapshotsComplete)
-  const setPage = useSnapshotsStore(state => state.setPage)
-  const setItemsPerPage = useSnapshotsStore(state => state.setItemsPerPage)
-  
-  const queries = useQueriesStore(state => state.queries)
-  const { analytics } = useAnalyticsStore()
-  const calculateAnalytics = useAnalyticsStore(state => state.calculateAnalyticsFromSnapshots)
-  const { user } = useAuth()
-  
+  const {
+    paginatedSnapshots,
+    allSnapshots,
+    pagination,
+    isLoadingPaginated,
+    isLoadingAnalytics,
+    fetchPaginatedSnapshots,
+    fetchAllSnapshots,
+    fetchSnapshotsComplete,
+    addSnapshot,
+    setPage,
+    setItemsPerPage,
+  } = useSnapshotsStore()
+
+  const queries                       = useQueriesStore(state => state.queries)
+  const { analytics,
+          calculateAnalyticsFromSnapshots } = useAnalyticsStore()
+  const { user }                      = useAuth()
+
   const [filters, setFilters] = useState({
-    category: "all",
-    status: "all-status",
-    search: "",
+    category:  "all",
+    status:    "all-status",
+    search:    "",
   })
   const [selectedQueryId, setSelectedQueryId] = useState<string>("")
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating]               = useState(false)
 
-  // ✅ Initial fetch - get both paginated and complete data
+  const { call, loading } = useSecureApi({ showErrorToast: true, showSuccessToast: false })
+
+  // ── Initial data fetch ────────────────────────────────────────────────────
   useEffect(() => {
-    if (user?.$id) {
-      // Fetch first page of data AND complete dataset for analytics
-      fetchSnapshotsComplete(1, pagination.itemsPerPage || 20, user.$id)
-    }
-  }, [user?.$id, fetchSnapshotsComplete, pagination.itemsPerPage])
+    if (!user?.$id) return
+    fetchSnapshotsComplete(1, pagination.itemsPerPage || 20, user.$id)
+    // Run once when userId is known — intentionally excludes fetchSnapshotsComplete
+    // and pagination.itemsPerPage from deps to avoid re-fetching on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.$id])
 
-  // ✅ Create snapshots with query info using PAGINATED data for display
-  const snapshotsWithQueries = paginatedSnapshots.map((snapshot) => {
-    const query = queries.find((q: QueryConfig) => q.id === snapshot.queryId)
-    return {
-      ...snapshot,
-      queryInfo: query || null,
-    }
-  })
+  // ── Derived data ──────────────────────────────────────────────────────────
 
-  // ✅ Filter the paginated snapshots for display
-const filteredSnapshots = useMemo(() => {
-  return snapshotsWithQueries.filter((snapshot) => {
-    if (filters.category !== "all" && snapshot.queryInfo?.category !== filters.category) return false;
-    if (filters.status !== "all-status") {
-      const status = snapshot.results.length > 0 ? "completed" : "failed";
-      if (status !== filters.status) return false;
-    }
-    if (filters.search && !snapshot.queryInfo?.query.toLowerCase().includes(filters.search.toLowerCase())) return false;
-    return true;
-  });
-}, [snapshotsWithQueries, filters]);
+  const snapshotsWithQueries = useMemo(
+    () => paginatedSnapshots.map(s => ({
+      ...s,
+      queryInfo: queries.find((q: QueryConfig) => q.id === s.queryId) ?? null,
+    })),
+    [paginatedSnapshots, queries]
+  )
 
-  const formatDate = (date: Date | string) => {
-    const parsedDate = typeof date === 'string' ? new Date(date) : date
-    const now = new Date()
-    const diffMs = now.getTime() - parsedDate.getTime()
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-    const diffMin = Math.floor(diffMs / (1000 * 60))
+  const filteredSnapshots = useMemo(
+    () => snapshotsWithQueries.filter(s => {
+      if (filters.category !== "all" && s.queryInfo?.category !== filters.category) return false
+      if (filters.status   !== "all-status") {
+        const status = s.results.length > 0 ? "completed" : "failed"
+        if (status !== filters.status) return false
+      }
+      if (filters.search && !s.queryInfo?.query.toLowerCase().includes(filters.search.toLowerCase()))
+        return false
+      return true
+    }),
+    [snapshotsWithQueries, filters]
+  )
 
-    if (diffMin < 60) {
-      return `${diffMin}m ago`
-    } else if (diffHours < 24) {
-      return `${diffHours}h ago`
-    } else {
-      return parsedDate.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    }
-  }
+  // ── Create snapshot ───────────────────────────────────────────────────────
 
-  const handleCreateSnapshot = async () => {
-    if (creating) return // Prevent double-clicks
-    
+  const handleCreateSnapshot = useCallback(async () => {
+    if (creating) return
+
+    // ✅ Guard before setting creating=true so we don't show spinner unnecessarily
+    if (!user) { toast.error("Please log in to create snapshots."); return }
+    if (!selectedQueryId) { toast.error("Please select a query first."); return }
+
+    const queryConfig = queries.find(q => q.id === selectedQueryId)
+    if (!queryConfig) { toast.error("Query not found"); return }
+
     setCreating(true)
-    
     try {
-      if (!user) {
-        toast.error("Authentication required. Please log in to create snapshots.")
-        return
-      }
-      
-      if (!selectedQueryId) {
-        toast.error("Please select a query to snapshot.")
-        return
-      }
+      const runResponse = await call("POST", `/queries/${selectedQueryId}/run`)
+      if (!runResponse?.ok) throw new Error("Failed to run query")
 
-      const queryConfig = queries.find((q: QueryConfig) => q.id === selectedQueryId)
-      if (!queryConfig) {
-        throw new Error("Query not found")
-      }
+      const queryResults = await runResponse.json()
 
-      console.log('[Snapshots] Creating snapshot for query:', selectedQueryId)
-
-      // Step 1: Run the query
-      const runRes = await fetch(`/api/queries/${selectedQueryId}/run`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const snapshotData = {
+        queryId:   selectedQueryId,
+        timestamp: new Date().toISOString(),
+        results:   queryResults.results ?? [],
+        metadata:  {
+          responseTime:  queryResults.responseTime  ?? 0,
+          totalResults:  queryResults.totalResults  ?? 0,
+          executedAt:    new Date().toISOString(),
+          source:        "manual_creation",
         },
-        credentials: 'include',
-      })
-
-      if (!runRes.ok) {
-        if (runRes.status === 401) {
-          toast.error("Session expired. Please log in again.")
-          return
-        }
-        throw new Error(`Failed to run query: ${runRes.status} ${runRes.statusText}`)
       }
 
-      const queryResults = await runRes.json()
-      console.log('[Snapshots] Query executed successfully, creating snapshot...')
+      const createResponse = await call("POST", "/snapshots", snapshotData)
+      if (!createResponse?.ok) throw new Error("Failed to create snapshot")
 
-      // Step 2: Create the snapshot
-      const createRes = await fetch("/api/snapshots", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          queryId: selectedQueryId,
-          timestamp: new Date().toISOString(),
-          results: queryResults.results || [],
-          metadata: {
-            responseTime: queryResults.responseTime || 0,
-            totalResults: queryResults.totalResults || 0,
-          },
-        }),
-      })
+      const created = await createResponse.json()
 
-      if (!createRes.ok) {
-        if (createRes.status === 401) {
-          toast.error("Session expired. Please log in again.")
-          return
-        }
-        const errorData = await createRes.json().catch(() => ({}))
-        throw new Error(errorData.message || `Failed to create snapshot: ${createRes.status}`)
-      }
+      //  Use store action instead of direct setState — respects persist middleware
+      addSnapshot(created)
 
-      const createdSnapshot = await createRes.json()
-      console.log('[Snapshots] Snapshot created successfully:', createdSnapshot)
+      //  Recalculate analytics with a capped snapshot count to avoid
+      //    blocking the main thread with thousands of items
+      const ANALYTICS_CAP = 500
+      calculateAnalyticsFromSnapshots(
+        [created, ...allSnapshots].slice(0, ANALYTICS_CAP)
+      )
 
-      // ✅ Step 3: Refresh BOTH paginated and complete datasets
-      await Promise.all([
-        fetchPaginatedSnapshots(pagination.currentPage, pagination.itemsPerPage, user.$id),
+      // Background refresh to sync with server state
+      if (user.$id) {
+        fetchPaginatedSnapshots(pagination.currentPage, pagination.itemsPerPage, user.$id)
         fetchAllSnapshots(user.$id)
-      ])
-      
-      // ✅ Step 4: Recalculate analytics with fresh COMPLETE data
-      const freshAllSnapshots = useSnapshotsStore.getState().allSnapshots
-      calculateAnalytics(freshAllSnapshots) // Use complete dataset for analytics
+      }
 
       toast.success("Snapshot created successfully!")
-      
-      // Optional: Clear selection after successful creation
-      // setSelectedQueryId("")
-      
-    } catch (error) {
-      console.error('[Snapshots] Creation failed:', error)
-      const message = error instanceof Error ? error.message : "Failed to create snapshot"
-      toast.error(message)
+    } catch (err: any) {
+      toast.error(err?.message ?? "Snapshot creation failed")
     } finally {
       setCreating(false)
     }
-  }
+  }, [
+    creating, user, selectedQueryId, queries, call,
+    allSnapshots, pagination, addSnapshot,
+    calculateAnalyticsFromSnapshots, fetchPaginatedSnapshots, fetchAllSnapshots,
+  ])
 
-  // ✅ Pagination handlers
-  const handlePageChange = (page: number) => {
-    setPage(page)
-  }
+  // ── Pagination handlers (pass userId through) ─────────────────────────────
 
-  const handleItemsPerPageChange = (itemsPerPage: number) => {
-    setItemsPerPage(itemsPerPage)
-  }
+  const handlePageChange = useCallback(
+    (page: number) => setPage(page, user?.$id),
+    [setPage, user?.$id]
+  )
 
-  // ✅ Filter change handler that might need to reset pagination
-  const handleFiltersChange = (newFilters: typeof filters) => {
-    setFilters(newFilters)
-    // Optional: Reset to first page when filters change
-    if (pagination.currentPage > 1) {
-      setPage(1)
-    }
-  }
+  const handleItemsPerPageChange = useCallback(
+    (limit: number) => setItemsPerPage(limit, user?.$id),
+    [setItemsPerPage, user?.$id]
+  )
+
+  // ── Refresh ───────────────────────────────────────────────────────────────
+
+  //  Guard — don't call without userId
+  const refreshData = useCallback(() => {
+    if (!user?.$id) return
+    fetchSnapshotsComplete(pagination.currentPage, pagination.itemsPerPage, user.$id)
+  }, [user?.$id, pagination.currentPage, pagination.itemsPerPage, fetchSnapshotsComplete])
+
+  // ── Return ────────────────────────────────────────────────────────────────
 
   return {
-    // ✅ Paginated data for display
-    snapshots: paginatedSnapshots, // Keep original name for backward compatibility
+    snapshots:                paginatedSnapshots,
     paginatedSnapshots,
-    
-    // ✅ Complete data for analytics
     allSnapshots,
-    
-    // ✅ Loading states
-    isLoading: isLoadingPaginated, // Keep original name for backward compatibility
+    isLoading:                isLoadingPaginated || loading,
     isLoadingPaginated,
     isLoadingAnalytics,
-    
-    // ✅ Pagination info
     pagination,
-    
-    // ✅ Other data
     queries,
     analytics,
     user,
-    
-    // ✅ State and handlers
     filters,
-    setFilters: handleFiltersChange,
+    setFilters,
     selectedQueryId,
     setSelectedQueryId,
     creating,
-    
-    // ✅ Computed data
     filteredSnapshots,
-    
-    // ✅ Utility functions
     formatDate,
-    
-    // ✅ Action handlers
     handleCreateSnapshot,
     handlePageChange,
     handleItemsPerPageChange,
-    
-    // ✅ Direct pagination actions
-    setPage,
-    setItemsPerPage,
-    
-    // ✅ Data fetching methods
     fetchPaginatedSnapshots,
     fetchAllSnapshots,
-    refreshData: () => fetchSnapshotsComplete(pagination.currentPage, pagination.itemsPerPage, user?.$id),
+    refreshData,
   }
 }

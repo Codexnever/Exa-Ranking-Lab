@@ -3,7 +3,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { GitCompare } from "lucide-react"
-import type { RankingSnapshot, QueryConfig } from "@/lib/type" // use your actual path
+import type { RankingSnapshot, QueryConfig } from "@/types/type" // use your actual path
 
 interface CompareSetupProps {
   queries: QueryConfig[]

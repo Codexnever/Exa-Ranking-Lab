@@ -1,6 +1,26 @@
+// components/analytics/QueryPerformanceStatsTable.tsx
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 
-export function QueryPerformanceStatsTable({ stats }: { stats: any[] }) {
+interface QueryStat {
+  queryId?:   string;
+  id?:        string;
+  name?:      string;
+  lastPosition?: number;
+  positions?: number[];
+}
+
+interface QueryPerformanceStatsTableProps {
+  stats?: QueryStat[];
+}
+
+export function QueryPerformanceStatsTable({ stats = [] }: QueryPerformanceStatsTableProps) {
+  // ✅ Array.isArray guard — `stats` previously had no default param and
+  // no guard, so an undefined/null value passed during initial load
+  // (before the parent's fetch resolves) would throw on `.length` and
+  // crash the entire component. Same class of bug fixed across every
+  // other chart/table component in this audit.
+  const safeStats = Array.isArray(stats) ? stats : [];
+
   return (
     <Card>
       <CardHeader>
@@ -12,7 +32,7 @@ export function QueryPerformanceStatsTable({ stats }: { stats: any[] }) {
 
       <CardContent>
         <div className="overflow-x-auto rounded-lg border border-gray-200">
-          {stats.length === 0 ? (
+          {safeStats.length === 0 ? (
             <div className="text-gray-500 text-sm text-center py-10">No query stats available</div>
           ) : (
             <table className="min-w-full divide-y divide-gray-100">
@@ -25,21 +45,43 @@ export function QueryPerformanceStatsTable({ stats }: { stats: any[] }) {
               </thead>
 
               <tbody className="bg-white divide-y divide-gray-100">
-                {stats.map((stat, idx) => (
-                  <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-800 max-w-xs break-words text-balance">
-                      <span title={stat.name}>{stat.name || "—"}</span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      {stat.lastPosition != null ? stat.lastPosition.toFixed(2) : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis">
-                      {Array.isArray(stat.positions)
-                        ? stat.positions.slice(-5).map((p: number) => p.toFixed(2)).join(", ")
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
+                {safeStats.map((stat, idx) => {
+                  // ✅ Filter positions to valid finite numbers before
+                  // formatting — a single malformed entry (null, NaN, a
+                  // string from a bad API response) previously crashed
+                  // the table's ENTIRE render via an unguarded .toFixed()
+                  // call, not just that one cell.
+                  const validPositions = Array.isArray(stat.positions)
+                    ? stat.positions.filter((p): p is number => typeof p === "number" && isFinite(p))
+                    : [];
+
+                  return (
+                    <tr
+                      // ✅ Stable key — uses the query's actual identifier
+                      // instead of array index. Using `idx` as key meant
+                      // React could incorrectly reuse DOM nodes across
+                      // re-renders if `stats` is ever re-sorted or
+                      // re-fetched in a different order, causing stale
+                      // content to briefly appear under the wrong row.
+                      key={stat.queryId ?? stat.id ?? `row-${idx}`}
+                      className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                    >
+                      <td className="px-4 py-3 text-sm font-medium text-gray-800 max-w-xs break-words">
+                        <span title={stat.name}>{stat.name || "—"}</span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {typeof stat.lastPosition === "number" && isFinite(stat.lastPosition)
+                          ? stat.lastPosition.toFixed(2)
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis">
+                        {validPositions.length > 0
+                          ? validPositions.slice(-5).map(p => p.toFixed(2)).join(", ")
+                          : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

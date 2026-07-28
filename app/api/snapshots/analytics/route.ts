@@ -1,42 +1,33 @@
 // app/api/snapshots/analytics/route.ts
 import { type NextRequest, NextResponse } from "next/server"
-import { databaseService } from "@/app/services/database-service"
-import { getCurrentUser } from "@/app/server/auth"
+import { databaseService } from "@/app/services/database/database-service"
+import { getCurrentUser } from "@/lib/middleware/authentication/auth"
 
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const { searchParams } = new URL(request.url)
-    const queryId = searchParams.get("queryId")
-    const userId = searchParams.get("userId") || user.$id
+    const queryId = searchParams.get("queryId") ?? undefined
 
-    console.log(`[API] Fetching ALL snapshots for analytics: userId=${userId}`)
+    // ✅ userId always from auth — never from query string
+    const userId = user.$id
 
-    // Fetch ALL snapshots for analytics (higher limit)
+    console.log(`[Snapshots/Analytics] Fetching for userId=${userId}, queryId=${queryId ?? "all"}`)
+
     const snapshots = await databaseService.snapshotService.getSnapshots(
-      queryId || undefined,
+      queryId,
       userId,
-      1000 // High limit for analytics
+      1000  // High limit for analytics — getSnapshots warns if truncated
     )
+    // ✅ Removed redundant sort — getSnapshots already applies orderDesc("timestamp")
 
-    console.log(`[API] Analytics snapshots: ${snapshots.length} total snapshots`)
-
-    // Sort by newest first
-    snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-
+    console.log(`[Snapshots/Analytics] Returning ${snapshots.length} snapshots`)
     return NextResponse.json(snapshots)
-  } catch (error) {
-    console.error("Failed to fetch analytics snapshots:", error)
-    return NextResponse.json(
-      {
-        error: "Failed to fetch analytics snapshots",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 }
-    )
+  } catch (err) {
+    console.error("[GET /api/snapshots/analytics] Failed:", err)
+    // ✅ No internal error details exposed to client
+    return NextResponse.json({ error: "Failed to fetch analytics snapshots" }, { status: 500 })
   }
 }

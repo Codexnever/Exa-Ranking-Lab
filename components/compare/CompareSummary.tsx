@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { RankingChange } from "@/lib/type"
+import type { RankingChange } from "@/types/type"
 
 export function CompareSummary({ comparison }: { comparison: RankingChange[] }) {
   return (
