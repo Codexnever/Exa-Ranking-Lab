@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { ChevronDown, Plus, Search, User, Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/middleware/authentication/auth-context"
 import { toast } from "sonner"
+import { NotificationBell } from "@/components/ui/NotificationBell"
 
 interface SearchableRoute {
   label: string
@@ -162,6 +163,7 @@ export default function Navbar() {
                   New Query
                 </Button>
               </Link>
+<NotificationBell />
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

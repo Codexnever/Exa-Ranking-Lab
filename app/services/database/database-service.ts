@@ -1,7 +1,7 @@
 import { QueryService } from "../query/query-service"
 import { SnapshotService } from "../query/snapshot-service"
 import { FeedbackService } from "../other/feedback-service"
-import { AnalyticsService } from "../appwrite/analytics-service"
+import { AnalyticsService } from "../../logic/analytics-service"
 import { AccessLogService } from "../other/access-log-service"
 
 // Compose the modular services into a single DatabaseService

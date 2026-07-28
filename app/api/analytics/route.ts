@@ -1,6 +1,6 @@
 // app/api/analytics/route.ts
 import { type NextRequest, NextResponse } from "next/server"
-import { AnalyticsService } from "@/app/services/appwrite/analytics-service"
+import { AnalyticsService } from "@/app/logic/analytics-service"
 import { getCurrentUser } from "@/lib/middleware/authentication/auth"
 import { calculateTimeRangeMs } from "@/app/logic/analyticsLogic"
 

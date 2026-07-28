@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
 
   const isAuthPage = pathname.startsWith("/auth");
 
-  // 🧠 1. Handle bots — early exit
+  //  1. Handle bots — early exit
   const ua = userAgent(request);
   if (ua.isBot) {
     return new NextResponse("Bots not allowed", { status: 403 });
@@ -24,17 +24,17 @@ export async function middleware(request: NextRequest) {
   response.headers.set("x-real-ip", request.headers.get("x-forwarded-for") || "unknown");
   response.headers.set("x-user-agent", JSON.stringify(userAgentInfo));
 
-  // 🧠 2. Allow auth pages freely
+  //  2. Allow auth pages freely
   if (isAuthPage) return response;
 
-  // 🧠 3. No JWT → redirect to /auth
+  //  3. No JWT → redirect to /auth
   if (!jwt) {
     const loginUrl = new URL("/auth", request.url);
     loginUrl.searchParams.set("returnTo", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // 🧠 4. Verify session using server route
+  //  4. Verify session using server route
   try {
     const origin = request.nextUrl.origin;
 

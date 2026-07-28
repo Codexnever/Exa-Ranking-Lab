@@ -1,5 +1,5 @@
 // app/services/enhanced-analytics-service.ts
-import { AnalyticsService } from "../../appwrite/analytics-service"
+import { AnalyticsService } from "../../../logic/analytics-service"
 import type { EnhancedAnalyticsData, QueryConfig, RankingSnapshot } from "@/types/type"
 import type { ContentCoherenceResult, SemanticStabilityResult } from "@/types/type"
 import type { WeaviateService } from "../weaviate-service"
@@ -8,7 +8,7 @@ import {
   // ✅ Import with alias to avoid shadowing by the private method below
   calculateSemanticStability as calcSemanticStability,
   calculateStandardDeviation,
-} from "@/lib/analytics-calculations"
+} from "@/app/services/appwrite/analytics-calculations"
 import { VectorUtils } from "@/utils/vector-utils"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -332,7 +332,7 @@ export class EnhancedAnalyticsService extends AnalyticsService {
   }
 
   /**
-   * ✅ Uses 'content' field that cluster items actually have.
+   *  Uses 'content' field that cluster items actually have.
    * Falls back gracefully when title is missing.
    */
   private extractDocumentsFromClusters(

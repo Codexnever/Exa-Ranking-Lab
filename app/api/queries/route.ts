@@ -2,8 +2,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database/database-service"
 import { getCurrentUser } from "@/lib/middleware/authentication/auth"
-import type { ExaCategory } from "@/types/type"
-
+import {
+  CATEGORY_MAP,
+  VALID_CATEGORIES,
+  type ExaCategory,
+} from "@/constants/category-map"
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -35,14 +38,17 @@ function parseCreateBody(body: unknown): {
     throw Object.assign(new Error("'query' is required"), { status: 400 })
   }
 
-  const validCategories: ExaCategory[] = [
-    "company", "research paper", "news", "pdf", "github",
-    "tweet", "personal site", "linkedin profile", "financial report",
-  ]
-  if (!validCategories.includes(b.category as ExaCategory)) {
-    throw Object.assign(new Error(`'category' must be one of: ${validCategories.join(", ")}`), { status: 400 })
-  }
-
+  if (
+  typeof b.category !== "string" ||
+  !VALID_CATEGORIES.includes(b.category as ExaCategory)
+) {
+  throw Object.assign(
+    new Error(
+      `'category' must be one of: ${VALID_CATEGORIES.join(", ")}`
+    ),
+    { status: 400 }
+  )
+}
   const schedule: { enabled: boolean; frequency: "daily" | "hourly" | "weekly"; times?: string[] | undefined } = {
     enabled: false,
     frequency: "daily",

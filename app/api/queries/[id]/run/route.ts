@@ -7,6 +7,12 @@ import { withEnhancedSecurity } from "@/lib/middleware/security/security-middlew
 import { createHash } from "crypto"
 import type { SecurityContext, QueryConfig, SearchResult } from "@/types/type"
 
+// ✅ NEW: Coverage gap + config versioning utilities
+import {
+  computeConfigHash,
+  computeCoverageGap,
+} from "@/utils/coverage-and-versioning"
+
 // ─── Weaviate singleton ────────────────────────────────────────────────────────
 
 let _weaviateService: import("@/app/services/weaviate/weaviate-service").WeaviateService | null = null
@@ -20,8 +26,6 @@ async function getWeaviateService() {
 }
 
 // ─── Concurrent execution dedup ───────────────────────────────────────────────
-// Prevents duplicate parallel executions for the same user+query combination.
-// TTL of 30 s: any execution running longer than this is assumed to have leaked.
 
 const activeExecutions = new Map<string, { timestamp: number; promise: Promise<NextResponse> }>()
 const EXECUTION_TTL_MS = 30_000
@@ -29,12 +33,8 @@ const EXECUTION_TTL_MS = 30_000
 // ─── Content type mapping ─────────────────────────────────────────────────────
 
 const EXA_TYPE_MAP: Record<string, SearchResult["contentType"]> = {
-  pdf:     "pdf",
-  tweet:   "tweet",
-  github:  "github",
-  news:    "news",
-  word:    "word",
-  article: "article",
+  pdf: "pdf", tweet: "tweet", github: "github",
+  news: "news", word: "word", article: "article",
 }
 
 function mapContentType(raw: string | undefined): SearchResult["contentType"] {
@@ -42,10 +42,6 @@ function mapContentType(raw: string | undefined): SearchResult["contentType"] {
 }
 
 // ─── Error formatting ─────────────────────────────────────────────────────────
-//
-// Extracts message/code/status from any error shape so logs show
-// "[Gemini] 429: quota exceeded" or "[Weaviate] 429: USAGE_LIMIT_EXCEEDED"
-// instead of a bare "429".
 
 function formatSyncError(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -143,18 +139,7 @@ async function executeQuery(
     const exaClient = new ExaClient(apiKey)
 
     console.log(`[QueryRun] Executing search for query: ${queryId}`)
-console.log(
-  "[QueryRun] Query filters:",
-  JSON.stringify(filters, null, 2)
-)
 
-console.log(
-  "[QueryRun] Sending to Exa:",
-  JSON.stringify({
-    results: filters.numResults,
-    numResults: filters.numResults,
-  }, null, 2)
-)
     const exaResponse = await exaClient.search({
       query:          query.query,
       category:       query.category,
@@ -165,13 +150,7 @@ console.log(
       endDate:        filters.endDate,
       numResults:     filters.numResults,
     })
-console.log(`[QueryRun] Exa response received for query: ${queryId} exaResponse:${JSON.stringify(exaResponse)}`) 
-    // FIX: Use searchTime (ms, server-side from Exa) as the canonical response
-    //      time stored in snapshot metadata and returned to the client.
-    //      Previous code measured wall-clock ms here independently, creating a
-    //      second timing source that disagreed with exa-client's own measurement.
-    //      responseTime (full RTT ms) is also available on exaResponse if needed
-    //      for SLA monitoring, but searchTime is the right value for analytics.
+
     const { responseTime, searchTime } = exaResponse
 
     const mappedResults: SearchResult[] = (exaResponse.results ?? []).map(
@@ -210,31 +189,47 @@ console.log(`[QueryRun] Exa response received for query: ${queryId} exaResponse:
       `[QueryRun] ${mappedResults.length} results for query: ${queryId} ` +
       `(Exa searchTime: ${searchTime}ms, RTT: ${responseTime}ms)`
     )
-//here wrong result came 
+
+    // ✅ NEW: compute config hash + coverage gap before creating snapshot
+    const configHash   = computeConfigHash(query)
+    const coverageGap  = computeCoverageGap(
+      filters.numResults ?? 50,
+      mappedResults.length
+    )
+
+    // Log coverage gap for visibility
+    if (coverageGap.status !== "full") {
+      console.warn(
+        `[QueryRun] Coverage gap for query ${queryId}: ` +
+        `requested=${coverageGap.numRequested}, returned=${coverageGap.numReturned}, ` +
+        `status=${coverageGap.status}, gapRate=${(coverageGap.gapRate * 100).toFixed(1)}%`
+      )
+    }
+
     const snapshot = await databaseService.snapshotService.createSnapshot({
       queryId:  query.id,
       userId:   user.$id,
       results:  mappedResults,
       metadata: {
         totalResults:  mappedResults.length,
-        // searchTime is server-side ms from Exa; stored as-is for analytics accuracy
-        responseTime:  responseTime,
+        responseTime:  searchTime ?? responseTime,
         executedAt:    new Date().toISOString(),
         executionType: "manual",
         source:        "query_run_api",
-        // Surface cost data for monitoring — zero-cost fields omitted downstream    
+        // ✅ NEW: stored for drift contamination detection and coverage trend
+        configHash,
+        numRequested:  coverageGap.numRequested,
+        numReturned:   coverageGap.numReturned,
+        coverageGap:   coverageGap.gap,
+        coverageRate:  parseFloat((coverageGap.gapRate * 100).toFixed(2)),
+        coverageStatus: coverageGap.status,
       },
       timestamp: new Date(),
     })
 
     console.log(`[QueryRun] Snapshot created: ${snapshot.id}`)
 
-    // ── Weaviate sync (non-critical — never blocks response) ──────────────────
-    //
-    // Promise.then chaining (not await) so this runs after the response is sent.
-    // WeaviateService has an internal circuit breaker (60 s cooldown after a
-    // failed initialize()) so repeated 429s during a burst won't each trigger
-    // a fresh failing network call.
+    // ── Weaviate sync (non-critical) ──────────────────────────────────────────
     getWeaviateService()
       .then(w => w.initialize().then(() => w.syncSnapshot(snapshot)))
       .then(() => console.log(`[QueryRun] Weaviate sync complete: ${snapshot.id}`))
@@ -248,17 +243,22 @@ console.log(`[QueryRun] Exa response received for query: ${queryId} exaResponse:
     await databaseService.queryService.updateQuery(query.id, { lastRun: new Date() })
 
     return NextResponse.json({
-      success:      true,
-      results:      mappedResults,
-      // Return both timings so the client can display the server-side figure
-      // while the monitoring layer records full RTT separately
-      searchTime: searchTime,
-      responseTime: responseTime,
-      totalResults: mappedResults.length,
-      timestamp:    new Date().toISOString(),
-      snapshotId:   snapshot.id,
-      source:       "query_run_api",
-      requestId:    exaResponse.requestId,
+      success:        true,
+      results:        mappedResults,
+      searchTime,
+      responseTime,
+      totalResults:   mappedResults.length,
+      timestamp:      new Date().toISOString(),
+      snapshotId:     snapshot.id,
+      source:         "query_run_api",
+      requestId:      exaResponse.requestId,
+      // NEW: surface coverage gap to client so UI can show it immediately
+      coverageGap: {
+        numRequested: coverageGap.numRequested,
+        numReturned:  coverageGap.numReturned,
+        gap:          coverageGap.gap,
+        status:       coverageGap.status,
+      },
     })
 
   } catch (err) {

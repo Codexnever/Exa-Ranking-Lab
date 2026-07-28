@@ -2,7 +2,7 @@
 // NOTE: Folder was "calculate-coherance" — rename to "calculate-coherence"
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/middleware/authentication/auth"
-import { calculateUMassCoherence } from "@/lib/analytics-calculations"
+import { calculateUMassCoherence } from "@/app/services/appwrite/analytics-calculations"
 
 const VALID_METHODS  = new Set(["umass", "cv", "npmi"])
 const MAX_DOCUMENTS  = 500

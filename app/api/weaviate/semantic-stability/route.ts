@@ -1,7 +1,7 @@
 // app/api/weaviate/semantic-stability/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/middleware/authentication/auth"
-import { calculateSemanticStability } from "@/lib/analytics-calculations"
+import { calculateSemanticStability } from "@/app/services/appwrite/analytics-calculations"
 
 const MAX_ITEMS = 500
 

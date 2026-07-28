@@ -1,6 +1,6 @@
 // app/services/WeaviateAnalyticsService.ts
 import { WeaviateService, COLLECTION_NAME } from "../weaviate-service"
-import { AnalyticsService } from "../../appwrite/analytics-service"
+import { AnalyticsService } from "../../../logic/analytics-service"
 import { analyticsCalculations } from "@/app/logic/analyticsLogic"
 import { getTimeRangeString } from "@/utils/timeRangeString"
 import type {

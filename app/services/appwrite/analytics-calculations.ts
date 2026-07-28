@@ -3,12 +3,12 @@
 // Pure functions — no React, no side effects.
 
 import type { ContentCoherenceResult, SemanticStabilityResult } from "@/types/type"
-import { VectorUtils } from "../utils/vector-utils"
+import { VectorUtils } from "../../../utils/vector-utils"
 // ✅ Import from analyticsLogic — no duplicate definition
 export { calculateTimeRangeMs } from "@/app/logic/analyticsLogic"
 
 // ─── Re-exports frome vector-utils ─────────────────────────────────────────────
-export { cosineSimilarity, calculateCentroid } from "../utils/vector-utils"
+export { cosineSimilarity, calculateCentroid } from "../../../utils/vector-utils"
 
 // ============================================================================
 // VECTOR-BASED CALCULATIONS (Primary)

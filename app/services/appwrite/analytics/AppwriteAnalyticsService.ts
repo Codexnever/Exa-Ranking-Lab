@@ -1,5 +1,5 @@
 // app/services/AppwriteAnalyticsService.ts
-import { AnalyticsService } from "../analytics-service"
+import { AnalyticsService } from "../../../logic/analytics-service"
 import { getTimeRangeString } from "@/utils/timeRangeString"  // ✅ single source of truth
 import type {
   AnalyticsData,

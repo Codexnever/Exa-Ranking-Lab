@@ -1,16 +1,18 @@
 // lib/drift-analyzer.ts
 //
-// Uses Google Gemini Embedding 2 (gemini-embedding-2-preview) for semantic
-// similarity. Requires: GEMINI_API_KEY environment variable.
+// Uses EmbeddingService (Gemini → OpenAI fallback → position-only) for
+// semantic similarity. Direct Gemini calls replaced with the abstraction
+// layer that adds persistent Weaviate cache + provider fallback chain.
+//
+// Also integrates DriftDecomposer — every snapshot-pair comparison now
+// returns typed drift (content / competitor / rerank) in addition to the
+// single driftScore for backward compatibility.
 //
 // Model specs (GA April 2026):
-//   - Model ID: gemini-embedding-2-preview
+//   - Model ID: gemini-embedding-2-preview (corrected from gemini-embedding-2)
 //   - Input token limit: 8,192 (~32,000 chars)
-//   - Output dimensions: flexible 128–3072 (default 3072; we use 768 for speed)
-//   - Multimodal: text, image, video, audio, PDF
-//   - REST: https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2-preview:embedContent
-//   - Batch: batchEmbedContents — up to 100 requests per call
-//   - taskType: SEMANTIC_SIMILARITY optimal for drift/coherence comparisons
+//   - Output dimensions: 768 (balanced speed/quality)
+//   - REST: https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2-preview
 
 import type {
   RankingSnapshot,
@@ -21,131 +23,15 @@ import type {
 } from "@/types/type"
 import { createHash } from "crypto"
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+//  NEW: EmbeddingService replaces all direct Gemini calls
+import { getEmbeddingService, type EmbeddingMode } from "@/app/services/EmbeddingService"
 
-const GEMINI_MODEL = "gemini-embedding-2"
-const GEMINI_BASE  = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}`
+//  NEW: DriftDecomposer splits single score into 3 typed signals
+import { DriftDecomposer } from "@/app/services/DriftDecomposer"
 
-// Gemini Embedding 2: 8192 tokens ≈ 32,000 chars; we cap at 16,000 for safety
-const MAX_CHARS = 16_000
+// ─── Cosine similarity ────────────────────────────────────────────────────────
 
-// Output dimension — 768 is the recommended balanced option (speed vs quality).
-// Change to 1536 or 3072 for higher quality at the cost of storage/latency.
-const OUTPUT_DIMENSIONALITY = 768
-
-// Gemini batch limit per call
-const BATCH_LIMIT = 100
-
-// ─── API key helper ───────────────────────────────────────────────────────────
-
-function getApiKey(): string {
-  const key = process.env.GEMINI_API_KEY
-  if (!key) throw new Error("[DriftAnalyzer] GEMINI_API_KEY not set in environment")
-  return key
-}
-
-// ─── Gemini Embedding 2 REST API ─────────────────────────────────────────────
-
-/**
- * Single text embedding via embedContent.
- */
-
-/**
- * Gemini Embedding 2 uses task instructions in the text itself.
- * For drift analysis we're performing symmetric semantic similarity.
- */
-function prepareSimilarityText(text: string): string {
-  return `task: sentence similarity | query: ${text}`
-}
-async function fetchGeminiEmbedding(text: string): Promise<number[]> {
-  const key = getApiKey()
-
-  const res = await fetch(`${GEMINI_BASE}:embedContent?key=${key}`, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-  model: `models/${GEMINI_MODEL}`,
-  content: {
-    parts: [{
-      text: prepareSimilarityText(
-        text.slice(0, MAX_CHARS)
-      )
-    }]
-  },
-  outputDimensionality: OUTPUT_DIMENSIONALITY,
-}),
-  })
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(
-      `[DriftAnalyzer] Gemini embedContent failed (${res.status}): ${err?.error?.message ?? res.statusText}`
-    )
-  }
-
-  const data   = await res.json()
-  const values = data?.embedding?.values as number[] | undefined
-  if (!values?.length) throw new Error("[DriftAnalyzer] Gemini returned empty embedding")
-  return values
-}
-
-/**
- * Batch embed multiple texts via batchEmbedContents.
- * Handles chunking (max 100 per call) and falls back to sequential on error.
- * Returns embeddings in the same order as input texts.
- */
-async function fetchGeminiBatchEmbeddings(texts: string[]): Promise<number[][]> {
-  if (texts.length === 0) return []
-  if (texts.length === 1) return [await fetchGeminiEmbedding(texts[0])]
-
-  const key     = getApiKey()
-  const results: number[][] = []
-
-  for (let i = 0; i < texts.length; i += BATCH_LIMIT) {
-    const chunk = texts.slice(i, i + BATCH_LIMIT)
-
-    const res = await fetch(`${GEMINI_BASE}:batchEmbedContents?key=${key}`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-       requests: chunk.map(text => ({
-  model: `models/${GEMINI_MODEL}`,
-  content: {
-    parts: [{
-      text: prepareSimilarityText(
-        text.slice(0, MAX_CHARS)
-      )
-    }]
-  },
-  outputDimensionality: OUTPUT_DIMENSIONALITY,
-})),
-      }),
-    })
-
-    if (!res.ok) {
-      // Batch failed — fall back to sequential for this chunk
-      console.warn(`[DriftAnalyzer] batchEmbedContents failed (${res.status}), falling back to sequential`)
-      const fallback = await Promise.all(chunk.map(fetchGeminiEmbedding))
-      results.push(...fallback)
-      continue
-    }
-
-    const data = await res.json()
-    const embeddings = data?.embeddings as Array<{ values: number[] }> | undefined
-
-    if (!embeddings?.length) {
-      throw new Error("[DriftAnalyzer] Gemini batchEmbedContents returned empty response")
-    }
-
-    results.push(...embeddings.map(e => e.values))
-  }
-
-  return results
-}
-
-// ─── Cosine similarity (local — no external dep) ──────────────────────────────
-
-function cosineSimilarity(a: number[], b: number[]): number {
+export function cosineSimilarity(a: number[], b: number[]): number {
   if (!a?.length || !b?.length || a.length !== b.length) return 0
   let dot = 0, na = 0, nb = 0
   for (let i = 0; i < a.length; i++) {
@@ -159,111 +45,16 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 // ─── Content hash ─────────────────────────────────────────────────────────────
 
-function computeContentHash(title: string, snippet: string, url: string, fulltext: string): string {
-  const s = `${title ?? ""}|${snippet ?? ""}|${fulltext.slice(0, 5000)}|${url ?? ""}`.trim().toLowerCase()
+function computeContentHash(
+  title:    string,
+  snippet:  string,
+  url:      string,
+  fulltext: string
+): string {
+  const s = `${title ?? ""}|${snippet ?? ""}|${fulltext.slice(0, 5000)}|${url ?? ""}`
+    .trim()
+    .toLowerCase()
   return createHash("sha256").update(s).digest("hex")
-}
-
-// ─── Embedding cache ──────────────────────────────────────────────────────────
-// Critical for cost control — every cache miss = one billable Gemini API call.
-
-interface CacheEntry { vector: number[]; timestamp: number; hits: number }
-
-class EmbeddingCache {
-  private map   = new Map<string, CacheEntry>()
-  private order: string[] = []  // insertion order → O(1) LRU eviction
-
-  // 768-dim float64 ≈ 6KB; 2000 entries ≈ 12MB in-process
-  private readonly TTL      = 24 * 60 * 60 * 1000
-  private readonly MAX_SIZE = 2000
-
-  private key(text: string, contentHash?: string): string {
-    if (contentHash) return `h_${contentHash}`
-    // djb2 + length suffix for collision resistance
-    let h = 0
-    for (let i = 0; i < text.length; i++) h = ((h << 5) - h + text.charCodeAt(i)) | 0
-    return `t_${h}_${text.length}`
-  }
-
-  get(text: string, contentHash?: string): number[] | null {
-    const k     = this.key(text, contentHash)
-    const entry = this.map.get(k)
-    if (!entry) return null
-    if (Date.now() - entry.timestamp > this.TTL) { this.evict(k); return null }
-    entry.hits++
-    return entry.vector
-  }
-
-  set(text: string, vector: number[], contentHash?: string): void {
-    const k = this.key(text, contentHash)
-    if (this.map.has(k)) {
-      this.order = this.order.filter(x => x !== k)
-    } else if (this.map.size >= this.MAX_SIZE) {
-      // O(1) LRU — evict single oldest
-      const oldest = this.order.shift()
-      if (oldest) this.map.delete(oldest)
-    }
-    this.map.set(k, { vector, timestamp: Date.now(), hits: 1 })
-    this.order.push(k)
-  }
-
-  private evict(k: string): void {
-    this.map.delete(k)
-    this.order = this.order.filter(x => x !== k)
-  }
-
-  shouldRecalculate(oldHashes: string[], newHashes: string[]): boolean {
-    if (oldHashes.length !== newHashes.length) return true
-    const oldSet = new Set(oldHashes)
-    for (const h of newHashes) if (!oldSet.has(h)) return true
-    return false
-  }
-
-  get size() { return this.map.size }
-}
-
-const embeddingCache = new EmbeddingCache()
-
-// ─── Cache-aware batch embedding ─────────────────────────────────────────────
-
-/**
- * Returns embeddings for all texts, hitting the cache first and only
- * calling the Gemini batch API for uncached texts.
- * Preserves input order.
- */
-async function getBatchEmbeddings(
-  texts:         string[],
-  contentHashes?: string[]
-): Promise<number[][]> {
-  const results: (number[] | null)[] = new Array(texts.length).fill(null)
-  const uncachedTexts:    string[]   = []
-  const uncachedHashes:   (string | undefined)[] = []
-  const uncachedIndices:  number[]   = []
-
-  // Cache pass — collect what's already cached
-  for (let i = 0; i < texts.length; i++) {
-    const cached = embeddingCache.get(texts[i], contentHashes?.[i])
-    if (cached) {
-      results[i] = cached
-    } else {
-      uncachedTexts.push(texts[i])
-      uncachedHashes.push(contentHashes?.[i])
-      uncachedIndices.push(i)
-    }
-  }
-
-  if (uncachedTexts.length === 0) return results as number[][]
-
-  // Single batch API call for all uncached texts
-  const vectors = await fetchGeminiBatchEmbeddings(uncachedTexts)
-
-  for (let j = 0; j < uncachedIndices.length; j++) {
-    const i = uncachedIndices[j]
-    results[i] = vectors[j]
-    embeddingCache.set(texts[i], vectors[j], uncachedHashes[j])
-  }
-
-  return results as number[][]
 }
 
 // ─── SearchResult helpers ─────────────────────────────────────────────────────
@@ -273,11 +64,15 @@ function getCombinedText(r: SearchResult): string {
     `title: ${r.title ?? "none"}`,
     `text: ${r.snippet ?? ""}`,
     `fullText: ${r.fullText?.slice(0, 5000) ?? ""}`,
-    `url: ${r.url ?? ""}`
+    `url: ${r.url ?? ""}`,
   ].join(" | ")
 }
+
 function getContentHash(r: SearchResult): string {
-  return r.contentHash || computeContentHash(r.title ?? "", r.snippet ?? "", r.url ?? "", r.fullText?.slice(0, 5000) ?? "")
+  return r.contentHash || computeContentHash(
+    r.title ?? "", r.snippet ?? "", r.url ?? "",
+    r.fullText?.slice(0, 5000) ?? ""
+  )
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -336,6 +131,11 @@ export async function calculateDriftScore(
   contentChanges:       number
   processingTime:       number
   identicalContentRate: number
+  resultsCompared:      number
+  //  NEW: embedding mode used for this comparison
+  embeddingMode:        EmbeddingMode
+  //  NEW: full decomposed breakdown (content / competitor / rerank)
+  decomposedDrift:      ReturnType<typeof DriftDecomposer.decompose>
 }> {
   const t0 = performance.now()
 
@@ -347,23 +147,46 @@ export async function calculateDriftScore(
     if (config.useContentHashOptimization) {
       const prevHashes = prevResults.map(getContentHash)
       const currHashes = currResults.map(getContentHash)
-      if (!embeddingCache.shouldRecalculate(prevHashes, currHashes)) {
+
+      const allIdentical = prevHashes.length === currHashes.length &&
+        prevHashes.every((h, i) => h === currHashes[i])
+
+      if (allIdentical) {
+        //  Still run DriftDecomposer on fast path — position drift may
+        // still exist even with identical content hashes
+        const positionOnlyScore = calculatePositionOnlyDrift(prevResults, currResults, config)
+
+        // Build identity vecMap (no real vectors needed — decomposer
+        // handles empty maps gracefully, relying on hash comparison)
+        const emptyVecMap = new Map<string, number[]>()
+
+        const decomposed = DriftDecomposer.decompose({
+          prev,
+          curr,
+          prevEmbeddings: emptyVecMap,
+          currEmbeddings: emptyVecMap,
+          topN:           config.topN,
+        })
+
         return {
-          driftScore:           calculatePositionOnlyDrift(prevResults, currResults, config),
+          driftScore:           positionOnlyScore,
           rankChanges:          [],
           newResults:           0,
           droppedResults:       0,
           contentChanges:       0,
           processingTime:       performance.now() - t0,
           identicalContentRate: 1.0,
+          resultsCompared:      currResults.length,
+          embeddingMode:        "gemini",  // fast path — no model needed
+          decomposedDrift:      decomposed,
         }
       }
     }
 
     const prevUrlMap = new Map(prevResults.map(r => [r.url, r]))
 
-    // ── Collect unique texts for a single batch API call ──────────────────
-    const textByHash  = new Map<string, string>()
+    // ── Collect unique texts for a single batch embedding call ────────────
+    const textByHash = new Map<string, string>()
     for (const r of [...prevResults, ...currResults]) {
       const h = getContentHash(r)
       if (!textByHash.has(h)) textByHash.set(h, getCombinedText(r))
@@ -372,10 +195,25 @@ export async function calculateDriftScore(
     const uniqueHashes = [...textByHash.keys()]
     const uniqueTexts  = [...textByHash.values()]
 
-    // One batch call covers all unique content in this snapshot pair
-    const vectors  = await getBatchEmbeddings(uniqueTexts, uniqueHashes)
-    const vecMap   = new Map<string, number[]>()
-    uniqueHashes.forEach((h, i) => vecMap.set(h, vectors[i]))
+    //  CHANGED: use EmbeddingService instead of direct Gemini calls.
+    // EmbeddingService handles:
+    //   1. Persistent Weaviate cache (survives cold starts)
+    //   2. In-process LRU cache (sub-ms hot path)
+    //   3. Gemini gemini-embedding-2-preview (primary)
+    //   4. OpenAI text-embedding-3-small (fallback)
+    //   5. Position-only degradation (if both providers fail)
+    const embSvc = getEmbeddingService()
+    const batchResult = await embSvc.embedBatch(uniqueTexts, uniqueHashes)
+
+    const { vectors, mode: embeddingMode } = batchResult
+
+    // If position-only degradation: vectors are null — skip cosine similarity
+    const isPositionOnly = embeddingMode === "position-only"
+
+    const vecMap = new Map<string, number[]>()
+    uniqueHashes.forEach((h, i) => {
+      if (vectors[i]?.length) vecMap.set(h, vectors[i]!)
+    })
 
     // ── Score each result ──────────────────────────────────────────────────
     const rankChanges:  RankChange[] = []
@@ -389,16 +227,19 @@ export async function calculateDriftScore(
       const prevR = prevUrlMap.get(currR.url)
 
       if (prevR) {
-        const pi            = prevResults.findIndex(r => r.url === currR.url)
-        const positionDelta = pi - ci
-        const prevHash      = getContentHash(prevR)
-        const currHash      = getContentHash(currR)
+        const pi             = prevResults.findIndex(r => r.url === currR.url)
+        const positionDelta  = pi - ci
+        const prevHash       = getContentHash(prevR)
+        const currHash       = getContentHash(currR)
         const contentChanged = prevHash !== currHash
 
         let simScore: number
         if (!contentChanged) {
-          simScore = 1.0  // identical content — no vector math needed
+          simScore = 1.0
           identicalCount++
+        } else if (isPositionOnly) {
+          // Position-only degradation — no cosine similarity available
+          simScore = 0.5  // neutral assumption when AI is unavailable
         } else {
           const v1 = vecMap.get(prevHash)
           const v2 = vecMap.get(currHash)
@@ -438,6 +279,15 @@ export async function calculateDriftScore(
     ).length
     totalDrift += droppedResults * config.droppedResultPenalty
 
+    // ✅ NEW: run DriftDecomposer with the real vecMaps we just built
+    const decomposedDrift = DriftDecomposer.decompose({
+      prev,
+      curr,
+      prevEmbeddings: vecMap,
+      currEmbeddings: vecMap,
+      topN:           config.topN,
+    })
+
     return {
       driftScore:           Math.min(100, (totalDrift / (config.topN * 15)) * 100),
       rankChanges,
@@ -448,13 +298,33 @@ export async function calculateDriftScore(
       identicalContentRate: rankChanges.length > 0
         ? identicalCount / rankChanges.length
         : 0,
+      resultsCompared:      rankChanges.length,
+      embeddingMode,
+      decomposedDrift,
     }
   } catch (err) {
     console.error("[DriftAnalyzer] calculateDriftScore failed:", err)
+
+    // ✅ Fallback decomposed drift on error
+    const emptyDecomposed = DriftDecomposer.decompose({
+      prev,
+      curr,
+      prevEmbeddings: new Map(),
+      currEmbeddings: new Map(),
+      topN: config.topN,
+    })
+
     return {
-      driftScore: 0, rankChanges: [], newResults: 0,
-      droppedResults: 0, contentChanges: 0,
-      processingTime: performance.now() - t0, identicalContentRate: 0,
+      driftScore:           0,
+      rankChanges:          [],
+      newResults:           0,
+      droppedResults:       0,
+      contentChanges:       0,
+      processingTime:       performance.now() - t0,
+      identicalContentRate: 0,
+      resultsCompared:      0,
+      embeddingMode:        "position-only",
+      decomposedDrift:      emptyDecomposed,
     }
   }
 }
@@ -470,12 +340,19 @@ export async function analyzeDrift(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   )
 
-  const timeline:          DriftTimelinePoint[] = []
-  let totalDrift           = 0
-  let maxDrift             = 0
-  let totalContentChanges  = 0
-  let totalIdenticalRate   = 0
-  let totalProcessingTime  = 0
+  const timeline:              DriftTimelinePoint[]                        = []
+  let   totalDrift             = 0
+  let   maxDrift               = 0
+  let   totalContentChanges    = 0
+  let   totalIdenticalRate     = 0
+  let   totalProcessingTime    = 0
+  let   totalResultsCompared   = 0
+  //  NEW: aggregate decomposed drift across timeline
+  let   totalContentDrift      = 0
+  let   totalCompetitorDrift   = 0
+  let   totalRerankDrift       = 0
+  //  Track which embedding mode was used most (for UI badge)
+  const embeddingModes: EmbeddingMode[] = []
 
   for (let i = 1; i < sorted.length; i++) {
     const result = await calculateDriftScore(sorted[i - 1], sorted[i])
@@ -490,13 +367,21 @@ export async function analyzeDrift(
       droppedResults:     result.droppedResults,
       contentChanges:     result.contentChanges,
       processingTime:     result.processingTime,
+      // ✅ NEW: attach decomposed breakdown to each timeline point
+      decomposedDrift:    result.decomposedDrift,
     })
 
-    totalDrift          += result.driftScore
-    maxDrift             = Math.max(maxDrift, result.driftScore)
-    totalContentChanges += result.contentChanges
-    totalIdenticalRate  += result.identicalContentRate
-    totalProcessingTime += result.processingTime
+    totalDrift           += result.driftScore
+    maxDrift              = Math.max(maxDrift, result.driftScore)
+    totalContentChanges  += result.contentChanges
+    totalIdenticalRate   += result.identicalContentRate
+    totalProcessingTime  += result.processingTime
+    totalResultsCompared += result.resultsCompared
+    // ✅ NEW
+    totalContentDrift    += result.decomposedDrift.contentDrift
+    totalCompetitorDrift += result.decomposedDrift.competitorDrift
+    totalRerankDrift     += result.decomposedDrift.rerankDrift
+    embeddingModes.push(result.embeddingMode)
   }
 
   const n            = timeline.length
@@ -513,18 +398,43 @@ export async function analyzeDrift(
     driftTrend   = slope < -5 ? "improving" : slope > 5 ? "worsening" : "stable"
   }
 
+  // ✅ Dominant embedding mode across this analysis run
+  const modeCount = embeddingModes.reduce((acc, m) => {
+    acc[m] = (acc[m] ?? 0) + 1
+    return acc
+  }, {} as Record<EmbeddingMode, number>)
+  const dominantMode = (Object.entries(modeCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "gemini") as EmbeddingMode
+
+  // ✅ Aggregate decomposed drift for the whole query timeline
+  const aggregateDecomposed = DriftDecomposer.aggregateTimeline(
+    timeline.map(t => t.decomposedDrift).filter(Boolean) as ReturnType<typeof DriftDecomposer.decompose>[]
+  )
+
   return {
     queryId,
     queryName,
-    driftTimeline:       timeline,
+    driftTimeline:          timeline,
     averageDrift,
     maxDrift,
     latestDrift,
     stability,
     driftTrend,
     totalContentChanges,
-    averageCacheHitRate: n > 0 ? totalIdenticalRate / n : 0,
+    totalResultsCompared,
+    //  FIXED: real embedding cache hit rate from EmbeddingService
+    averageCacheHitRate:    getEmbeddingService().cacheStats.lruHitRate,
+    //  Content stability rate — separate from cache hit rate
+    contentStabilityRate:   n > 0 ? totalIdenticalRate / n : 0,
     totalProcessingTime,
+    //  NEW: embedding mode used during this analysis
+    embeddingMode:          dominantMode,
+    //  NEW: decomposed drift aggregates
+    avgContentDrift:        n > 0 ? totalContentDrift    / n : 0,
+    decomposedDriftavgCompetitorDrift:     n > 0 ? totalCompetitorDrift / n : 0,
+    avgRerankDrift:         n > 0 ? totalRerankDrift     / n : 0,
+    dominantDriftCause:     aggregateDecomposed.dominantCause,
+    //  Latest snapshot's decomposed drift for the detail page
+    decomposedDrift:        timeline[n - 1]?.decomposedDrift ?? null,
   }
 }
 

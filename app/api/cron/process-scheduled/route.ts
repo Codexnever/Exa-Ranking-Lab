@@ -1,27 +1,4 @@
 // app/api/cron/process-scheduled/route.ts
-//
-// Scheduled query execution. Triggered by an external scheduler:
-//   - Vercel Cron (recommended — see vercel.json snippet below)
-//   - Or any cron service hitting this URL with the CRON_SECRET header
-//
-// ─── Vercel Cron setup ─────────────────────────────────────────────────────
-// 1. Set CRON_SECRET in your environment variables (generate with
-//    `openssl rand -hex 32`).
-// 2. Add to vercel.json:
-//      {
-//        "crons": [{ "path": "/api/cron/process-scheduled", "schedule": "*/30 * * * *" }]
-//      }
-//    Vercel automatically sends `Authorization: Bearer $CRON_SECRET` on
-//    cron-triggered requests when CRON_SECRET is set.
-// 3. Note: */30 (every 30 min) requires a Pro plan on Vercel — Hobby plan
-//    cron jobs run at most once per day. For Hobby, use an external cron
-//    service (cron-job.org, GitHub Actions scheduled workflow, etc.)
-//    hitting this URL with the Authorization header on your desired interval.
-//
-// ─── Manual trigger (testing) ──────────────────────────────────────────────
-//   curl -X GET https://yourapp.com/api/cron/process-scheduled \
-//        -H "Authorization: Bearer $CRON_SECRET"
-
 import { NextRequest, NextResponse } from "next/server"
 import { databaseService } from "@/app/services/database/database-service"
 import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite/appwrite-server"
@@ -30,15 +7,22 @@ import { ExaClient } from "@/app/server/exa/exa-client"
 import { createHash } from "crypto"
 import type { QueryConfig, SearchResult } from "@/types/type"
 
+//  NEW: all three post-processing services
+import { DriftAlertService } from "@/app/services/DriftAlertService"
+import { AlgorithmUpdateDetector } from "@/app/services/AlgorithmUpdateDetector"
+import { analyzeDrift } from "@/app/logic/driftAnalyzer"
+import {
+  computeConfigHash,
+  computeCoverageGap,
+} from "@/utils/coverage-and-versioning"
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Cap per invocation — keeps the route within serverless function time limits.
-// Most-overdue queries are processed first; remainder picked up next run.
 const MAX_QUERIES_PER_RUN = 30
 const BATCH_SIZE          = 3
 const BATCH_DELAY_MS      = 500
 
-// ─── Weaviate singleton (same lazy pattern as run/route.ts) ───────────────────
+// ─── Weaviate singleton ───────────────────────────────────────────────────────
 
 let _weaviateService: import("@/app/services/weaviate/weaviate-service").WeaviateService | null = null
 
@@ -50,7 +34,7 @@ async function getWeaviateService() {
   return _weaviateService
 }
 
-// ─── Content type mapping (shared with run/route.ts) ─────────────────────────
+// ─── Content type mapping ─────────────────────────────────────────────────────
 
 const EXA_TYPE_MAP: Record<string, SearchResult["contentType"]> = {
   pdf: "pdf", tweet: "tweet", github: "github",
@@ -61,7 +45,7 @@ function mapContentType(raw: string | undefined): SearchResult["contentType"] {
   return EXA_TYPE_MAP[raw?.toLowerCase() ?? ""] ?? "article"
 }
 
-// ─── Error formatting ──────────────────────────────────────────────────────────
+// ─── Error formatting ─────────────────────────────────────────────────────────
 
 function formatError(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -69,13 +53,11 @@ function formatError(err: unknown): string {
   try { return JSON.stringify(err) } catch { return String(err) }
 }
 
-// ─── Due-query check ────────────────────────────────────────────────────────
-// Same logic as use-queries-store.ts getDueQueries — kept in sync manually.
+// ─── Due-query check ──────────────────────────────────────────────────────────
 
 function isQueryDue(query: QueryConfig, now: number): boolean {
   if (!query.schedule?.enabled) return false
   if (!query.lastRun) return true
-
   const diff = now - new Date(query.lastRun).getTime()
   switch (query.schedule.frequency) {
     case "hourly": return diff >= 60 * 60 * 1000
@@ -85,12 +67,11 @@ function isQueryDue(query: QueryConfig, now: number): boolean {
   }
 }
 
-/** Sort most-overdue first: never-run (no lastRun) comes first, then oldest lastRun. */
 function overdueSortKey(query: QueryConfig): number {
   return query.lastRun ? new Date(query.lastRun).getTime() : 0
 }
 
-// ─── Auth check ────────────────────────────────────────────────────────────────
+// ─── Auth check ───────────────────────────────────────────────────────────────
 
 function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
@@ -98,20 +79,24 @@ function isAuthorized(request: NextRequest): boolean {
     console.error("[Cron] CRON_SECRET not set — rejecting all requests")
     return false
   }
-  const auth = request.headers.get("authorization")
-  return auth === `Bearer ${secret}`
+  return request.headers.get("authorization") === `Bearer ${secret}`
 }
 
-// ─── Single query execution (mirrors run/route.ts executeQuery) ──────────────
+// ─── Single query execution ───────────────────────────────────────────────────
 
 async function executeOneQuery(
   query:  QueryConfig,
   apiKey: string
-): Promise<{ queryId: string; status: "success" | "error"; snapshotId?: string; error?: string }> {
+): Promise<{
+  queryId:    string
+  userId:     string
+  status:     "success" | "error" | "skipped"
+  snapshotId?: string
+  error?:      string
+}> {
   try {
-    const filters   = query.filters ?? {}
-    const exaClient = new ExaClient(apiKey)
-    const startTime = Date.now()
+    const filters    = query.filters ?? {}
+    const exaClient  = new ExaClient(apiKey)
 
     const exaResults = await exaClient.search({
       query:          query.query,
@@ -123,13 +108,14 @@ async function executeOneQuery(
       numResults:     filters.numResults,
     })
 
+    const { responseTime, searchTime } = exaResults
 
     const mappedResults: SearchResult[] = (exaResults?.results ?? []).map((r: any, idx: number) => {
-      const title   = r.title   ?? ""
-      const snippet = r.snippet ?? r.summary ?? ""
-      const url     = r.url     ?? ""
+      const title    = r.title   ?? ""
+      const snippet  = r.snippet ?? r.summary ?? ""
+      const url      = r.url     ?? ""
       const fulltext = r.text    ?? r.fullText ?? ""
-      let domain    = r.domain  ?? ""
+      let   domain   = r.domain  ?? ""
       if (!domain && url) {
         try { domain = new URL(url).hostname } catch { /* malformed */ }
       }
@@ -148,39 +134,56 @@ async function executeOneQuery(
         score:     typeof r.score === "number" ? r.score : 0,
       } as SearchResult
     })
-    const {responseTime} = exaResults
+
+    // ✅ NEW: config hash + coverage gap
+    const configHash  = computeConfigHash(query)
+    const coverageGap = computeCoverageGap(filters.numResults ?? 50, mappedResults.length)
+
+    if (coverageGap.status !== "full") {
+      console.warn(
+        `[Cron] Coverage gap for ${query.id}: ` +
+        `${coverageGap.numReturned}/${coverageGap.numRequested} (${coverageGap.status})`
+      )
+    }
 
     const snapshot = await databaseService.snapshotService.createSnapshot({
       queryId:  query.id,
       userId:   query.userId,
       results:  mappedResults,
       metadata: {
-        totalResults:  mappedResults.length,
-        responseTime: responseTime,
-        executedAt:    new Date().toISOString(),
-        executionType: "scheduled",
-        source:        "cron_scheduler",
+        totalResults:   mappedResults.length,
+        responseTime:   searchTime ?? responseTime,
+        executedAt:     new Date().toISOString(),
+        executionType:  "scheduled",
+        source:         "cron_scheduler",
+        // ✅ NEW
+        configHash,
+        numRequested:   coverageGap.numRequested,
+        numReturned:    coverageGap.numReturned,
+        coverageGap:    coverageGap.gap,
+        coverageRate:   parseFloat((coverageGap.gapRate * 100).toFixed(2)),
+        coverageStatus: coverageGap.status,
       },
       timestamp: new Date(),
     })
 
-    // Weaviate sync — fire-and-forget, non-critical
+    // Weaviate sync — fire-and-forget
     getWeaviateService()
       .then(w => w.initialize().then(() => w.syncSnapshot(snapshot)))
       .catch(err => console.error(
-        `[Cron] Weaviate sync failed (non-critical) for ${snapshot.id}: ${formatError(err)}`
+        `[Cron] Weaviate sync failed for ${snapshot.id}: ${formatError(err)}`
       ))
 
     await databaseService.queryService.updateQuery(query.id, { lastRun: new Date() })
 
-    return { queryId: query.id, status: "success", snapshotId: snapshot.id }
+    return { queryId: query.id, userId: query.userId, status: "success", snapshotId: snapshot.id }
   } catch (err) {
     console.error(`[Cron] Query ${query.id} failed:`, formatError(err))
-    return { queryId: query.id, status: "error", error: formatError(err) }
+    return { queryId: query.id, userId: query.userId, status: "error", error: formatError(err) }
   }
 }
 
-// ─── GET/POST handler ──────────────────────────────────────────────────────────
+// ─── GET/POST handler ─────────────────────────────────────────────────────────
 
 async function handler(request: NextRequest) {
   if (!isAuthorized(request)) {
@@ -191,10 +194,9 @@ async function handler(request: NextRequest) {
   console.log("[Cron] Starting scheduled query processing...")
 
   try {
-    // ── Find all due queries across all users ──────────────────────────────
     const scheduled = await databaseService.queryService.getAllScheduledQueries()
-    const now  = Date.now()
-    let due = scheduled.filter(q => isQueryDue(q, now))
+    const now       = Date.now()
+    let   due       = scheduled.filter(q => isQueryDue(q, now))
 
     console.log(`[Cron] ${scheduled.length} scheduled, ${due.length} due`)
 
@@ -206,19 +208,11 @@ async function handler(request: NextRequest) {
       })
     }
 
-    // ── Cap and prioritise most-overdue first ───────────────────────────────
     due = due
       .sort((a, b) => overdueSortKey(a) - overdueSortKey(b))
       .slice(0, MAX_QUERIES_PER_RUN)
 
-    if (scheduled.filter(q => isQueryDue(q, now)).length > MAX_QUERIES_PER_RUN) {
-      console.warn(
-        `[Cron] More than ${MAX_QUERIES_PER_RUN} queries due — processing the ` +
-        `most overdue ${MAX_QUERIES_PER_RUN}; remainder will run next invocation.`
-      )
-    }
-
-    // ── Fetch each user's API key once (cached per run) ─────────────────────
+    // ── API key cache ──────────────────────────────────────────────────────
     const apiKeyCache = new Map<string, string | null>()
 
     async function getApiKey(userId: string): Promise<string | null> {
@@ -231,8 +225,14 @@ async function handler(request: NextRequest) {
       return key
     }
 
-    // ── Execute in batches ───────────────────────────────────────────────────
-    const results: Array<{ queryId: string; status: string; snapshotId?: string; error?: string }> = []
+    // ── Execute in batches ─────────────────────────────────────────────────
+    const results: Array<{
+      queryId:    string
+      userId:     string
+      status:     string
+      snapshotId?: string
+      error?:      string
+    }> = []
     let skipped = 0
 
     for (let i = 0; i < due.length; i += BATCH_SIZE) {
@@ -243,8 +243,8 @@ async function handler(request: NextRequest) {
           const apiKey = await getApiKey(query.userId)
           if (!apiKey) {
             skipped++
-            console.warn(`[Cron] Skipping query ${query.id} — user ${query.userId} has no API key`)
-            return { queryId: query.id, status: "skipped" as const }
+            console.warn(`[Cron] Skipping ${query.id} — no API key for user ${query.userId}`)
+            return { queryId: query.id, userId: query.userId, status: "skipped" as const }
           }
           return executeOneQuery(query, apiKey)
         })
@@ -254,7 +254,7 @@ async function handler(request: NextRequest) {
         if (r.status === "fulfilled") {
           results.push(r.value)
         } else {
-          results.push({ queryId: "unknown", status: "error", error: formatError(r.reason) })
+          results.push({ queryId: "unknown", userId: "unknown", status: "error", error: formatError(r.reason) })
         }
       }
 
@@ -263,23 +263,89 @@ async function handler(request: NextRequest) {
       }
     }
 
-    const succeeded = results.filter(r => r.status === "success").length
-    const failed    = results.filter(r => r.status === "error").length
+    const succeeded = results.filter(r => r.status === "success")
+    const failed    = results.filter(r => r.status === "error")
+
+    // ✅ NEW: POST-PROCESSING — drift alerts + algorithm update detection
+    // Group successful results by userId so we process per-user
+    const successByUser = new Map<string, string[]>()
+    for (const r of succeeded) {
+      if (!successByUser.has(r.userId)) successByUser.set(r.userId, [])
+      successByUser.get(r.userId)!.push(r.queryId)
+    }
+
+    // Build queryMeta lookup for AlgorithmUpdateDetector (needs category)
+    const queryMetaByUser = new Map<string, Array<{ id: string; name: string; category: string }>>()
+    for (const q of due) {
+      if (!queryMetaByUser.has(q.userId)) queryMetaByUser.set(q.userId, [])
+      queryMetaByUser.get(q.userId)!.push({
+        id:       q.id,
+        name:     q.name,
+        category: q.category ?? "unknown",
+      })
+    }
+
+    // Run per-user post-processing (fire-and-forget — never blocks response)
+    for (const [userId, queryIds] of successByUser) {
+      if (queryIds.length === 0) continue
+
+      Promise.allSettled(
+        queryIds.map(async qid => {
+          // Fetch the query's snapshots and run drift analysis
+          const snapshots = await databaseService.snapshotService.getSnapshots(qid, userId)
+          if (snapshots.length < 2) return null
+          const query = due.find(q => q.id === qid)
+          if (!query) return null
+          return analyzeDrift(qid, query.name, snapshots)
+        })
+      ).then(async driftSettled => {
+        const driftResults = driftSettled
+          .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled" && r.value !== null)
+          .map(r => r.value)
+
+        if (driftResults.length === 0) return
+
+        // ✅ Fire drift threshold alerts
+        const alertResult = await DriftAlertService.checkAndAlert(userId, driftResults)
+        if (alertResult.alertsFired > 0) {
+          console.log(`[Cron] Drift alerts fired for user ${userId}: ${alertResult.alertsFired}`)
+        }
+        if (alertResult.errors.length > 0) {
+          console.warn(`[Cron] Alert errors for user ${userId}:`, alertResult.errors)
+        }
+
+        // ✅ Detect algorithm updates
+        const queryMeta = queryMetaByUser.get(userId) ?? []
+        const updateEvents = AlgorithmUpdateDetector.analyze(driftResults, queryMeta)
+
+        if (updateEvents.length > 0) {
+          console.log(
+            `[Cron] Algorithm update events detected for user ${userId}: ` +
+            updateEvents.map(e => `${e.category}(${e.severity})`).join(", ")
+          )
+          await AlgorithmUpdateDetector.persistEvents(userId, updateEvents)
+        }
+      }).catch(err => {
+        console.error(`[Cron] Post-processing failed for user ${userId}:`, formatError(err))
+      })
+    }
+    // ── END post-processing ────────────────────────────────────────────────
 
     console.log(
       `[Cron] Done in ${Date.now() - startTime}ms — ` +
-      `${succeeded} succeeded, ${failed} failed, ${skipped} skipped`
+      `${succeeded.length} succeeded, ${failed.length} failed, ${skipped} skipped`
     )
 
     return NextResponse.json({
-      success:   true,
-      processed: due.length,
-      succeeded,
-      failed,
+      success:    true,
+      processed:  due.length,
+      succeeded:  succeeded.length,
+      failed:     failed.length,
       skipped,
       durationMs: Date.now() - startTime,
-      timestamp: new Date().toISOString(),
+      timestamp:  new Date().toISOString(),
     })
+
   } catch (err) {
     console.error("[Cron] Unexpected error:", formatError(err))
     return NextResponse.json(
@@ -289,6 +355,5 @@ async function handler(request: NextRequest) {
   }
 }
 
-// Vercel Cron sends GET; support POST too for manual/external triggers
 export const GET  = handler
 export const POST = handler

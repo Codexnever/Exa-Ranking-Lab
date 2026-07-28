@@ -1,7 +1,7 @@
 // app/services/analytics-service.ts
 import { databases, DATABASE_ID, COLLECTIONS, Query, ID } from "@/app/server/appwrite/appwrite-server"
 
-import { calculateStandardDeviation } from "@/lib/analytics-calculations"
+import { calculateStandardDeviation } from "@/app/services/appwrite/analytics-calculations"
 import type {
   EnhancedAnalyticsData,
   AnalyticsData,
@@ -14,7 +14,7 @@ import type {
   ComplexityMetrics,
   HourlyStats,
 } from "@/types/type"
-import { loadFromStorage, transformSnapshotDocument } from "../../../utils/db-utils"
+import { loadFromStorage, transformSnapshotDocument } from "../../utils/db-utils"
 import { analyticsCalculations, predictTrend } from "@/app/logic/analyticsLogic"
 import { getTimeRangeString } from "@/utils/timeRangeString"
 
@@ -305,7 +305,9 @@ export class AnalyticsService {
   protected calculateComplexityMetrics(snapshots: RankingSnapshot[]): ComplexityMetrics {
     const scores = snapshots.map(s => {
       const resultCount  = s.results?.length ?? 0
-      const responseTime = s.metadata?.responseTime ?? 0
+      const responseTime = typeof s.metadata?.responseTime === "number"
+        ? s.metadata.responseTime
+        : 0
       const domains      = new Set((s.results ?? []).map(r => r.domain).filter(Boolean)).size
       return (
         Math.min(resultCount  / 10, 5) +
