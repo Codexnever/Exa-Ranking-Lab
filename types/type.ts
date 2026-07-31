@@ -33,13 +33,13 @@ export interface QueryConfig {
 export type ExaCategory =
   | "company"
   | "news"
-  | "research_paper"
+  | "research paper"
   | "github"
   | "pdf"
   | "tweet"
-  | "personal_site"
-  | "linkedin_profile"
-  | "financial_report"
+  | "personal site"
+  | "linkedin profile"
+  | "financial report"
 
 export interface ExaSearchOptions {
   query: string

@@ -8,8 +8,8 @@ import { createHash } from "crypto"
 import type { QueryConfig, SearchResult } from "@/types/type"
 
 //  NEW: all three post-processing services
-import { DriftAlertService } from "@/app/services/DriftAlertService"
-import { AlgorithmUpdateDetector } from "@/app/services/AlgorithmUpdateDetector"
+import { driftAlertService } from "@/app/services/DriftAlertService"
+import { algorithmUpdateDetector } from "@/app/services/AlgorithmUpdateDetector"
 import { analyzeDrift } from "@/app/logic/driftAnalyzer"
 import {
   computeConfigHash,
@@ -306,7 +306,7 @@ async function handler(request: NextRequest) {
         if (driftResults.length === 0) return
 
         // ✅ Fire drift threshold alerts
-        const alertResult = await DriftAlertService.checkAndAlert(userId, driftResults)
+        const alertResult = await driftAlertService.checkAndAlert(userId, driftResults)
         if (alertResult.alertsFired > 0) {
           console.log(`[Cron] Drift alerts fired for user ${userId}: ${alertResult.alertsFired}`)
         }
@@ -316,14 +316,14 @@ async function handler(request: NextRequest) {
 
         // ✅ Detect algorithm updates
         const queryMeta = queryMetaByUser.get(userId) ?? []
-        const updateEvents = AlgorithmUpdateDetector.analyze(driftResults, queryMeta)
+        const updateEvents = algorithmUpdateDetector.analyze(driftResults, queryMeta)
 
         if (updateEvents.length > 0) {
           console.log(
             `[Cron] Algorithm update events detected for user ${userId}: ` +
             updateEvents.map(e => `${e.category}(${e.severity})`).join(", ")
           )
-          await AlgorithmUpdateDetector.persistEvents(userId, updateEvents)
+          await algorithmUpdateDetector.persistEvents(userId, updateEvents)
         }
       }).catch(err => {
         console.error(`[Cron] Post-processing failed for user ${userId}:`, formatError(err))

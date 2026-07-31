@@ -145,13 +145,13 @@ export default function QueryBuilder() {
       
       await deleteQuery(queryId);
       
-      // ✅ Refresh queries after deletion
+      //  Refresh queries after deletion
       await fetchQueries(user.$id);
       
-      // ✅ Refresh complete snapshots for analytics
+      //  Refresh complete snapshots for analytics
       await fetchAllSnapshots(user.$id);
       
-      // ✅ Recalculate analytics with updated dataset
+      //  Recalculate analytics with updated dataset
       const freshAllSnapshots = useSnapshotsStore.getState().allSnapshots;
       calculateAnalytics(freshAllSnapshots);
       

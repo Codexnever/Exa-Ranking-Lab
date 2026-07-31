@@ -52,7 +52,11 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit, Quer
   const QueryCategory = {
     options: ["company", "news", "research paper", "pdf", "github", "tweet", "personal site", "linkedin profile", "financial report"]
   };
-
+const QUERY_FREQUENCIES = [
+  "hourly",
+  "daily",
+  "weekly",
+] as const;
 
   React.useEffect(() => {
     if (editingQuery) {
@@ -234,7 +238,7 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit, Quer
             </FormItem>
           )}
         />
-
+console.log("Schedule enabled:", form.watch("schedule.enabled"))
         {form.watch("schedule.enabled") && (
           <FormField
             control={form.control}
@@ -249,11 +253,11 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit, Quer
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    {QueryFrequency?.options?.map((option: string) => (
-                      <SelectItem key={option} value={option}>
-                        {option.charAt(0).toUpperCase() + option.slice(1)}
-                      </SelectItem>
-                    ))}
+                   {QUERY_FREQUENCIES.map((option) => (
+  <SelectItem key={option} value={option}>
+    {option.charAt(0).toUpperCase() + option.slice(1)}
+  </SelectItem>
+))}
                   </SelectContent>
                 </Select>
                 <FormMessage />

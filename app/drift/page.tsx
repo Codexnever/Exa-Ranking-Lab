@@ -32,7 +32,7 @@ export default function DriftPage() {
     lastUpdated,
     fetchDriftResults,
     isCacheValid,
-    performanceMetrics, // ✅ New performance metrics
+    performanceMetrics, // New performance metrics
     getPerformanceMetrics
   } = useDriftStore()
   
@@ -141,7 +141,7 @@ export default function DriftPage() {
               {isCacheValid && isCacheValid() && <Badge variant="outline" className="text-green-600">Cache Valid</Badge>}
               {isCacheValid && !isCacheValid() && <Badge variant="outline" className="text-amber-600">Cache Expired</Badge>}
               
-              {/* ✅ Enhanced performance indicators */}
+              {/*  Enhanced performance indicators */}
               {summaryStats.averageProcessingTime > 0 && (
                 <div className="flex items-center gap-3">
                   <span className="flex items-center gap-1">
