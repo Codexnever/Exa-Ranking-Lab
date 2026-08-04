@@ -7,10 +7,9 @@ import { ExaClient } from "@/app/server/exa/exa-client"
 import { createHash } from "crypto"
 import type { QueryConfig, SearchResult } from "@/types/type"
 
-//  NEW: all three post-processing services
-import { driftAlertService } from "@/app/services/DriftAlertService"
-import { algorithmUpdateDetector } from "@/app/services/AlgorithmUpdateDetector"
-import { analyzeDrift } from "@/app/logic/driftAnalyzer"
+import { driftAlertService }       from "@/app/services/DriftAlertService"
+import { algorithmUpdateDetector }  from "@/app/services/AlgorithmUpdateDetector"
+import { analyzeDrift }             from "@/app/logic/driftAnalyzer"
 import {
   computeConfigHash,
   computeCoverageGap,
@@ -76,10 +75,19 @@ function overdueSortKey(query: QueryConfig): number {
 function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
   if (!secret) {
-    console.error("[Cron] CRON_SECRET not set — rejecting all requests")
+    console.error("[Cron] ❌ CRON_SECRET env var not set — rejecting all requests")
     return false
   }
-  return request.headers.get("authorization") === `Bearer ${secret}`
+  const authHeader = request.headers.get("authorization")
+  if (!authHeader) {
+    console.error("[Cron] ❌ No Authorization header in request")
+    return false
+  }
+  const matches = authHeader === `Bearer ${secret}`
+  if (!matches) {
+    console.error("[Cron] ❌ Authorization header does not match CRON_SECRET")
+  }
+  return matches
 }
 
 // ─── Single query execution ───────────────────────────────────────────────────
@@ -94,9 +102,13 @@ async function executeOneQuery(
   snapshotId?: string
   error?:      string
 }> {
+  console.log(`[Cron:Query] ▶ Starting query "${query.name}" (${query.id})`)
+
   try {
-    const filters    = query.filters ?? {}
-    const exaClient  = new ExaClient(apiKey)
+    const filters   = query.filters ?? {}
+    const exaClient = new ExaClient(apiKey)
+
+    console.log(`[Cron:Query] Calling Exa for "${query.name}" — numResults=${filters.numResults}, category=${query.category}`)
 
     const exaResults = await exaClient.search({
       query:          query.query,
@@ -109,6 +121,7 @@ async function executeOneQuery(
     })
 
     const { responseTime, searchTime } = exaResults
+    console.log(`[Cron:Query] ✅ Exa returned ${exaResults?.results?.length ?? 0} results for "${query.name}" in ${searchTime ?? responseTime}ms`)
 
     const mappedResults: SearchResult[] = (exaResults?.results ?? []).map((r: any, idx: number) => {
       const title    = r.title   ?? ""
@@ -135,17 +148,12 @@ async function executeOneQuery(
       } as SearchResult
     })
 
-    // ✅ NEW: config hash + coverage gap
     const configHash  = computeConfigHash(query)
     const coverageGap = computeCoverageGap(filters.numResults ?? 50, mappedResults.length)
 
-    if (coverageGap.status !== "full") {
-      console.warn(
-        `[Cron] Coverage gap for ${query.id}: ` +
-        `${coverageGap.numReturned}/${coverageGap.numRequested} (${coverageGap.status})`
-      )
-    }
+    console.log(`[Cron:Query] Coverage for "${query.name}": ${coverageGap.numReturned}/${coverageGap.numRequested} (${coverageGap.status}) | configHash=${configHash}`)
 
+    console.log(`[Cron:Query] Creating snapshot for "${query.name}"...`)
     const snapshot = await databaseService.snapshotService.createSnapshot({
       queryId:  query.id,
       userId:   query.userId,
@@ -156,7 +164,6 @@ async function executeOneQuery(
         executedAt:     new Date().toISOString(),
         executionType:  "scheduled",
         source:         "cron_scheduler",
-        // ✅ NEW
         configHash,
         numRequested:   coverageGap.numRequested,
         numReturned:    coverageGap.numReturned,
@@ -167,18 +174,24 @@ async function executeOneQuery(
       timestamp: new Date(),
     })
 
+    console.log(`[Cron:Query] ✅ Snapshot created: ${snapshot.id} for "${query.name}"`)
+
     // Weaviate sync — fire-and-forget
     getWeaviateService()
-      .then(w => w.initialize().then(() => w.syncSnapshot(snapshot)))
-      .catch(err => console.error(
-        `[Cron] Weaviate sync failed for ${snapshot.id}: ${formatError(err)}`
-      ))
+      .then(w => {
+        console.log(`[Cron:Weaviate] Syncing snapshot ${snapshot.id} for "${query.name}"`)
+        return w.initialize().then(() => w.syncSnapshot(snapshot))
+      })
+      .then(() => console.log(`[Cron:Weaviate] ✅ Sync complete for "${query.name}"`))
+      .catch(err => console.error(`[Cron:Weaviate] ❌ Sync failed for "${query.name}": ${formatError(err)}`))
 
     await databaseService.queryService.updateQuery(query.id, { lastRun: new Date() })
+    console.log(`[Cron:Query] ✅ Updated lastRun for "${query.name}"`)
 
     return { queryId: query.id, userId: query.userId, status: "success", snapshotId: snapshot.id }
+
   } catch (err) {
-    console.error(`[Cron] Query ${query.id} failed:`, formatError(err))
+    console.error(`[Cron:Query] ❌ Failed "${query.name}" (${query.id}): ${formatError(err)}`)
     return { queryId: query.id, userId: query.userId, status: "error", error: formatError(err) }
   }
 }
@@ -186,24 +199,65 @@ async function executeOneQuery(
 // ─── GET/POST handler ─────────────────────────────────────────────────────────
 
 async function handler(request: NextRequest) {
+  const runId     = Math.random().toString(36).slice(2, 8).toUpperCase()
+  const startTime = Date.now()
+
+  // ── STEP 1: Log that the route was actually hit ───────────────────────────
+  console.log(`\n${"=".repeat(60)}`)
+  console.log(`[Cron] 🚀 Route hit — runId=${runId}`)
+  console.log(`[Cron] Method: ${request.method}`)
+  console.log(`[Cron] URL: ${request.url}`)
+  console.log(`[Cron] Time: ${new Date().toISOString()}`)
+  console.log(`[Cron] Has Authorization header: ${!!request.headers.get("authorization")}`)
+  console.log(`[Cron] CRON_SECRET set: ${!!process.env.CRON_SECRET}`)
+  console.log(`[Cron] NODE_ENV: ${process.env.NODE_ENV}`)
+  console.log(`${"=".repeat(60)}\n`)
+
+  // ── STEP 2: Auth check ────────────────────────────────────────────────────
   if (!isAuthorized(request)) {
+    console.error(`[Cron] ❌ Unauthorized — returning 401`)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-
-  const startTime = Date.now()
-  console.log("[Cron] Starting scheduled query processing...")
+  console.log(`[Cron] ✅ Authorization passed`)
 
   try {
+    // ── STEP 3: Fetch all scheduled queries ──────────────────────────────────
+    console.log(`[Cron] Fetching all scheduled queries from Appwrite...`)
     const scheduled = await databaseService.queryService.getAllScheduledQueries()
-    const now       = Date.now()
-    let   due       = scheduled.filter(q => isQueryDue(q, now))
+    console.log(`[Cron] Total scheduled queries found: ${scheduled.length}`)
 
-    console.log(`[Cron] ${scheduled.length} scheduled, ${due.length} due`)
+    if (scheduled.length > 0) {
+      scheduled.forEach(q => {
+        console.log(`[Cron]   • "${q.name}" (${q.id}) | enabled=${q.schedule?.enabled} | freq=${q.schedule?.frequency} | lastRun=${q.lastRun ?? "never"}`)
+      })
+    } else {
+      console.log(`[Cron] ⚠️  No queries found with schedule.enabled=true in Appwrite`)
+    }
+
+    // ── STEP 4: Filter which are due ─────────────────────────────────────────
+    const now = Date.now()
+    let due   = scheduled.filter(q => isQueryDue(q, now))
+
+    console.log(`\n[Cron] Due queries: ${due.length} of ${scheduled.length} scheduled`)
+    if (due.length === 0 && scheduled.length > 0) {
+      scheduled.forEach(q => {
+        const lastRunMs  = q.lastRun ? new Date(q.lastRun).getTime() : 0
+        const diffMins   = Math.floor((now - lastRunMs) / 60000)
+        const freqNeeded = q.schedule?.frequency === "hourly" ? 60
+          : q.schedule?.frequency === "daily"  ? 1440
+          : q.schedule?.frequency === "weekly" ? 10080
+          : 0
+        console.log(`[Cron]   • "${q.name}": ran ${diffMins}min ago, needs ${freqNeeded}min interval → ${diffMins >= freqNeeded ? "DUE" : "not due yet"}`)
+      })
+    }
 
     if (due.length === 0) {
+      console.log(`[Cron] No queries due this run. Returning early.`)
       return NextResponse.json({
-        success: true, message: "No queries due",
+        success: true,
+        message: "No queries due",
         processed: 0, succeeded: 0, failed: 0, skipped: 0,
+        runId,
         timestamp: new Date().toISOString(),
       })
     }
@@ -212,20 +266,28 @@ async function handler(request: NextRequest) {
       .sort((a, b) => overdueSortKey(a) - overdueSortKey(b))
       .slice(0, MAX_QUERIES_PER_RUN)
 
-    // ── API key cache ──────────────────────────────────────────────────────
+    console.log(`[Cron] Processing ${due.length} due queries (capped at ${MAX_QUERIES_PER_RUN})`)
+
+    // ── STEP 5: API key cache ─────────────────────────────────────────────────
     const apiKeyCache = new Map<string, string | null>()
 
     async function getApiKey(userId: string): Promise<string | null> {
       if (apiKeyCache.has(userId)) return apiKeyCache.get(userId)!
+      console.log(`[Cron] Fetching API key for userId=${userId}`)
       const settingsRes = await databases.listDocuments(
         DATABASE_ID, COLLECTIONS.SETTINGS, [Query.equal("userId", userId)]
       )
       const key = (settingsRes?.documents?.[0]?.apiKey as string | undefined) ?? null
+      if (key) {
+        console.log(`[Cron] ✅ API key found for userId=${userId}`)
+      } else {
+        console.warn(`[Cron] ⚠️  No API key found for userId=${userId} — queries will be skipped`)
+      }
       apiKeyCache.set(userId, key)
       return key
     }
 
-    // ── Execute in batches ─────────────────────────────────────────────────
+    // ── STEP 6: Execute batches ───────────────────────────────────────────────
     const results: Array<{
       queryId:    string
       userId:     string
@@ -236,14 +298,18 @@ async function handler(request: NextRequest) {
     let skipped = 0
 
     for (let i = 0; i < due.length; i += BATCH_SIZE) {
-      const batch = due.slice(i, i + BATCH_SIZE)
+      const batch     = due.slice(i, i + BATCH_SIZE)
+      const batchNum  = Math.floor(i / BATCH_SIZE) + 1
+      const totalBatches = Math.ceil(due.length / BATCH_SIZE)
+
+      console.log(`\n[Cron] --- Batch ${batchNum}/${totalBatches} (${batch.length} queries) ---`)
 
       const batchResults = await Promise.allSettled(
         batch.map(async query => {
           const apiKey = await getApiKey(query.userId)
           if (!apiKey) {
             skipped++
-            console.warn(`[Cron] Skipping ${query.id} — no API key for user ${query.userId}`)
+            console.warn(`[Cron] ⚠️  Skipping "${query.name}" — no API key`)
             return { queryId: query.id, userId: query.userId, status: "skipped" as const }
           }
           return executeOneQuery(query, apiKey)
@@ -253,12 +319,19 @@ async function handler(request: NextRequest) {
       for (const r of batchResults) {
         if (r.status === "fulfilled") {
           results.push(r.value)
+          if (r.value.status === "success") {
+            console.log(`[Cron] ✅ Batch result: "${r.value.queryId}" succeeded → snapshot ${r.value.snapshotId}`)
+          } else {
+            console.log(`[Cron] ⚠️  Batch result: "${r.value.queryId}" ${r.value.status}${r.value.error ? ` — ${r.value.error}` : ""}`)
+          }
         } else {
+          console.error(`[Cron] ❌ Batch promise rejected: ${formatError(r.reason)}`)
           results.push({ queryId: "unknown", userId: "unknown", status: "error", error: formatError(r.reason) })
         }
       }
 
       if (i + BATCH_SIZE < due.length) {
+        console.log(`[Cron] Waiting ${BATCH_DELAY_MS}ms before next batch...`)
         await new Promise(res => setTimeout(res, BATCH_DELAY_MS))
       }
     }
@@ -266,15 +339,17 @@ async function handler(request: NextRequest) {
     const succeeded = results.filter(r => r.status === "success")
     const failed    = results.filter(r => r.status === "error")
 
-    // ✅ NEW: POST-PROCESSING — drift alerts + algorithm update detection
-    // Group successful results by userId so we process per-user
+    console.log(`\n[Cron] Execution complete — ${succeeded.length} succeeded, ${failed.length} failed, ${skipped} skipped`)
+
+    // ── STEP 7: Post-processing (alerts + algorithm detection) ────────────────
+    console.log(`[Cron] Starting post-processing (fire-and-forget)...`)
+
     const successByUser = new Map<string, string[]>()
     for (const r of succeeded) {
       if (!successByUser.has(r.userId)) successByUser.set(r.userId, [])
       successByUser.get(r.userId)!.push(r.queryId)
     }
 
-    // Build queryMeta lookup for AlgorithmUpdateDetector (needs category)
     const queryMetaByUser = new Map<string, Array<{ id: string; name: string; category: string }>>()
     for (const q of due) {
       if (!queryMetaByUser.has(q.userId)) queryMetaByUser.set(q.userId, [])
@@ -285,17 +360,23 @@ async function handler(request: NextRequest) {
       })
     }
 
-    // Run per-user post-processing (fire-and-forget — never blocks response)
     for (const [userId, queryIds] of successByUser) {
       if (queryIds.length === 0) continue
 
+      console.log(`[Cron:PostProcess] Running drift analysis for userId=${userId} (${queryIds.length} queries)`)
+
       Promise.allSettled(
         queryIds.map(async qid => {
-          // Fetch the query's snapshots and run drift analysis
+          console.log(`[Cron:PostProcess] Fetching snapshots for queryId=${qid}`)
           const snapshots = await databaseService.snapshotService.getSnapshots(qid, userId)
-          if (snapshots.length < 2) return null
+          console.log(`[Cron:PostProcess] Found ${snapshots.length} snapshots for queryId=${qid}`)
+          if (snapshots.length < 2) {
+            console.log(`[Cron:PostProcess] Skipping drift analysis for ${qid} — need 2+ snapshots, have ${snapshots.length}`)
+            return null
+          }
           const query = due.find(q => q.id === qid)
           if (!query) return null
+          console.log(`[Cron:PostProcess] Running analyzeDrift for "${query.name}"`)
           return analyzeDrift(qid, query.name, snapshots)
         })
       ).then(async driftSettled => {
@@ -303,53 +384,66 @@ async function handler(request: NextRequest) {
           .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled" && r.value !== null)
           .map(r => r.value)
 
-        if (driftResults.length === 0) return
+        console.log(`[Cron:PostProcess] Drift analysis complete for userId=${userId} — ${driftResults.length} results`)
 
-        // ✅ Fire drift threshold alerts
+        if (driftResults.length === 0) {
+          console.log(`[Cron:PostProcess] No drift results for userId=${userId} — skipping alerts`)
+          return
+        }
+
+        // Drift alerts
+        console.log(`[Cron:PostProcess] Checking drift alert thresholds for userId=${userId}`)
         const alertResult = await driftAlertService.checkAndAlert(userId, driftResults)
-        if (alertResult.alertsFired > 0) {
-          console.log(`[Cron] Drift alerts fired for user ${userId}: ${alertResult.alertsFired}`)
-        }
+        console.log(`[Cron:PostProcess] Alerts fired: ${alertResult.alertsFired} | Errors: ${alertResult.errors.length}`)
         if (alertResult.errors.length > 0) {
-          console.warn(`[Cron] Alert errors for user ${userId}:`, alertResult.errors)
+          console.warn(`[Cron:PostProcess] Alert errors:`, alertResult.errors)
         }
 
-        // ✅ Detect algorithm updates
-        const queryMeta = queryMetaByUser.get(userId) ?? []
+        // Algorithm update detection
+        console.log(`[Cron:PostProcess] Running algorithm update detection for userId=${userId}`)
+        const queryMeta    = queryMetaByUser.get(userId) ?? []
         const updateEvents = algorithmUpdateDetector.analyze(driftResults, queryMeta)
+        console.log(`[Cron:PostProcess] Algorithm update events detected: ${updateEvents.length}`)
 
         if (updateEvents.length > 0) {
-          console.log(
-            `[Cron] Algorithm update events detected for user ${userId}: ` +
-            updateEvents.map(e => `${e.category}(${e.severity})`).join(", ")
+          updateEvents.forEach(e =>
+            console.log(`[Cron:PostProcess]   • ${e.category} — ${e.severity} (${Math.round(e.driftRate * 100)}% drift rate, avg score ${e.avgDriftScore.toFixed(1)})`)
           )
           await algorithmUpdateDetector.persistEvents(userId, updateEvents)
+          console.log(`[Cron:PostProcess] ✅ Persisted ${updateEvents.length} algorithm update event(s)`)
         }
-      }).catch(err => {
-        console.error(`[Cron] Post-processing failed for user ${userId}:`, formatError(err))
+
+      }).catch((err: unknown) => {
+        console.error(`[Cron:PostProcess] ❌ Failed for userId=${userId}: ${formatError(err)}`)
       })
     }
-    // ── END post-processing ────────────────────────────────────────────────
 
-    console.log(
-      `[Cron] Done in ${Date.now() - startTime}ms — ` +
-      `${succeeded.length} succeeded, ${failed.length} failed, ${skipped} skipped`
-    )
+    // ── STEP 8: Final summary ─────────────────────────────────────────────────
+    const durationMs = Date.now() - startTime
+    console.log(`\n${"=".repeat(60)}`)
+    console.log(`[Cron] 🏁 Run ${runId} complete in ${durationMs}ms`)
+    console.log(`[Cron] Processed: ${due.length} | Succeeded: ${succeeded.length} | Failed: ${failed.length} | Skipped: ${skipped}`)
+    if (failed.length > 0) {
+      failed.forEach(f => console.error(`[Cron]   ❌ ${f.queryId}: ${f.error}`))
+    }
+    console.log(`${"=".repeat(60)}\n`)
 
     return NextResponse.json({
       success:    true,
+      runId,
       processed:  due.length,
       succeeded:  succeeded.length,
       failed:     failed.length,
       skipped,
-      durationMs: Date.now() - startTime,
+      durationMs,
       timestamp:  new Date().toISOString(),
     })
 
   } catch (err) {
-    console.error("[Cron] Unexpected error:", formatError(err))
+    const durationMs = Date.now() - startTime
+    console.error(`[Cron] ❌ Unexpected top-level error after ${durationMs}ms: ${formatError(err)}`)
     return NextResponse.json(
-      { success: false, error: "Scheduled processing failed" },
+      { success: false, error: "Scheduled processing failed", runId, durationMs },
       { status: 500 }
     )
   }
