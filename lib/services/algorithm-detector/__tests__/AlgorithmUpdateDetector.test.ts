@@ -1,7 +1,7 @@
 import { AlgorithmUpdateDetector } from "../AlgorithmUpdateDetector"
 import { ConfidenceScorer } from "../ConfidenceScorer"
 import { DescriptionBuilder } from "../DescriptionBuilder"
-import { EventPersistence } from "../EventPersistence"
+import { EventPersistence, toAppwritePayload } from "../EventPersistence"
 import { NoHistoricalBaselineProvider } from "../HistoricalBaselineProvider"
 import { SilentLogger } from "../logger"
 import type { AlgorithmEventRepository, AlgorithmUpdateEvent, DetectionConfigOverride } from "../types"
@@ -138,5 +138,24 @@ describe("event presentation and identity", () => {
     expect(DescriptionBuilder.summary(event)).toContain("news")
     expect(DescriptionBuilder.detail(event)).toContain("78%")
     expect(DescriptionBuilder.label(event)).toBe("news:major:conf78")
+  })
+
+  test("serializes only attributes supported by the existing Appwrite schema", () => {
+    const payload = toAppwritePayload("user1", event)
+
+    expect(Object.keys(payload).sort()).toEqual([
+      "affectedCount",
+      "affectedQueries",
+      "avgDriftScore",
+      "category",
+      "description",
+      "detectedAt",
+      "driftRate",
+      "eventId",
+      "severity",
+      "userId",
+    ])
+    expect(payload.description).toContain("78%")
+    expect(payload.affectedQueries).toContain("q1")
   })
 })

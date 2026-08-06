@@ -73,14 +73,11 @@ export interface PersistedAlgorithmEvent {
   eventId: string
   category: string
   severity: AlgorithmUpdateSeverity
-  confidence: number
   driftRate: number
   avgDriftScore: number
   affectedCount: number
   affectedQueries: string
-  metrics: string
-  windowStart: string
-  windowEnd: string
+  description: string
   detectedAt: string
 }
 

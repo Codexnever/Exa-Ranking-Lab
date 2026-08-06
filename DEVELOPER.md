@@ -553,20 +553,19 @@ category         string    required
 driftRate        float     required
 avgDriftScore    float     required
 severity         string    "minor" | "moderate" | "major"
-confidence       float     required
+description      string    required (generated from structured event at write time)
 affectedCount    integer   required
 affectedQueries  string    JSON array of query drift points
-metrics          string    JSON detection metrics + confidence signals
-windowStart      datetime  required
-windowEnd        datetime  required
 detectedAt       datetime  required
 ```
 Indexes: `userId`, `detectedAt DESC`, `category`
 
-Descriptions are generated from the structured metrics when events are read;
-they are not persisted. Event documents use deterministic IDs scoped by user,
-category, and UTC correlation-window bucket so repeated cron runs update the
-same event rather than creating duplicates.
+Persistence intentionally targets this existing schema: confidence, metrics,
+windowStart, and windowEnd remain in the in-memory/API event but are not sent
+to Appwrite, which rejects unknown attributes. Descriptions are generated from
+the structured event when it is written. Event documents use deterministic IDs
+scoped by user, category, and UTC correlation-window bucket so repeated cron
+runs update the same event rather than creating duplicates.
 
 ### embedding_cache (NEW — Appwrite, not Weaviate)
 ```

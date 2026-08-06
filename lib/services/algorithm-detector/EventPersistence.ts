@@ -1,4 +1,6 @@
 import { DETECTOR_DEFAULTS, getAlgorithmEventsCollection } from "./constants"
+import { ConfidenceScorer } from "./ConfidenceScorer"
+import { DescriptionBuilder } from "./DescriptionBuilder"
 import { SilentLogger } from "./logger"
 import type {
   AlgorithmEventRepository,
@@ -24,6 +26,31 @@ export function buildEventId(category: string, windowStartMs: number): string {
   return `algo_${dayBucket}_${hashString(`${category.toLowerCase()}::${dayBucket}`)}`
 }
 
+/**
+ * Serialize to the schema that is already provisioned in Appwrite.
+ *
+ * Keep this boundary intentionally conservative: Appwrite rejects unknown
+ * attributes, so confidence/metrics/window fields remain in the domain event
+ * and API response until a separately deployed schema migration adds them.
+ */
+export function toAppwritePayload(
+  userId: string,
+  event: AlgorithmUpdateEvent
+): PersistedAlgorithmEvent {
+  return {
+    userId,
+    eventId: event.id,
+    category: event.category,
+    severity: event.severity,
+    driftRate: event.metrics.driftRate,
+    avgDriftScore: event.metrics.avgDriftScore,
+    affectedCount: event.affectedQueries.length,
+    affectedQueries: JSON.stringify(event.affectedQueries),
+    description: DescriptionBuilder.detail(event),
+    detectedAt: event.detectedAt.toISOString(),
+  }
+}
+
 function buildDocumentId(userId: string, eventId: string): string {
   return `algo_${hashString(userId)}_${hashString(eventId)}`
 }
@@ -40,21 +67,7 @@ export class EventPersistence implements AlgorithmEventRepository {
     const { databases, DATABASE_ID } = await import("@/app/server/appwrite/appwrite-server")
     const collection = getAlgorithmEventsCollection()
     const documentId = buildDocumentId(userId, event.id)
-    const payload: PersistedAlgorithmEvent = {
-      userId,
-      eventId: event.id,
-      category: event.category,
-      severity: event.severity,
-      confidence: event.confidence.score,
-      driftRate: event.metrics.driftRate,
-      avgDriftScore: event.metrics.avgDriftScore,
-      affectedCount: event.affectedQueries.length,
-      affectedQueries: JSON.stringify(event.affectedQueries),
-      metrics: JSON.stringify({ ...event.metrics, confidenceSignals: event.confidence.signals }),
-      windowStart: new Date(event.metrics.windowStartMs).toISOString(),
-      windowEnd: new Date(event.metrics.windowEndMs).toISOString(),
-      detectedAt: event.detectedAt.toISOString(),
-    }
+    const payload = toAppwritePayload(userId, event)
 
     try {
       await databases.createDocument(DATABASE_ID, collection, documentId, payload)
@@ -110,6 +123,10 @@ export class EventPersistence implements AlgorithmEventRepository {
             ? Math.max(0, (parsedMetrics.avgDriftScore - parsedMetrics.historicalAvgDrift) / parsedMetrics.historicalStdDev)
             : 0,
         }
+        const storedConfidence = Number(document.confidence)
+        const confidence = Number.isFinite(storedConfidence)
+          ? { score: storedConfidence, severity, signals }
+          : ConfidenceScorer.score(signals)
         return [{
           id: String(document.eventId),
           detectedAt: new Date(document.detectedAt),
@@ -117,7 +134,7 @@ export class EventPersistence implements AlgorithmEventRepository {
           severity,
           affectedQueries,
           metrics: parsedMetrics,
-          confidence: { score: Number(document.confidence) || 0, severity, signals },
+          confidence,
         }]
       } catch (error) {
         this.logger.warn("system", "Skipping malformed algorithm event", {
