@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { format } from "date-fns"
 import type { DriftTimelinePoint } from "@/types/type"
 import { Card, CardContent } from "@/components/ui/card"
@@ -87,8 +87,8 @@ export function DriftTimeline({ driftTimeline }: DriftTimelineProps) {
                 <XAxis dataKey="date" tickFormatter={(date) => format(date, "MMM d")} />
                 <YAxis domain={[0, 100]} />
                 <Tooltip
-                  formatter={(value: number) => [`${value.toFixed(1)}`, "Drift Score"]}
-                  labelFormatter={(date: Date) => format(date, "MMM d, yyyy")}
+                  formatter={(value: unknown) => [`${Number(value).toFixed(1)}`, "Drift Score"]}
+                  labelFormatter={(date: ReactNode) => format(new Date(String(date)), "MMM d, yyyy")}
                 />
                 <Line type="monotone" dataKey="drift" stroke="#2563eb" strokeWidth={2} activeDot={{ r: 8 }} />
                 <ReferenceLine

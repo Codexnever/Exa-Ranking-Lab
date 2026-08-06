@@ -60,11 +60,14 @@ export class ExaClient {
     const timeoutId  = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
     try {
+      // Query configuration stores stable underscore-delimited keys while Exa's
+      // wire API expects human-readable category values with spaces.
+      const category = options.category?.replaceAll("_", " ")
       const requestBody = {
         query:      options.query,
         numResults: options.numResults ?? 50,
 
-        ...(options.category                   && { category:             options.category }),
+        ...(category                           && { category }),
         ...(options.startDate                  && { start_published_date: options.startDate }),
         ...(options.endDate                    && { end_published_date:   options.endDate }),
         ...(options.includeDomains?.length     && { include_domains:      options.includeDomains }),

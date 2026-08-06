@@ -3,6 +3,7 @@
 import type { DriftTimelinePoint } from "@/types/type";
 import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts"
 import { format } from "date-fns"
+import type { ReactNode } from "react"
 
 interface DriftSparklineProps {
   driftTimeline: DriftTimelinePoint[]
@@ -44,8 +45,8 @@ export function DriftSparkline({ driftTimeline, height = 40, showTooltip = false
         />
         {showTooltip && (
           <Tooltip
-            formatter={(value: number) => [`${value.toFixed(1)}`, "Drift Score"]}
-            labelFormatter={(date: Date) => format(date, "MMM d, yyyy")}
+            formatter={(value: unknown) => [`${Number(value).toFixed(1)}`, "Drift Score"]}
+            labelFormatter={(date: ReactNode) => format(new Date(String(date)), "MMM d, yyyy")}
           />
         )}
       </LineChart>
