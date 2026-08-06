@@ -671,9 +671,32 @@ export interface AlgorithmUpdateEvent {
     queryId:    string
     queryName:  string
     driftScore: number
+    timestamp?: Date | string
   }>
   driftRate:     number
   avgDriftScore: number
   severity:      "minor" | "moderate" | "major"
   description:   string
+  summary?:      string
+  detail?:       string
+  confidence?: {
+    score: number
+    severity: "minor" | "moderate" | "major"
+    signals: {
+      driftRate: number
+      avgDriftScore: number
+      affectedQueryCount: number
+      historicalDeviation: number
+    }
+  }
+  metrics?: {
+    totalQueriesInCategory: number
+    affectedQueryCount: number
+    driftRate: number
+    avgDriftScore: number
+    historicalAvgDrift: number
+    historicalStdDev: number
+    windowStartMs: number
+    windowEndMs: number
+  }
 }

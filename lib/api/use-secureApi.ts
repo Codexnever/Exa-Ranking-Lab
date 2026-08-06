@@ -28,35 +28,33 @@ export function useSecureApi(options: UseSecureApiOptions = {}) {
   // ✅ clearError wrapped in useCallback — stable reference
   const clearError = useCallback(() => setError(null), [])
 
-  const call = useCallback(async (
+  const call = useCallback(async <T = any,>(
     method:   "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     endpoint: string,
     data?:    unknown
-    //  Returns Response (what apiClient actually returns) not a misleading generic.
-    //    Callers that need parsed JSON call .json() themselves — this preserves
-    //    access to .ok, .status, and .headers for error handling.
-  ): Promise<Response> => {
+    // SecureApiClient parses JSON/text and returns the caller's requested type.
+  ): Promise<T> => {
     setLoading(true)
     setError(null)
 
     try {
-      let result: Response
+      let result: T
 
       switch (method) {
         case "GET":
-          result = await apiClient.get(endpoint)
+          result = await apiClient.get<T>(endpoint)
           break
         case "POST":
-          result = await apiClient.post(endpoint, data)
+          result = await apiClient.post<T>(endpoint, data)
           break
         case "PUT":
-          result = await apiClient.put(endpoint, data)
+          result = await apiClient.put<T>(endpoint, data)
           break
         case "PATCH":
-          result = await apiClient.patch(endpoint, data)
+          result = await apiClient.patch<T>(endpoint, data)
           break
         case "DELETE":
-          result = await apiClient.delete(endpoint)
+          result = await apiClient.delete<T>(endpoint)
           break
         default:
           throw new Error(`Unsupported HTTP method: ${method}`)

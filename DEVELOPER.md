@@ -129,11 +129,12 @@ app/
     └── appwrite.ts                  # browser SDK (client components)
 
 lib/
-├── services/                        # Business logic — no DB, no HTTP framework
-│   ├── EmbeddingService.ts          # Gemini → OpenAI → position-only fallback
-│   ├── DriftAlertService.ts         # Email + webhook on drift threshold
-│   ├── DriftDecomposer.ts           # Splits drift into content/competitor/rerank
-│   └── AlgorithmUpdateDetector.ts   # Cross-query correlation → algo update event
+├── services/
+│   └── algorithm-detector/          # Modular cross-query update detection
+│       ├── AlgorithmUpdateDetector.ts
+│       ├── ConfidenceScorer.ts
+│       ├── EventPersistence.ts
+│       └── DescriptionBuilder.ts
 ├── middleware/
 │   ├── security/security-middleware.ts   # withEnhancedSecurity
 │   └── authentication/auth-context.tsx   # useAuth hook
@@ -222,7 +223,7 @@ GitHub Actions (*/30 * * * *)
   → POST-PROCESSING (fire-and-forget per user):
       → analyzeDrift() for each successful query
       → DriftAlertService.checkAndAlert() — email if threshold crossed
-      → AlgorithmUpdateDetector.analyze() — detect coordinated drift
+      → AlgorithmUpdateDetector.detect() — detect coordinated drift + confidence
       → persistEvents() to algorithm_events collection
 ```
 
@@ -552,12 +553,20 @@ category         string    required
 driftRate        float     required
 avgDriftScore    float     required
 severity         string    "minor" | "moderate" | "major"
-description      string    required
+confidence       float     required
 affectedCount    integer   required
-affectedQueries  string    JSON array
+affectedQueries  string    JSON array of query drift points
+metrics          string    JSON detection metrics + confidence signals
+windowStart      datetime  required
+windowEnd        datetime  required
 detectedAt       datetime  required
 ```
 Indexes: `userId`, `detectedAt DESC`, `category`
+
+Descriptions are generated from the structured metrics when events are read;
+they are not persisted. Event documents use deterministic IDs scoped by user,
+category, and UTC correlation-window bucket so repeated cron runs update the
+same event rather than creating duplicates.
 
 ### embedding_cache (NEW — Appwrite, not Weaviate)
 ```

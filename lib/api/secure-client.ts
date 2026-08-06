@@ -18,7 +18,7 @@ class SecureApiClient {
 
   // ── Request builder ─────────────────────────────────────────────────────────
 
-  private async makeRequest(endpoint: string, options: RequestInit = {}): Promise<unknown> {
+  private async makeRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = endpoint.startsWith("http")
       ? endpoint
       : `${this.baseURL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`
@@ -82,9 +82,9 @@ class SecureApiClient {
       // ── Parse response ────────────────────────────────────────────────────
       const contentType = response.headers.get("Content-Type") ?? ""
       if (contentType.includes("application/json")) {
-        return response.json()
+        return response.json() as Promise<T>
       }
-      return response.text()
+      return response.text() as Promise<T>
     } catch (err) {
       clearTimeout(timeoutId)
 
@@ -104,33 +104,33 @@ class SecureApiClient {
 
   // ── Public methods ──────────────────────────────────────────────────────────
 
-  async get(endpoint: string): Promise<unknown> {
-    return this.makeRequest(endpoint, { method: "GET" })
+  async get<T>(endpoint: string): Promise<T> {
+    return this.makeRequest<T>(endpoint, { method: "GET" })
   }
 
-  async post(endpoint: string, data?: unknown): Promise<unknown> {
-    return this.makeRequest(endpoint, {
+  async post<T>(endpoint: string, data?: unknown): Promise<T> {
+    return this.makeRequest<T>(endpoint, {
       method: "POST",
       body:   data !== undefined ? JSON.stringify(data) : undefined,
     })
   }
 
-  async put(endpoint: string, data?: unknown): Promise<unknown> {
-    return this.makeRequest(endpoint, {
+  async put<T>(endpoint: string, data?: unknown): Promise<T> {
+    return this.makeRequest<T>(endpoint, {
       method: "PUT",
       body:   data !== undefined ? JSON.stringify(data) : undefined,
     })
   }
 
-  async patch(endpoint: string, data?: unknown): Promise<unknown> {
-    return this.makeRequest(endpoint, {
+  async patch<T>(endpoint: string, data?: unknown): Promise<T> {
+    return this.makeRequest<T>(endpoint, {
       method: "PATCH",
       body:   data !== undefined ? JSON.stringify(data) : undefined,
     })
   }
 
-  async delete(endpoint: string): Promise<unknown> {
-    return this.makeRequest(endpoint, { method: "DELETE" })
+  async delete<T>(endpoint: string): Promise<T> {
+    return this.makeRequest<T>(endpoint, { method: "DELETE" })
   }
 }
 
