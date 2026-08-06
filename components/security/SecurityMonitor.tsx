@@ -18,21 +18,17 @@ export function SecurityMonitor() {
   useEffect(() => {
     const checkSecurityStatus = async () => {
       try {
-        // Get client status
-        const clientStatus = apiClient.getStatus()
-        
-        // Check CSRF token status
-        const csrfValid = clientStatus.hasCSRFToken && 
-                         clientStatus.tokenExpires > Date.now()
+        await apiClient.get("/verify-session")
 
         setSecurityStatus({
-          csrfToken: csrfValid,
+          csrfToken: false,
           rateLimit: { remaining: 10, used: 0 }, // Would come from API
-          sessionHealth: clientStatus.sessionId ? 'active' : 'inactive',
+          sessionHealth: 'active',
           lastCheck: new Date()
         })
       } catch (error) {
         console.error('Security status check failed:', error)
+        setSecurityStatus(status => ({ ...status, csrfToken: false, sessionHealth: 'inactive', lastCheck: new Date() }))
       }
     }
 
