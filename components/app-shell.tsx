@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"
 import { useAuth } from "@/lib/middleware/authentication/auth-context"
 import Sidebar from "@/components/sidebar"
 import Navbar from "@/components/navbar"
-import { ErrorBoundary } from "react-error-boundary"
+import { ErrorBoundary, type FallbackProps } from "react-error-boundary"
 import { RealTimeProvider } from "@/monitoring/healthcheck/RealTimeProvider"
 import { ConnectionHealthProvider } from "@/monitoring/healthcheck/ConnectionHealthProvider"
 
@@ -28,13 +28,8 @@ if (typeof Navbar !== "function")
 if (typeof ErrorBoundary !== "function") 
   console.error("ErrorBoundary is:", ErrorBoundary)
 // ─── Error fallback for real-time provider failures ────────────────
-function RealTimeErrorFallback({
-  error,
-  resetErrorBoundary,
-}: {
-  error: Error
-  resetErrorBoundary: () => void
-}) {
+function RealTimeErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
+  const message = error instanceof Error ? error.message : "An unknown real-time error occurred"
   return (
     <div className="fixed top-4 right-4 max-w-md p-4 border-l-4 border-amber-400 bg-amber-50 rounded shadow-lg z-50">
       <div className="flex items-start">
@@ -49,7 +44,7 @@ function RealTimeErrorFallback({
         </div>
         <div className="ml-3">
           <h3 className="text-sm font-medium text-amber-800">Real-time Connection Issue</h3>
-          <p className="mt-1 text-xs text-amber-700">{error.message}</p>
+          <p className="mt-1 text-xs text-amber-700">{message}</p>
           <button
             onClick={resetErrorBoundary}
             className="mt-2 text-xs text-amber-800 underline hover:text-amber-900"

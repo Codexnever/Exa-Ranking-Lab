@@ -8,7 +8,7 @@ import { createHash } from "crypto"
 import type { QueryConfig, SearchResult } from "@/types/type"
 
 import { driftAlertService }       from "@/app/services/DriftAlertService"
-import { algorithmUpdateDetector }  from "@/app/services/AlgorithmUpdateDetector"
+import { algorithmUpdateDetector } from "@/lib/services/algorithm-detector"
 import { analyzeDrift }             from "@/app/logic/driftAnalyzer"
 import {
   computeConfigHash,
@@ -73,7 +73,7 @@ function overdueSortKey(query: QueryConfig): number {
 // ─── Auth check ───────────────────────────────────────────────────────────────
 
 function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET || "exa-cron-secret-2024-xK9mP3nQ7rL2"
+  const secret = process.env.CRON_SECRET
   if (!secret) {
     console.error("[Cron] ❌ CRON_SECRET env var not set — rejecting all requests")
     return false
@@ -402,12 +402,12 @@ async function handler(request: NextRequest) {
         // Algorithm update detection
         console.log(`[Cron:PostProcess] Running algorithm update detection for userId=${userId}`)
         const queryMeta    = queryMetaByUser.get(userId) ?? []
-        const updateEvents = algorithmUpdateDetector.analyze(driftResults, queryMeta)
+        const updateEvents = await algorithmUpdateDetector.detect(driftResults, queryMeta, userId)
         console.log(`[Cron:PostProcess] Algorithm update events detected: ${updateEvents.length}`)
 
         if (updateEvents.length > 0) {
           updateEvents.forEach(e =>
-            console.log(`[Cron:PostProcess]   • ${e.category} — ${e.severity} (${Math.round(e.driftRate * 100)}% drift rate, avg score ${e.avgDriftScore.toFixed(1)})`)
+            console.log(`[Cron:PostProcess]   • ${e.category} — ${e.severity} (${Math.round(e.metrics.driftRate * 100)}% drift rate, avg score ${e.metrics.avgDriftScore.toFixed(1)}, ${e.confidence.score}% confidence)`)
           )
           await algorithmUpdateDetector.persistEvents(userId, updateEvents)
           console.log(`[Cron:PostProcess] ✅ Persisted ${updateEvents.length} algorithm update event(s)`)

@@ -82,7 +82,7 @@ export default function PerformanceOverview({
   const successRate = totalSnapshots > 0 ? (successfulSnapshots / totalSnapshots) * 100 : 0
 
   const avgResponseTime = totalSnapshots > 0
-    ? safeSnapshots.reduce((sum, s) => sum + (s?.metadata?.responseTime ?? 0), 0) / totalSnapshots
+    ? safeSnapshots.reduce((sum, s) => sum + (Number(s?.metadata?.responseTime) || 0), 0) / totalSnapshots
     : 0
 
   // ✅ Now uses the shared, guarded helper instead of duplicated inline logic

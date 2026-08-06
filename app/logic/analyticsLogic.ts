@@ -126,7 +126,7 @@ export function createAverageSnapshot(snapshots: RankingSnapshot[]): RankingSnap
 
   const base = snapshots[0]
   const avgResponseTime =
-    snapshots.reduce((sum, s) => sum + (s.metadata?.responseTime ?? 0), 0) / snapshots.length
+    snapshots.reduce((sum, s) => sum + (Number(s.metadata?.responseTime) || 0), 0) / snapshots.length
 
   const urlMap = new Map<string, { positions: number[]; title: string; snippet: string; raw: any }>()
 
@@ -346,7 +346,7 @@ export function calculateSuccessRateByHour(snapshots: RankingSnapshot[]) {
       hourly[hour].total++
       if (snapshot.results?.length) {
         hourly[hour].success++
-        hourly[hour].times.push(snapshot.metadata.responseTime ?? 0)
+        hourly[hour].times.push(Number(snapshot.metadata.responseTime) || 0)
       } else {
         hourly[hour].failures++
       }
