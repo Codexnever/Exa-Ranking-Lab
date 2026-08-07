@@ -72,6 +72,7 @@
     "react-dom": "^19",
     "react-error-boundary": "^6.0.0",
     "react-hook-form": "latest",
+    "react-is": "^19.0.0",
     "react-resizable-panels": "^3.0.2",
     "recharts": "latest",
     "sonner": "latest",

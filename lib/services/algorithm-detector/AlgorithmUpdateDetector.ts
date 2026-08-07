@@ -112,7 +112,7 @@ export class AlgorithmUpdateDetector {
         timestamp: new Date(result.driftTimeline.at(-1)?.timestamp ?? windowEndMs),
       }))
       events.push({
-        id: EventPersistence.buildEventId(category, windowStartMs),
+        id: EventPersistence.buildEventId(category, windowStartMs, config.correlationWindowMs),
         detectedAt: new Date(windowEndMs),
         category,
         affectedQueries,
