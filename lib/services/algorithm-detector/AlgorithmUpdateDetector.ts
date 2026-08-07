@@ -112,7 +112,7 @@ export class AlgorithmUpdateDetector {
         timestamp: new Date(result.driftTimeline.at(-1)?.timestamp ?? windowEndMs),
       }))
       events.push({
-        id: EventPersistence.buildEventId(category, windowStartMs),
+        id: EventPersistence.buildEventId(category, windowStartMs, config.correlationWindowMs),
         detectedAt: new Date(windowEndMs),
         category,
         affectedQueries,
@@ -134,7 +134,10 @@ export class AlgorithmUpdateDetector {
   async getRecentEvents(userId: string, limit = 10): Promise<AlgorithmUpdateEventView[]> {
     const events = await this.repository.getRecent(userId, limit)
     return events.map(event => {
-      const detail = DescriptionBuilder.detail(event)
+      // Existing Appwrite documents already contain the accurate description
+      // generated at detection time. Prefer it over rebuilding from the lossy
+      // legacy fallback metrics used when structured metrics are unavailable.
+      const detail = event.storedDescription ?? DescriptionBuilder.detail(event)
       return {
         ...event,
         summary: DescriptionBuilder.summary(event),
