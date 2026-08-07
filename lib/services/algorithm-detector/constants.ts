@@ -35,7 +35,7 @@ export const CONFIDENCE_WEIGHTS = {
 } as const
 
 export function getAlgorithmEventsCollection(): string {
-  // Backward compatibility: deployments created before this setting was
-  // documented used the collection ID "algorithm_events" directly.
-  return process.env.COLLECTION_ALGORITHM_EVENTS ?? "algorithm_events"
+  const collection = process.env.COLLECTION_ALGORITHM_EVENTS
+  if (!collection) throw new Error("COLLECTION_ALGORITHM_EVENTS is not configured")
+  return collection
 }

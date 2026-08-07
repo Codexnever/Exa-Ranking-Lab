@@ -134,10 +134,7 @@ export class AlgorithmUpdateDetector {
   async getRecentEvents(userId: string, limit = 10): Promise<AlgorithmUpdateEventView[]> {
     const events = await this.repository.getRecent(userId, limit)
     return events.map(event => {
-      // Existing Appwrite documents already contain the accurate description
-      // generated at detection time. Prefer it over rebuilding from the lossy
-      // legacy fallback metrics used when structured metrics are unavailable.
-      const detail = event.storedDescription ?? DescriptionBuilder.detail(event)
+      const detail = DescriptionBuilder.detail(event)
       return {
         ...event,
         summary: DescriptionBuilder.summary(event),

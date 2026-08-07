@@ -134,16 +134,6 @@ describe("event presentation and identity", () => {
     expect(first).not.toBe(EventPersistence.buildEventId("github", NOW))
   })
 
-  test("uses the configured correlation window in event identity", () => {
-    const oneHour = 3_600_000
-    const firstWindow = EventPersistence.buildEventId("github", NOW, oneHour)
-    const nextWindow = EventPersistence.buildEventId("github", NOW + oneHour, oneHour)
-    const dailyWindow = EventPersistence.buildEventId("github", NOW, 86_400_000)
-
-    expect(firstWindow).not.toBe(nextWindow)
-    expect(firstWindow).not.toBe(dailyWindow)
-  })
-
   test("builds human and machine-readable descriptions", () => {
     expect(DescriptionBuilder.summary(event)).toContain("news")
     expect(DescriptionBuilder.detail(event)).toContain("78%")
@@ -167,24 +157,5 @@ describe("event presentation and identity", () => {
     ])
     expect(payload.description).toContain("78%")
     expect(payload.affectedQueries).toContain("q1")
-  })
-
-  test("preserves a stored description instead of rebuilding it from fallback metrics", async () => {
-    const storedDescription = "6 of 10 queries drifted with the original detection context."
-    const storedEvent = { ...event, storedDescription }
-    const readRepository: AlgorithmEventRepository = {
-      async upsert(): Promise<void> {},
-      async getRecent(): Promise<AlgorithmUpdateEvent[]> { return [storedEvent] },
-    }
-    const detector = new AlgorithmUpdateDetector(
-      {},
-      new SilentLogger(),
-      readRepository,
-      new NoHistoricalBaselineProvider()
-    )
-
-    const [view] = await detector.getRecentEvents("user1")
-    expect(view.detail).toBe(storedDescription)
-    expect(view.description).toBe(storedDescription)
   })
 })

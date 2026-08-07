@@ -57,8 +57,6 @@ export interface AlgorithmUpdateEvent {
   confidence: ConfidenceResult
   metrics: DetectionMetrics
   severity: AlgorithmUpdateSeverity
-  /** Accurate description loaded from the legacy Appwrite schema, when present. */
-  storedDescription?: string
 }
 
 export interface AlgorithmUpdateEventView extends AlgorithmUpdateEvent {

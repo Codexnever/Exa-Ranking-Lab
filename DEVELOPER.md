@@ -547,9 +547,6 @@ Indexes: `userId`, `read`, `createdAt DESC`
 
 ### algorithm_events (NEW)
 ```
-
-`COLLECTION_ALGORITHM_EVENTS` defaults to `algorithm_events` for compatibility
-with deployments created before the environment variable was documented.
 userId           string    required
 eventId          string    required
 category         string    required
