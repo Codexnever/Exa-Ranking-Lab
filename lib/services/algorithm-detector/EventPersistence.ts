@@ -21,9 +21,17 @@ function hashString(value: string): string {
   return hash.toString(16).padStart(8, "0")
 }
 
-export function buildEventId(category: string, windowStartMs: number): string {
-  const dayBucket = Math.floor(windowStartMs / 86_400_000)
-  return `algo_${dayBucket}_${hashString(`${category.toLowerCase()}::${dayBucket}`)}`
+export function buildEventId(
+  category: string,
+  windowStartMs: number,
+  correlationWindowMs = DETECTOR_DEFAULTS.CORRELATION_WINDOW_MS
+): string {
+  const safeWindowMs = Number.isFinite(correlationWindowMs) && correlationWindowMs > 0
+    ? Math.trunc(correlationWindowMs)
+    : DETECTOR_DEFAULTS.CORRELATION_WINDOW_MS
+  const windowBucket = Math.floor(windowStartMs / safeWindowMs)
+  const identity = `${category.toLowerCase()}::${safeWindowMs}::${windowBucket}`
+  return `algo_${safeWindowMs}_${windowBucket}_${hashString(identity)}`
 }
 
 /**
@@ -135,6 +143,9 @@ export class EventPersistence implements AlgorithmEventRepository {
           affectedQueries,
           metrics: parsedMetrics,
           confidence,
+          storedDescription: typeof document.description === "string"
+            ? document.description
+            : undefined,
         }]
       } catch (error) {
         this.logger.warn("system", "Skipping malformed algorithm event", {
