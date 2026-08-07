@@ -223,7 +223,14 @@ async function handler(request: NextRequest) {
   try {
     // ── STEP 3: Fetch all scheduled queries ──────────────────────────────────
     console.log(`[Cron] Fetching all scheduled queries from Appwrite...`)
-    const scheduled = await databaseService.queryService.getAllScheduledQueries()
+    const triggerUserId = request.headers.get("x-trigger-user-id")
+    const allScheduled = await databaseService.queryService.getAllScheduledQueries()
+    // This header is accepted only after CRON_SECRET authorization above. It
+    // scopes browser-initiated manual runs to the authenticated user, while
+    // GitHub Actions continues to process all users without the header.
+    const scheduled = triggerUserId
+      ? allScheduled.filter(query => query.userId === triggerUserId)
+      : allScheduled
     console.log(`[Cron] Total scheduled queries found: ${scheduled.length}`)
 
     if (scheduled.length > 0) {
