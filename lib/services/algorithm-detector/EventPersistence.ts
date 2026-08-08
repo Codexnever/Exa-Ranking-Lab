@@ -9,7 +9,7 @@ import type {
 
 export const ALGORITHM_EVENT_SCHEMA_VERSION = 2 as const
 export const STRUCTURED_JSON_LIMITS = {
-  thresholdsJson: 4_096, confidenceJson: 8_192, metricsJson: 8_192, evidenceJson: 16_384,
+  thresholdsJson: 4_096, confidenceJson: 8_192, evidenceJson: 16_384,
   rankingWinners: 5, rankingLosers: 5, domainsGained: 50, domainsLost: 50, detectionReasons: 10,
 } as const
 
@@ -18,7 +18,7 @@ export const V2_ATTRIBUTE_KEYS = [
   "observedQueryCount", "affectedQueryCount", "affectedAverageDrift", "currentObservedAverageDrift",
   "historicalBaselineAvailable", "historicalDeviation", "historicalObservationCount", "historicalQueryCount",
   "windowStart", "windowEnd", "correlationWindowMs", "createdAt", "thresholdsJson", "evidenceJson",
-  "confidenceJson", "metricsJson",
+  "confidenceJson",
 ] as const
 
 interface DatabaseAdapter {
@@ -50,7 +50,7 @@ function normalizeJson(value: unknown): unknown {
     .filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeJson(item)]))
   return value
 }
-export function stableStringify(value: unknown, field: keyof Pick<typeof STRUCTURED_JSON_LIMITS, "thresholdsJson" | "evidenceJson" | "confidenceJson" | "metricsJson">): string {
+export function stableStringify(value: unknown, field: keyof Pick<typeof STRUCTURED_JSON_LIMITS, "thresholdsJson" | "evidenceJson" | "confidenceJson">): string {
   const serialized = JSON.stringify(normalizeJson(value))
   if (serialized.length > STRUCTURED_JSON_LIMITS[field]) throw new Error(`${field} exceeds ${STRUCTURED_JSON_LIMITS[field]} characters (${serialized.length})`)
   return serialized
@@ -86,8 +86,7 @@ export function toAppwritePayloadV2(userId: string, event: AlgorithmUpdateEvent)
     historicalQueryCount: event.metrics.historicalQueryCount, windowStart: new Date(event.metrics.windowStartMs).toISOString(),
     windowEnd: new Date(event.metrics.windowEndMs).toISOString(), correlationWindowMs: event.thresholds.correlationWindowMs,
     createdAt: event.createdAt.toISOString(), thresholdsJson: stableStringify(event.thresholds, "thresholdsJson"),
-    evidenceJson: stableStringify(boundedEvidence(event), "evidenceJson"), confidenceJson: stableStringify(event.confidence, "confidenceJson"),
-    metricsJson: stableStringify(event.metrics, "metricsJson") }
+    evidenceJson: stableStringify(boundedEvidence(event), "evidenceJson"), confidenceJson: stableStringify(event.confidence, "confidenceJson") }
 }
 
 function parseJson<T>(value: unknown, fallback: T): T { if (typeof value !== "string") return fallback; try { return JSON.parse(value) as T } catch { return fallback } }
@@ -109,7 +108,26 @@ export function documentToEvent(document: Record<string, unknown>): AlgorithmUpd
     historicalObservationCount: 0, historicalQueryCount: 0, historicalBaselineAvailable: false, historicalDeviation: null,
     windowStartMs: detectedAt.getTime() - DETECTOR_DEFAULTS.CORRELATION_WINDOW_MS, windowEndMs: detectedAt.getTime() }
   const schemaVersion = numberOr(document.schemaVersion, 1) === 2 ? 2 : 1
-  const metrics = schemaVersion === 2 ? parseJson<DetectionMetrics>(document.metricsJson, legacyMetrics) : legacyMetrics
+  const storedEvidence = schemaVersion === 2
+    ? parseJson<Partial<AlgorithmUpdateEvent["evidence"]>>(document.evidenceJson, {})
+    : {}
+  const metrics: DetectionMetrics = schemaVersion === 2 ? {
+    totalQueriesInCategory: numberOr(document.observedQueryCount, legacyMetrics.totalQueriesInCategory),
+    affectedQueryCount: numberOr(document.affectedQueryCount, legacyMetrics.affectedQueryCount),
+    driftRate: numberOr(document.driftRate, legacyMetrics.driftRate),
+    avgDriftScore: numberOr(document.affectedAverageDrift, legacyAverage),
+    affectedAverageDrift: numberOr(document.affectedAverageDrift, legacyAverage),
+    currentObservedAverageDrift: numberOr(document.currentObservedAverageDrift, legacyAverage),
+    historicalAvgDrift: numberOr(storedEvidence.baselineMean, 0),
+    historicalStdDev: numberOr(storedEvidence.baselineStandardDeviation, 0),
+    historicalSampleCount: numberOr(document.historicalQueryCount, 0),
+    historicalObservationCount: numberOr(document.historicalObservationCount, 0),
+    historicalQueryCount: numberOr(document.historicalQueryCount, 0),
+    historicalBaselineAvailable: document.historicalBaselineAvailable === true,
+    historicalDeviation: optionalNumber(document.historicalDeviation),
+    windowStartMs: new Date(String(document.windowStart)).getTime(),
+    windowEndMs: new Date(String(document.windowEnd)).getTime(),
+  } : legacyMetrics
   const thresholds = schemaVersion === 2 ? parseJson(document.thresholdsJson, defaultThresholds()) : defaultThresholds()
   const signals: ConfidenceSignals = { driftRate: metrics.driftRate, avgDriftScore: metrics.currentObservedAverageDrift,
     affectedQueryCount: metrics.affectedQueryCount, observedQueryCount: metrics.totalQueriesInCategory,

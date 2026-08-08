@@ -565,8 +565,11 @@ Indexes: `userId`, `detectedAt DESC`, `category`
 
 Schema v2 preserves all fields above and adds optional first-class detector,
 confidence, query-count, baseline, and window attributes plus
-`thresholdsJson` (4096), `evidenceJson` (16384), `confidenceJson` (8192), and
-`metricsJson` (8192). Run `npm run provision:algorithm-events-v2 -- --dry-run`
+`thresholdsJson` (4096), `evidenceJson` (16384), and `confidenceJson` (8192).
+`metricsJson` is intentionally omitted to stay within Appwrite attribute limits;
+the reader reconstructs metrics from first-class fields and `evidenceJson`.
+`userId` must remain because Appwrite's `$id` identifies a document, not its
+owner, and event listing is scoped by `userId`. Run `npm run provision:algorithm-events-v2 -- --dry-run`
 to inspect, then run it without `--dry-run` before deploying v2-writing code.
 The migration never recreates the collection or modifies old documents.
 

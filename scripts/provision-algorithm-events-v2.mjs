@@ -51,7 +51,6 @@ const definitions = [
   { key: "thresholdsJson", create: () => databases.createStringAttribute(configuredDatabaseId, collectionId, "thresholdsJson", 4_096, false) },
   { key: "evidenceJson", create: () => databases.createStringAttribute(configuredDatabaseId, collectionId, "evidenceJson", 16_384, false) },
   { key: "confidenceJson", create: () => databases.createStringAttribute(configuredDatabaseId, collectionId, "confidenceJson", 8_192, false) },
-  { key: "metricsJson", create: () => databases.createStringAttribute(configuredDatabaseId, collectionId, "metricsJson", 8_192, false) },
 ]
 
 async function inspect() {

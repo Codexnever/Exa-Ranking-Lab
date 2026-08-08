@@ -195,7 +195,6 @@ export interface PersistedAlgorithmEventV2 extends PersistedAlgorithmEvent {
   thresholdsJson: string
   evidenceJson: string
   confidenceJson: string
-  metricsJson: string
 }
 
 export interface HistoricalBaseline {
