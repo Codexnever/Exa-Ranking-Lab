@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
-    "provision:algorithm-events-v2": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/provision-algorithm-events-v2.ts"
+    "provision:algorithm-events-v2": "node scripts/provision-algorithm-events-v2.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "latest",

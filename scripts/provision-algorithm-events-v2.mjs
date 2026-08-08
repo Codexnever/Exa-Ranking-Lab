@@ -1,4 +1,21 @@
+import { readFileSync } from "node:fs"
 import { Client, Databases } from "node-appwrite"
+
+try {
+  const localEnv = readFileSync(".env.local", "utf8")
+  for (const rawLine of localEnv.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith("#")) continue
+    const separator = line.indexOf("=")
+    if (separator < 1) continue
+    const key = line.slice(0, separator).trim()
+    let value = line.slice(separator + 1).trim()
+    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("\'") && value.endsWith("\'"))) value = value.slice(1, -1)
+    if (process.env[key] === undefined) process.env[key] = value
+  }
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error
+}
 
 const databaseId = process.env.APPWRITE_DATABASE_ID ?? process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID
 const collectionId = process.env.COLLECTION_ALGORITHM_EVENTS ?? "algorithm_events"
@@ -48,7 +65,7 @@ async function inspect() {
   return { existing, missing }
 }
 
-async function waitUntilReady(keys: string[]) {
+async function waitUntilReady(keys) {
   const deadline = Date.now() + 120_000
   while (Date.now() < deadline) {
     const collection = await databases.getCollection(configuredDatabaseId, collectionId)
