@@ -100,8 +100,11 @@ export class EvidenceBuilder {
     const affectedQueryCount = affectedResults.length
     const observedQueryCount = observedResults.length
     const driftRate = observedQueryCount > 0 ? affectedQueryCount / observedQueryCount : 0
-    const averageDriftScore = affectedQueryCount > 0
+    const affectedAverageDrift = affectedQueryCount > 0
       ? affectedResults.reduce((sum, result) => sum + result.latestDrift, 0) / affectedQueryCount
+      : 0
+    const currentObservedAverageDrift = observedQueryCount > 0
+      ? observedResults.reduce((sum, result) => sum + result.latestDrift, 0) / observedQueryCount
       : 0
 
     const detectionReasons: DetectionReason[] = [
@@ -126,13 +129,13 @@ export class EvidenceBuilder {
             code: "historical_baseline",
             passed: baselinePassed,
             message: baseline.standardDeviation === 0
-              ? `Current average drift ${averageDriftScore.toFixed(1)} was compared with a zero-variance historical baseline of ${baseline.mean.toFixed(1)}.`
+              ? `Observed-query average drift ${currentObservedAverageDrift.toFixed(1)} was compared with the zero-variance baseline plus the ${thresholds.baselineAbsoluteEpsilon}-point engineering noise floor.`
               : `Current drift was ${historicalDeviation?.toFixed(2) ?? "—"} standard deviations above the historical mean; threshold ${thresholds.baselineDeviationThreshold}.`,
           }
         : {
             code: "baseline_fallback",
             passed: true,
-            message: `Fixed thresholds were used because only ${baseline.sampleCount} historical observations were available; ${thresholds.minBaselineSamples} are required.`,
+            message: `Fixed thresholds were used because ${baseline.historicalQueryCount} query histories and ${baseline.historicalObservationCount} observations were available; ${thresholds.minBaselineQueries} queries and ${thresholds.minBaselineSamples} observations are required.`,
           },
     ]
 
@@ -141,7 +144,9 @@ export class EvidenceBuilder {
       observedQueryCount,
       driftRate,
       configuredDriftRateThreshold: thresholds.driftRateThreshold,
-      averageDriftScore,
+      averageDriftScore: affectedAverageDrift,
+      affectedAverageDrift,
+      currentObservedAverageDrift,
       correlationWindowMs: thresholds.correlationWindowMs,
       correlationWindowHours: thresholds.correlationWindowMs / 3_600_000,
       temporalConcentration,
@@ -166,6 +171,10 @@ export class EvidenceBuilder {
       baselineMean: baseline.mean,
       baselineStandardDeviation: baseline.standardDeviation,
       baselineSampleCount: baseline.sampleCount,
+      historicalObservationCount: baseline.historicalObservationCount,
+      historicalQueryCount: baseline.historicalQueryCount,
+      amountAboveBaseline: currentObservedAverageDrift - baseline.mean,
+      baselineAbsoluteEpsilon: thresholds.baselineAbsoluteEpsilon,
       historicalDeviation,
       detectionReasons,
     }

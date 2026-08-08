@@ -22,7 +22,9 @@ export interface DetectionConfig {
   correlationWindowMs: number
   historicalWindowDays: number
   minBaselineSamples: number
+  minBaselineQueries: number
   baselineDeviationThreshold: number
+  baselineAbsoluteEpsilon: number
 }
 
 export type DetectionConfigOverride = Partial<DetectionConfig>
@@ -56,9 +58,13 @@ export interface DetectionMetrics {
   affectedQueryCount: number
   driftRate: number
   avgDriftScore: number
+  affectedAverageDrift: number
+  currentObservedAverageDrift: number
   historicalAvgDrift: number
   historicalStdDev: number
   historicalSampleCount: number
+  historicalObservationCount: number
+  historicalQueryCount: number
   historicalBaselineAvailable: boolean
   historicalDeviation: number | null
   windowStartMs: number
@@ -72,7 +78,9 @@ export interface ResolvedDetectionThresholds {
   correlationWindowMs: number
   historicalWindowDays: number
   minBaselineSamples: number
+  minBaselineQueries: number
   baselineDeviationThreshold: number
+  baselineAbsoluteEpsilon: number
 }
 
 export interface RankingMovementEvidence {
@@ -96,7 +104,10 @@ export interface RankingChangeEvidence {
   observedQueryCount: number
   driftRate: number
   configuredDriftRateThreshold: number
+  /** @deprecated Compatibility alias for affectedAverageDrift. */
   averageDriftScore: number
+  affectedAverageDrift: number
+  currentObservedAverageDrift: number
   correlationWindowMs: number
   correlationWindowHours: number
   temporalConcentration: number
@@ -115,6 +126,10 @@ export interface RankingChangeEvidence {
   baselineMean: number
   baselineStandardDeviation: number
   baselineSampleCount: number
+  historicalObservationCount: number
+  historicalQueryCount: number
+  amountAboveBaseline: number
+  baselineAbsoluteEpsilon: number
   historicalDeviation: number | null
   detectionReasons: DetectionReason[]
 }
@@ -162,6 +177,8 @@ export interface HistoricalBaseline {
   mean: number
   standardDeviation: number
   sampleCount: number
+  historicalObservationCount: number
+  historicalQueryCount: number
   available: boolean
 }
 
@@ -171,7 +188,8 @@ export interface HistoricalBaselineProvider {
     windowStartMs: number,
     windowEndMs: number,
     historicalWindowDays: number,
-    minSamples: number
+    minSamples: number,
+    minQueries: number
   ): Promise<HistoricalBaseline>
 }
 

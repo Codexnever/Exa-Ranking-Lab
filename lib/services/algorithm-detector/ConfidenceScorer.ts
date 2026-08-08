@@ -13,7 +13,8 @@ export class ConfidenceScorer {
       observationStrength: ConfidenceScorer.clamp(
         signals.observedQueryCount / FULL_OBSERVATION_CONFIDENCE_COUNT
       ),
-      temporalConcentration: ConfidenceScorer.clamp(signals.temporalConcentration),
+      // Temporal concentration is diagnostic only: scheduler batching can
+      // make timestamps nearly identical without independent causal evidence.
     }
 
     if (signals.historicalSignal !== null) {

@@ -7,7 +7,10 @@ export const DETECTOR_DEFAULTS = {
   CORRELATION_WINDOW_MS: 24 * 60 * 60 * 1000,
   HISTORICAL_WINDOW_DAYS: 14,
   MIN_BASELINE_SAMPLES: 10,
+  MIN_BASELINE_QUERIES: 3,
   BASELINE_DEVIATION_THRESHOLD: 2,
+  // Engineering guardrail on the 0-100 drift scale; calibrate with production data.
+  BASELINE_ABSOLUTE_EPSILON: 5,
   EVENT_FETCH_LIMIT: 50,
 } as const
 
@@ -36,7 +39,6 @@ export const CONFIDENCE_WEIGHTS = {
   driftMagnitude: 0.25,
   historicalDeviation: 0.2,
   observationStrength: 0.15,
-  temporalConcentration: 0.1,
 } as const
 
 export const FULL_OBSERVATION_CONFIDENCE_COUNT = 10

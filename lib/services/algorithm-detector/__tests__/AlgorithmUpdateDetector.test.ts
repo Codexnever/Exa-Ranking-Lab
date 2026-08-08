@@ -49,6 +49,14 @@ const strongBatch = (history: number[] = []) => Array.from({ length: 10 }, (_, i
   makeResult(`q${i}`, i < 7 ? 70 : 5, i === 0 ? history : [])
 )
 
+function batchWithHistories(currentAffected = 70, currentStable = 5, historicalMean = 5) {
+  return Array.from({ length: 10 }, (_, i) => makeResult(
+    `q${i}`,
+    i < 7 ? currentAffected : currentStable,
+    i < 3 ? Array(4).fill(historicalMean) : []
+  ))
+}
+
 describe("coordinated and baseline-aware detection", () => {
   test("10 stable queries produce no event", async () => {
     const results = Array.from({ length: 10 }, (_, i) => makeResult(`q${i}`, 5))
@@ -70,34 +78,65 @@ describe("coordinated and baseline-aware detection", () => {
   })
 
   test("historically volatile normal drift is suppressed", async () => {
-    const history = [35, 55, 40, 50, 30, 60, 42, 48, 38, 52]
-    const results = Array.from({ length: 10 }, (_, i) => makeResult(`q${i}`, i < 7 ? 47 : 5, i === 0 ? history : []))
+    const means = [35, 45, 55]
+    const results = Array.from({ length: 10 }, (_, i) => makeResult(`q${i}`, i < 7 ? 47 : 5, i < 3 ? Array(4).fill(means[i]) : []))
     expect(await makeDetector().detect(results, metadata(results), "user", NOW)).toHaveLength(0)
   })
 
   test("historically stable category with sudden drift produces an event", async () => {
-    const [event] = await makeDetector().detect(strongBatch(Array(10).fill(5)), metadata(strongBatch(), "company"), "user", NOW)
+    const results = batchWithHistories()
+    const [event] = await makeDetector().detect(results, metadata(results), "user", NOW)
     expect(event.detectionMode).toBe("baseline-aware")
     expect(event.evidence.baselineStandardDeviation).toBe(0)
   })
 
   test("insufficient samples use fixed thresholds", async () => {
-    const results = strongBatch(Array(DETECTOR_DEFAULTS.MIN_BASELINE_SAMPLES - 1).fill(5))
+    const results = Array.from({ length: 10 }, (_, i) => makeResult(`q${i}`, i < 7 ? 70 : 5, i < 2 ? Array(20).fill(5) : []))
     const [event] = await makeDetector().detect(results, metadata(results), "user", NOW)
     expect(event.detectionMode).toBe("fixed-threshold")
   })
 
-  test("exactly the minimum samples uses the baseline-aware path", async () => {
-    const results = strongBatch(Array(DETECTOR_DEFAULTS.MIN_BASELINE_SAMPLES).fill(5))
+  test("enough observations across enough queries uses the baseline-aware path", async () => {
+    const results = batchWithHistories()
     const [event] = await makeDetector().detect(results, metadata(results), "user", NOW)
     expect(event.detectionMode).toBe("baseline-aware")
-    expect(event.metrics.historicalSampleCount).toBe(DETECTOR_DEFAULTS.MIN_BASELINE_SAMPLES)
+    expect(event.metrics.historicalSampleCount).toBe(DETECTOR_DEFAULTS.MIN_BASELINE_QUERIES)
   })
 
   test("zero-variance baseline deterministically suppresses an unchanged current level", async () => {
-    const history = Array(DETECTOR_DEFAULTS.MIN_BASELINE_SAMPLES).fill(40)
-    const results = Array.from({ length: 10 }, (_, i) => makeResult(`q${i}`, i < 7 ? 40 : 5, i === 0 ? history : []))
+    const results = batchWithHistories(30, 20, 24)
     expect(await makeDetector().detect(results, metadata(results), "user", NOW)).toHaveLength(0)
+  })
+
+  test("zero-variance baseline accepts a change at least the absolute epsilon", async () => {
+    const results = batchWithHistories(40, 20, 24)
+    const [event] = await makeDetector().detect(results, metadata(results), "user", NOW)
+    expect(event.detectionMode).toBe("baseline-aware")
+    expect(event.evidence.amountAboveBaseline).toBeGreaterThanOrEqual(DETECTOR_DEFAULTS.BASELINE_ABSOLUTE_EPSILON)
+  })
+
+  test("historical anomaly uses all observed queries rather than affected queries", async () => {
+    const results = batchWithHistories(70, 5, 20)
+    const [event] = await makeDetector({ baselineDeviationThreshold: 0 }).detect(results, metadata(results), "user", NOW)
+    expect(event.evidence.affectedAverageDrift).toBe(70)
+    expect(event.evidence.currentObservedAverageDrift).toBe(50.5)
+    expect(event.confidence.signals.avgDriftScore).toBe(50.5)
+  })
+})
+
+describe("TimelineHistoricalBaselineProvider", () => {
+  test("unequal history lengths cannot dominate the category baseline", async () => {
+    const results = [makeResult("q1", 0, Array(100).fill(90)), makeResult("q2", 0, Array(10).fill(10)), makeResult("q3", 0, Array(10).fill(20))]
+    const baseline = await new TimelineHistoricalBaselineProvider().getBaseline(results, NOW - 86_400_000, NOW, 14, 10, 3)
+    expect(baseline.mean).toBe(40)
+    expect(baseline.historicalObservationCount).toBe(120)
+    expect(baseline.historicalQueryCount).toBe(3)
+    expect(baseline.sampleCount).toBe(3)
+  })
+
+  test("one long query history is not considered a mature category baseline", async () => {
+    const baseline = await new TimelineHistoricalBaselineProvider().getBaseline([makeResult("q1", 0, Array(100).fill(20))], NOW - 86_400_000, NOW, 14, 10, 3)
+    expect(baseline.available).toBe(false)
   })
 })
 
@@ -120,6 +159,13 @@ describe("ConfidenceScorer v2", () => {
     expect(Object.values(confidence.weightsUsed).reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1)
     expect(confidence.value).toBeGreaterThan(0.7)
   })
+
+  test("batch timestamps cannot inflate authoritative confidence", () => {
+    const concentrated = ConfidenceScorer.score({ ...signals, temporalConcentration: 1 })
+    const dispersed = ConfidenceScorer.score({ ...signals, temporalConcentration: 0 })
+    expect(concentrated.value).toBe(dispersed.value)
+    expect(concentrated.weightsUsed.temporalConcentration).toBeUndefined()
+  })
 })
 
 describe("EvidenceBuilder", () => {
@@ -136,8 +182,8 @@ describe("EvidenceBuilder", () => {
         breakdown: { contentChangedUrls: [], newCompetitorUrls: ["https://gained.example/a"], droppedUrls: ["https://lost.example/b"], rerankedUrls: [] },
       },
     }
-    const thresholds = { driftRateThreshold: .6, perQueryDriftThreshold: 30, minQueriesInCategory: 1, correlationWindowMs: 86_400_000, historicalWindowDays: 14, minBaselineSamples: 10, baselineDeviationThreshold: 2 }
-    const evidence = EvidenceBuilder.build({ observedResults: [result], affectedResults: [result], queryMeta: metadata([result]), thresholds, baseline: { mean: 0, standardDeviation: 0, sampleCount: 0, available: false }, historicalDeviation: null, baselinePassed: true, windowStartMs: NOW - 86_400_000, windowEndMs: NOW })
+    const thresholds = { driftRateThreshold: .6, perQueryDriftThreshold: 30, minQueriesInCategory: 1, correlationWindowMs: 86_400_000, historicalWindowDays: 14, minBaselineSamples: 10, minBaselineQueries: 3, baselineDeviationThreshold: 2, baselineAbsoluteEpsilon: 5 }
+    const evidence = EvidenceBuilder.build({ observedResults: [result], affectedResults: [result], queryMeta: metadata([result]), thresholds, baseline: { mean: 0, standardDeviation: 0, sampleCount: 0, historicalObservationCount: 0, historicalQueryCount: 0, available: false }, historicalDeviation: null, baselinePassed: true, windowStartMs: NOW - 86_400_000, windowEndMs: NOW })
     expect(evidence.averageAbsoluteRankMovement).toBe(5.5)
     expect(evidence.urlTurnoverCount).toBe(3)
     expect(evidence.domainsGained).toEqual(["gained.example"])

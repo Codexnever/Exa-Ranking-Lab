@@ -45,7 +45,9 @@ export class AlgorithmUpdateDetector {
       correlationWindowMs: configOverride.correlationWindowMs ?? DETECTOR_DEFAULTS.CORRELATION_WINDOW_MS,
       historicalWindowDays: configOverride.historicalWindowDays ?? DETECTOR_DEFAULTS.HISTORICAL_WINDOW_DAYS,
       minBaselineSamples: configOverride.minBaselineSamples ?? DETECTOR_DEFAULTS.MIN_BASELINE_SAMPLES,
+      minBaselineQueries: configOverride.minBaselineQueries ?? DETECTOR_DEFAULTS.MIN_BASELINE_QUERIES,
       baselineDeviationThreshold: configOverride.baselineDeviationThreshold ?? DETECTOR_DEFAULTS.BASELINE_DEVIATION_THRESHOLD,
+      baselineAbsoluteEpsilon: configOverride.baselineAbsoluteEpsilon ?? DETECTOR_DEFAULTS.BASELINE_ABSOLUTE_EPSILON,
     }
   }
 
@@ -85,12 +87,15 @@ export class AlgorithmUpdateDetector {
       )
       const driftRate = drifted.length / categoryResults.length
       if (driftRate < config.driftRateThreshold || drifted.length === 0) continue
-      const avgDriftScore = drifted.reduce((sum, result) => sum + result.latestDrift, 0) / drifted.length
+      const affectedAverageDrift = drifted.reduce((sum, result) => sum + result.latestDrift, 0) / drifted.length
+      const currentObservedAverageDrift = categoryResults.reduce((sum, result) => sum + result.latestDrift, 0) / categoryResults.length
       const windowStartMs = windowEndMs - config.correlationWindowMs
       let baseline = {
         mean: 0,
         standardDeviation: 0,
         sampleCount: 0,
+        historicalObservationCount: 0,
+        historicalQueryCount: 0,
         available: false,
       }
       try {
@@ -99,7 +104,8 @@ export class AlgorithmUpdateDetector {
           windowStartMs,
           windowEndMs,
           config.historicalWindowDays,
-          config.minBaselineSamples
+          config.minBaselineSamples,
+          config.minBaselineQueries
         )
       } catch (error) {
         this.logger.warn(category, "Historical baseline unavailable", {
@@ -107,13 +113,13 @@ export class AlgorithmUpdateDetector {
         })
       }
       const historicalDeviation = baseline.available && baseline.standardDeviation > 0
-        ? (avgDriftScore - baseline.mean) / baseline.standardDeviation
+        ? (currentObservedAverageDrift - baseline.mean) / baseline.standardDeviation
         : null
-      // A zero-variance baseline represents genuinely stable history. A
-      // strictly larger current value is therefore unusual; equality is not.
+      // Zero variance cannot produce a z-score, so require a configurable
+      // absolute movement beyond the stable mean instead.
       const baselinePassed = !baseline.available
         || (baseline.standardDeviation === 0
-          ? avgDriftScore > baseline.mean
+          ? currentObservedAverageDrift >= baseline.mean + config.baselineAbsoluteEpsilon
           : (historicalDeviation ?? Number.NEGATIVE_INFINITY) >= config.baselineDeviationThreshold)
       if (!baselinePassed) continue
 
@@ -136,7 +142,7 @@ export class AlgorithmUpdateDetector {
         : null
       const confidence = ConfidenceScorer.score({
         driftRate,
-        avgDriftScore,
+        avgDriftScore: currentObservedAverageDrift,
         affectedQueryCount: drifted.length,
         observedQueryCount: categoryResults.length,
         historicalDeviation,
@@ -148,10 +154,14 @@ export class AlgorithmUpdateDetector {
         totalQueriesInCategory: categoryResults.length,
         affectedQueryCount: drifted.length,
         driftRate,
-        avgDriftScore,
+        avgDriftScore: affectedAverageDrift,
+        affectedAverageDrift,
+        currentObservedAverageDrift,
         historicalAvgDrift: baseline.mean,
         historicalStdDev: baseline.standardDeviation,
         historicalSampleCount: baseline.sampleCount,
+        historicalObservationCount: baseline.historicalObservationCount,
+        historicalQueryCount: baseline.historicalQueryCount,
         historicalBaselineAvailable: baseline.available,
         historicalDeviation,
         windowStartMs,
