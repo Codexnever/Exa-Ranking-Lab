@@ -182,6 +182,7 @@ export class AlgorithmUpdateDetector {
         metrics,
         severity: confidence.severity,
         detectorVersion: DETECTOR_VERSION,
+        schemaVersion: 2,
         createdAt: new Date(windowEndMs),
         detectionMode: baseline.available ? "baseline-aware" : "fixed-threshold",
         thresholds,

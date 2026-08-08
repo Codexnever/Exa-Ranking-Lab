@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "lint:fix": "next lint --fix"
+    "lint:fix": "next lint --fix",
+    "provision:algorithm-events-v2": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/provision-algorithm-events-v2.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "latest",

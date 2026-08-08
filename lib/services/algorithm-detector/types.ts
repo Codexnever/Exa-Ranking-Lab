@@ -143,6 +143,7 @@ export interface AlgorithmUpdateEvent {
   metrics: DetectionMetrics
   severity: AlgorithmUpdateSeverity
   detectorVersion: string
+  schemaVersion: 1 | 2
   createdAt: Date
   detectionMode: "fixed-threshold" | "baseline-aware"
   thresholds: ResolvedDetectionThresholds
@@ -171,6 +172,30 @@ export interface PersistedAlgorithmEvent {
   affectedQueries: string
   description: string
   detectedAt: string
+}
+
+export interface PersistedAlgorithmEventV2 extends PersistedAlgorithmEvent {
+  schemaVersion: 2
+  detectorVersion: string
+  detectionMode: "fixed-threshold" | "baseline-aware"
+  confidenceValue: number
+  confidencePercentage: number
+  observedQueryCount: number
+  affectedQueryCount: number
+  affectedAverageDrift: number
+  currentObservedAverageDrift: number
+  historicalBaselineAvailable: boolean
+  historicalDeviation: number | null
+  historicalObservationCount: number
+  historicalQueryCount: number
+  windowStart: string
+  windowEnd: string
+  correlationWindowMs: number
+  createdAt: string
+  thresholdsJson: string
+  evidenceJson: string
+  confidenceJson: string
+  metricsJson: string
 }
 
 export interface HistoricalBaseline {

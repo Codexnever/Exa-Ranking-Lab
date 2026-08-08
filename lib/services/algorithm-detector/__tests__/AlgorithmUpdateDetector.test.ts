@@ -1,7 +1,7 @@
 import { AlgorithmUpdateDetector } from "../AlgorithmUpdateDetector"
 import { ConfidenceScorer } from "../ConfidenceScorer"
 import { EvidenceBuilder } from "../EvidenceBuilder"
-import { EventPersistence, toAppwritePayload } from "../EventPersistence"
+import { documentToEvent, EventPersistence, stableStringify, toAppwritePayload, toAppwritePayloadV2 } from "../EventPersistence"
 import { NoHistoricalBaselineProvider, TimelineHistoricalBaselineProvider } from "../HistoricalBaselineProvider"
 import { DETECTOR_DEFAULTS, DETECTOR_VERSION } from "../constants"
 import { SilentLogger } from "../logger"
@@ -206,5 +206,54 @@ describe("identity and persistence compatibility", () => {
       "affectedCount", "affectedQueries", "avgDriftScore", "category", "description", "detectedAt",
       "driftRate", "eventId", "severity", "userId",
     ])
+  })
+
+  test("v2 payload preserves legacy semantics and structured values", async () => {
+    const results = batchWithHistories()
+    const [event] = await makeDetector().detect(results, metadata(results), "user", NOW)
+    const payload = toAppwritePayloadV2("user", event)
+    expect(payload.schemaVersion).toBe(2)
+    expect(payload.detectorVersion).toBe("2.0")
+    expect(payload.avgDriftScore).toBe(event.metrics.affectedAverageDrift)
+    expect(payload.currentObservedAverageDrift).toBe(event.metrics.currentObservedAverageDrift)
+    expect(payload.historicalObservationCount).toBe(event.metrics.historicalObservationCount)
+    expect(payload.historicalQueryCount).toBe(event.metrics.historicalQueryCount)
+    expect(JSON.parse(payload.thresholdsJson).baselineAbsoluteEpsilon).toBe(event.thresholds.baselineAbsoluteEpsilon)
+    expect(JSON.parse(payload.evidenceJson).affectedAverageDrift).toBe(event.evidence.affectedAverageDrift)
+    const restored = documentToEvent(payload as unknown as Record<string, unknown>)
+    expect(restored.schemaVersion).toBe(2)
+    expect(restored.metrics.currentObservedAverageDrift).toBe(event.metrics.currentObservedAverageDrift)
+    expect(restored.evidence.historicalQueryCount).toBe(event.evidence.historicalQueryCount)
+  })
+
+  test("legacy documents remain schema v1 without invented v2 evidence", () => {
+    const legacy = documentToEvent({ eventId: "old", category: "news", severity: "moderate", driftRate: .7,
+      avgDriftScore: 40, affectedCount: 3, affectedQueries: "[]", detectedAt: new Date(NOW).toISOString(),
+      description: "Original stored explanation" })
+    expect(legacy.schemaVersion).toBe(1)
+    expect(legacy.detectorVersion).toBe("legacy")
+    expect(legacy.storedDescription).toBe("Original stored explanation")
+    expect(legacy.evidence.historicalBaselineUsed).toBe(false)
+    expect(legacy.evidence.historicalObservationCount).toBe(0)
+    expect(legacy.evidence.detectionReasons[0].message).toContain("not stored")
+  })
+
+  test("schema-aware upsert falls back, deduplicates, and propagates genuine errors", async () => {
+    const [event] = await makeDetector().detect(strongBatch(), metadata(strongBatch()), "user", NOW)
+    const created: Array<Record<string, unknown>> = []; const updated: Array<Record<string, unknown>> = []
+    const database = { getCollection: async () => ({ attributes: [] }),
+      createDocument: async (_db: string, _collection: string, _id: string, data: Record<string, unknown>) => { created.push(data); throw { code: 409 } },
+      updateDocument: async (_db: string, _collection: string, _id: string, data: Record<string, unknown>) => { updated.push(data) },
+      listDocuments: async () => ({ documents: [] }) }
+    const dependencies = { databases: database, databaseId: "db", equal: () => "", orderDesc: () => "", limit: () => "" }
+    await new EventPersistence(new SilentLogger(), dependencies).upsert("user", event)
+    expect(created[0].schemaVersion).toBeUndefined()
+    expect(updated).toHaveLength(1)
+    database.createDocument = async () => { throw { code: 500 } }
+    await expect(new EventPersistence(new SilentLogger(), dependencies).upsert("user", event)).rejects.toEqual({ code: 500 })
+  })
+
+  test("oversized structured JSON fails explicitly", () => {
+    expect(() => stableStringify({ value: "x".repeat(20_000) }, "evidenceJson")).toThrow(/exceeds/)
   })
 })

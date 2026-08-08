@@ -563,10 +563,20 @@ detectedAt       datetime  required
 ```
 Indexes: `userId`, `detectedAt DESC`, `category`
 
-Persistence intentionally targets this existing schema: confidence, metrics,
-windowStart, and windowEnd remain in the in-memory/API event but are not sent
-to Appwrite, which rejects unknown attributes. Descriptions are generated from
-the structured event when it is written. Event documents use deterministic IDs
+Schema v2 preserves all fields above and adds optional first-class detector,
+confidence, query-count, baseline, and window attributes plus
+`thresholdsJson` (4096), `evidenceJson` (16384), `confidenceJson` (8192), and
+`metricsJson` (8192). Run `npm run provision:algorithm-events-v2 -- --dry-run`
+to inspect, then run it without `--dry-run` before deploying v2-writing code.
+The migration never recreates the collection or modifies old documents.
+
+During a staggered rollout the application checks attribute readiness. If v2
+attributes are missing it writes the legacy payload and emits a warning rather
+than failing scheduled processing. Production order is: provision attributes,
+verify they are available, deploy application code, then verify a new document
+has `schemaVersion=2` and `detectorVersion=2.0`.
+
+Descriptions are generated from the structured event when written. Event documents use deterministic IDs
 scoped by user, category, and UTC correlation-window bucket so repeated cron
 runs update the same event rather than creating duplicates.
 
