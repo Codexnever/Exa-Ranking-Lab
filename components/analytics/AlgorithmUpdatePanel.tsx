@@ -50,8 +50,7 @@ export function AlgorithmUpdatePanel() {
     setLoading(true)
     setError(null)
     try {
-      const data = await call("GET", "/analytics/algorithm-events?limit=10"
-      )
+      const data = await call<AlgorithmUpdateEvent[]>("GET", "/analytics/algorithm-events?limit=10")
       if (Array.isArray(data)) {
         // Parse affectedQueries if it came back as a string
         const parsed = data.map(e => ({
@@ -236,7 +235,7 @@ export function AlgorithmUpdatePanel() {
                       <div className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg">
                         <Info className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
                         <p className="text-xs text-gray-600 leading-relaxed">
-                          {event.description}
+                          {event.detail ?? event.description}
                         </p>
                       </div>
 
@@ -269,7 +268,7 @@ export function AlgorithmUpdatePanel() {
                             Affected Queries
                           </p>
                           <div className="space-y-1">
-                            {affectedQueries.map((q: any, i: number) => (
+                            {affectedQueries.map((q, i) => (
                               <div
                                 key={q.queryId ?? i}
                                 className="flex items-center justify-between text-xs px-2 py-1.5 bg-gray-50 rounded"

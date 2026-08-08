@@ -1,7 +1,7 @@
 // app/api/analytics/algorithm-events/route.ts
 import { type NextRequest, NextResponse } from "next/server"
 import { withEnhancedSecurity } from "@/lib/middleware/security/security-middleware"
-import { AlgorithmUpdateDetector } from "@/app/services/AlgorithmUpdateDetector"
+import { AlgorithmUpdateDetector } from "@/lib/services/algorithm-detector"
 import type { SecurityContext } from "@/types/type"
 
 async function getAlgorithmEventsHandler(
@@ -12,14 +12,17 @@ async function getAlgorithmEventsHandler(
 
   try {
     const { searchParams } = new URL(request.url)
-    const limit = Math.min(parseInt(searchParams.get("limit") ?? "10"), 50)
+    const parsedLimit = Number.parseInt(searchParams.get("limit") ?? "10", 10)
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(50, Math.max(1, parsedLimit))
+      : 10
 
     const events = await AlgorithmUpdateDetector.getRecentEvents(userId, limit)
 
     return NextResponse.json(events)
   } catch (err) {
     console.error("[AlgorithmEvents] GET failed:", err)
-    return NextResponse.json([], { status: 200 }) // silent — panel just shows empty
+    return NextResponse.json({ error: "Failed to load algorithm update events" }, { status: 500 })
   }
 }
 

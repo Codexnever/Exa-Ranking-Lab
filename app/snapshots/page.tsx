@@ -71,7 +71,7 @@ export default function Snapshots() {
           <CardTitle className="text-gray-900">Recent Snapshots</CardTitle>
         </CardHeader>
         <CardContent>
-          <SnapshotsTable filteredSnapshots={filteredSnapshots} isLoading={isLoading} formatDate={formatDate} />
+          <SnapshotsTable formatDate={formatDate} />
         </CardContent>
       </Card>
     </div>

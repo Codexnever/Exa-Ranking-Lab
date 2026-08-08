@@ -129,11 +129,12 @@ app/
     └── appwrite.ts                  # browser SDK (client components)
 
 lib/
-├── services/                        # Business logic — no DB, no HTTP framework
-│   ├── EmbeddingService.ts          # Gemini → OpenAI → position-only fallback
-│   ├── DriftAlertService.ts         # Email + webhook on drift threshold
-│   ├── DriftDecomposer.ts           # Splits drift into content/competitor/rerank
-│   └── AlgorithmUpdateDetector.ts   # Cross-query correlation → algo update event
+├── services/
+│   └── algorithm-detector/          # Modular cross-query update detection
+│       ├── AlgorithmUpdateDetector.ts
+│       ├── ConfidenceScorer.ts
+│       ├── EventPersistence.ts
+│       └── DescriptionBuilder.ts
 ├── middleware/
 │   ├── security/security-middleware.ts   # withEnhancedSecurity
 │   └── authentication/auth-context.tsx   # useAuth hook
@@ -222,7 +223,7 @@ GitHub Actions (*/30 * * * *)
   → POST-PROCESSING (fire-and-forget per user):
       → analyzeDrift() for each successful query
       → DriftAlertService.checkAndAlert() — email if threshold crossed
-      → AlgorithmUpdateDetector.analyze() — detect coordinated drift
+      → AlgorithmUpdateDetector.detect() — detect coordinated drift + confidence
       → persistEvents() to algorithm_events collection
 ```
 
@@ -546,18 +547,28 @@ Indexes: `userId`, `read`, `createdAt DESC`
 
 ### algorithm_events (NEW)
 ```
+
+`COLLECTION_ALGORITHM_EVENTS` defaults to `algorithm_events` for compatibility
+with deployments created before the environment variable was documented.
 userId           string    required
 eventId          string    required
 category         string    required
 driftRate        float     required
 avgDriftScore    float     required
 severity         string    "minor" | "moderate" | "major"
-description      string    required
+description      string    required (generated from structured event at write time)
 affectedCount    integer   required
-affectedQueries  string    JSON array
+affectedQueries  string    JSON array of query drift points
 detectedAt       datetime  required
 ```
 Indexes: `userId`, `detectedAt DESC`, `category`
+
+Persistence intentionally targets this existing schema: confidence, metrics,
+windowStart, and windowEnd remain in the in-memory/API event but are not sent
+to Appwrite, which rejects unknown attributes. Descriptions are generated from
+the structured event when it is written. Event documents use deterministic IDs
+scoped by user, category, and UTC correlation-window bucket so repeated cron
+runs update the same event rather than creating duplicates.
 
 ### embedding_cache (NEW — Appwrite, not Weaviate)
 ```

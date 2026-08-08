@@ -2,7 +2,7 @@
 // Utility functions for localStorage and Appwrite document transformation.
 
 import { CATEGORY_MAP_REVERSE } from "@/constants/category-map"
-import type { QueryConfig, RankingSnapshot, UserFeedback } from "@/types/type"
+import type { ExaCategory, QueryConfig, RankingSnapshot, UserFeedback } from "@/types/type"
 
 // ─── Storage key ──────────────────────────────────────────────────────────────
 
@@ -75,15 +75,25 @@ export function transformQueryDocument(doc: any, isLocal: boolean): QueryConfig 
     console.warn("[db-utils] transformQueryDocument: missing $id", doc)
   }
 
+  const rawCategory = CATEGORY_MAP_REVERSE[doc.category] ?? doc.category
+  const category: ExaCategory = typeof rawCategory === "string" && [
+    "company", "news", "research_paper", "github", "pdf", "tweet",
+    "personal_site", "linkedin_profile", "financial_report",
+  ].includes(rawCategory) ? rawCategory as ExaCategory : "news"
+  const schedule = safeParse<QueryConfig["schedule"]>(doc.schedule, {
+    enabled: false,
+    frequency: "daily",
+  })
+
   return {
     id:        doc.$id       ?? "",
     name:      doc.name      ?? "",
     query:     doc.query     ?? "",
     // ✅ Reverse-map category enum safely
-    category:  CATEGORY_MAP_REVERSE[doc.category] ?? doc.category ?? "unknown",
+    category,
     // ✅ safeParse guards against double-parsed fields
-    filters:   safeParse<Record<string, any>>(doc.filters,  {}),
-    schedule:  safeParse<Record<string, any>>(doc.schedule, {}),
+    filters:   safeParse<QueryConfig["filters"]>(doc.filters, {}),
+    schedule,
     tags:      safeParse<string[]>(doc.tags, []),
     createdAt: doc.createdAt ? new Date(doc.createdAt) : new Date(),
     lastRun:   doc.lastRun   ? new Date(doc.lastRun)   : undefined,
