@@ -275,7 +275,7 @@ export function RevolutionaryStatsCard({
             <div className="space-y-2">
               <div className="text-2xl font-bold text-indigo-600">
                 {statsData.contentCoherence !== null
-                  ? `${Math.round(statsData.contentCoherence * 100)}%`
+                  ? `${Math.round(statsData.contentCoherence)}%`
                   : "N/A"}
               </div>
               <p className="text-xs text-gray-500">Content Coherence</p>

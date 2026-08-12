@@ -1,0 +1,30 @@
+app/api/cron/process-scheduled/route.ts:11: trailing whitespace.
+[32m+[m[32mimport { algorithmUpdateDetector } from "@/lib/services/algorithm-detector"[m[41m[m
+app/api/cron/process-scheduled/route.ts:76: trailing whitespace.
+[32m+[m[32m  const secret = process.env.CRON_SECRET[m[41m[m
+app/api/cron/process-scheduled/route.ts:226: trailing whitespace.
+[32m+[m[32m    const triggerUserId = request.headers.get("x-trigger-user-id")[m[41m[m
+app/api/cron/process-scheduled/route.ts:227: trailing whitespace.
+[32m+[m[32m    const allScheduled = await databaseService.queryService.getAllScheduledQueries()[m[41m[m
+app/api/cron/process-scheduled/route.ts:228: trailing whitespace.
+[32m+[m[32m    // This header is accepted only after CRON_SECRET authorization above. It[m[41m[m
+app/api/cron/process-scheduled/route.ts:229: trailing whitespace.
+[32m+[m[32m    // scopes browser-initiated manual runs to the authenticated user, while[m[41m[m
+app/api/cron/process-scheduled/route.ts:230: trailing whitespace.
+[32m+[m[32m    // GitHub Actions continues to process all users without the header.[m[41m[m
+app/api/cron/process-scheduled/route.ts:231: trailing whitespace.
+[32m+[m[32m    const scheduled = triggerUserId[m[41m[m
+app/api/cron/process-scheduled/route.ts:232: trailing whitespace.
+[32m+[m[32m      ? allScheduled.filter(query => query.userId === triggerUserId)[m[41m[m
+app/api/cron/process-scheduled/route.ts:233: trailing whitespace.
+[32m+[m[32m      : allScheduled[m[41m[m
+app/api/cron/process-scheduled/route.ts:234: trailing whitespace.
+[32m+[m[32m    console.log(`[Cron] Total scheduled queries found: ${scheduled.length}`)[m[41m[m
+app/api/cron/process-scheduled/route.ts:412: trailing whitespace.
+[32m+[m[32m        const updateEvents = await algorithmUpdateDetector.detect(driftResults, queryMeta, userId)[m[41m[m
+app/api/cron/process-scheduled/route.ts:417: trailing whitespace.
+[32m+[m[32m            console.log(`[Cron:PostProcess]   • ${e.category} — ${e.severity} (${Math.round(e.metrics.driftRate * 100)}% drift rate, avg score ${e.metrics.avgDriftScore.toFixed(1)}, ${e.confidence.score}% confidence)`)[m[41m[m
+app/api/cron/process-scheduled/route.ts:460: trailing whitespace.
+[32m+[m[32mexport const POST = handler[m[41m[m
+components/analytics/RevolutionaryStatsCard.tsx:278: trailing whitespace.
+[32m+[m[32m                  ? `${Math.round(statsData.contentCoherence)}%`[m[41m[m
