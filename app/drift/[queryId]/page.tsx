@@ -36,7 +36,7 @@ interface EnhancedDriftResult extends DriftAnalysisResult {
   routeProcessingTime?: number;
   // ✅ FIX: added missing fields that were referenced at runtime but not
   // declared — caused "embeddingMode is not defined" browser error
-  embeddingMode?:       "gemini" | "minilm" | "position-only";
+  embeddingMode?:       "gemini" | "openai" | "position-only";
   totalResultsCompared?: number;
   contentStabilityRate?: number;
   decomposedDrift?:     {

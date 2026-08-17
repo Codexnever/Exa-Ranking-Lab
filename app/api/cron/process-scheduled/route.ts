@@ -8,7 +8,7 @@ import { createHash } from "crypto"
 import type { QueryConfig, SearchResult } from "@/types/type"
 
 import { driftAlertService }       from "@/app/services/DriftAlertService"
-import { algorithmUpdateDetector }  from "@/app/services/AlgorithmUpdateDetector"
+import { algorithmUpdateDetector } from "@/lib/services/algorithm-detector"
 import { analyzeDrift }             from "@/app/logic/driftAnalyzer"
 import {
   computeConfigHash,
@@ -73,7 +73,7 @@ function overdueSortKey(query: QueryConfig): number {
 // ─── Auth check ───────────────────────────────────────────────────────────────
 
 function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET || "exa-cron-secret-2024-xK9mP3nQ7rL2"
+  const secret = process.env.CRON_SECRET
   if (!secret) {
     console.error("[Cron] ❌ CRON_SECRET env var not set — rejecting all requests")
     return false
@@ -223,7 +223,14 @@ async function handler(request: NextRequest) {
   try {
     // ── STEP 3: Fetch all scheduled queries ──────────────────────────────────
     console.log(`[Cron] Fetching all scheduled queries from Appwrite...`)
-    const scheduled = await databaseService.queryService.getAllScheduledQueries()
+    const triggerUserId = request.headers.get("x-trigger-user-id")
+    const allScheduled = await databaseService.queryService.getAllScheduledQueries()
+    // This header is accepted only after CRON_SECRET authorization above. It
+    // scopes browser-initiated manual runs to the authenticated user, while
+    // GitHub Actions continues to process all users without the header.
+    const scheduled = triggerUserId
+      ? allScheduled.filter(query => query.userId === triggerUserId)
+      : allScheduled
     console.log(`[Cron] Total scheduled queries found: ${scheduled.length}`)
 
     if (scheduled.length > 0) {
@@ -402,12 +409,12 @@ async function handler(request: NextRequest) {
         // Algorithm update detection
         console.log(`[Cron:PostProcess] Running algorithm update detection for userId=${userId}`)
         const queryMeta    = queryMetaByUser.get(userId) ?? []
-        const updateEvents = algorithmUpdateDetector.analyze(driftResults, queryMeta)
+        const updateEvents = await algorithmUpdateDetector.detect(driftResults, queryMeta, userId)
         console.log(`[Cron:PostProcess] Algorithm update events detected: ${updateEvents.length}`)
 
         if (updateEvents.length > 0) {
           updateEvents.forEach(e =>
-            console.log(`[Cron:PostProcess]   • ${e.category} — ${e.severity} (${Math.round(e.driftRate * 100)}% drift rate, avg score ${e.avgDriftScore.toFixed(1)})`)
+            console.log(`[Cron:PostProcess]   • ${e.category} — ${e.severity} (${Math.round(e.metrics.driftRate * 100)}% drift rate, avg score ${e.metrics.avgDriftScore.toFixed(1)}, ${e.confidence.score}% confidence)`)
           )
           await algorithmUpdateDetector.persistEvents(userId, updateEvents)
           console.log(`[Cron:PostProcess] ✅ Persisted ${updateEvents.length} algorithm update event(s)`)

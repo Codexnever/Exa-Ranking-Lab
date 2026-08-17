@@ -141,6 +141,7 @@ export default function Sidebar() {
     { label: "Snapshots",       icon: Camera,       href: "/snapshots"     },
     { label: "Compare Rankings",icon: GitCompare,   href: "/compare"       },
     { label: "Feedback",        icon: MessageSquare,href: "/feedback"      },
+    { label: "Evaluation",      icon: Target,       href: "/evaluation"    },
     { label: "Settings",        icon: Settings,     href: "/settings"      },
   ]
 

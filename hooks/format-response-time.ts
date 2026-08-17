@@ -1,7 +1,8 @@
-export function formatResponseTime(value: number | undefined): string {
-  if (typeof value !== 'number' || isNaN(value)) return '-';
+export function formatResponseTime(value: number | string | undefined): string {
+  const numericValue = typeof value === "number" ? value : Number(value)
+  if (!Number.isFinite(numericValue)) return '-';
 
-  const seconds = value / 1000;
+  const seconds = numericValue / 1000;
 
   if (seconds >= 60) {
     // >= 1 minute
@@ -17,9 +18,9 @@ export function formatResponseTime(value: number | undefined): string {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}s`;
-  } else if (value > 0) {
+  } else if (numericValue > 0) {
     // < 1s: show ms
-    return `${Math.round(value)}ms`;
+    return `${Math.round(numericValue)}ms`;
   } else {
     return '-';
   }
