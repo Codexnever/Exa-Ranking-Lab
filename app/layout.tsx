@@ -14,16 +14,11 @@
 
 import type React from "react"
 import type { Metadata } from "next"
-import { Inter, JetBrains_Mono } from "next/font/google"
 import "../styles/globals.css"
 import { AuthProvider } from "@/lib/middleware/authentication/auth-context"
 import { AuthGate } from "@/components/security/auth-gate"
 import { AppShell } from "@/components/app-shell"
 import { Toaster } from "sonner"
-
-// ─── Fonts ────────────────────────────────────────────────────────────────────
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" })
-const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" })
 
 // ─── Metadata (App Router way — replaces next/head) ──────────────────────────
 // This runs on the server, gets injected into <head> automatically.
@@ -82,13 +77,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className="h-full">
       <head>
         {/* Performance hints — not available via metadata export */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://api.exa.ai" />
         <link rel="dns-prefetch" href="https://cloud.appwrite.io" />
         <link rel="dns-prefetch" href="https://vercel.com" />
       </head>
-      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased h-full`}>
+      <body className="font-sans antialiased h-full">
 
         {/*
           Provider order (inside-out):

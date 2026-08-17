@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const { data, userEmail } = await req.json()
     // Generate PDF buffer using pdfkit (server-side)
     const pdfBuffer = await generateDataExportPDF(data, userEmail || "user")
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",

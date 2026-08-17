@@ -176,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login: loginFn,
         register: registerFn,
         logout: logoutFn,
-        refreshSession: async () => (await fetchUser()) !== null,
+        refreshSession: fetchUser,
       }}
     >
       {children}

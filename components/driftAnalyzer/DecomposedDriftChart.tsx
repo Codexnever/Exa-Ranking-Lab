@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts"
 import { TrendingUp, Users, Shuffle, AlertCircle } from "lucide-react"
-import type { DecomposedDrift } from "@/lib/services/DriftDecomposer"
+import type { DecomposedDrift } from "@/app/services/DriftDecomposer"
 
 interface DecomposedDriftChartProps {
   decomposed: DecomposedDrift
@@ -22,7 +22,7 @@ const CAUSE_CONFIG = {
   rerank:     { label: "Re-rank Drift",    color: "#f97316", icon: Shuffle,      desc: "Pure algorithmic re-ordering"       },
   mixed:      { label: "Mixed Causes",     color: "#6b7280", icon: AlertCircle,  desc: "Multiple factors contributing"      },
   stable:     { label: "Stable",           color: "#22c55e", icon: TrendingUp,   desc: "No significant drift detected"      },
-}
+} as const
 
 export function DecomposedDriftChart({ decomposed, queryName }: DecomposedDriftChartProps) {
   if (!decomposed) return null
