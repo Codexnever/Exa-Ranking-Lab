@@ -49,8 +49,8 @@ function parsePatchBody(body: unknown): Partial<{
   const result: Record<string, unknown> = {}
 
   const validCategories: ExaCategory[] = [
-    "company", "research paper", "news", "pdf", "github",
-    "tweet", "personal site", "linkedin profile", "financial report",
+    "company", "research_paper", "news", "pdf", "github",
+    "tweet", "personal_site", "linkedin_profile", "financial_report",
   ]
 
   if (b.name !== undefined) {
@@ -121,14 +121,15 @@ function parsePatchBody(body: unknown): Partial<{
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     // ✅ getCurrentUser inside try/catch — handles Appwrite/network errors
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const query = await databaseService.queryService.getQuery(params.id)
+    const query = await databaseService.queryService.getQuery(id)
 
     // ✅ Return 404 for both "not found" and "wrong owner" — don't leak existence
     if (!query || query.userId !== user.$id) {
@@ -146,15 +147,16 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     // Auth inside try/catch
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     // Verify ownership before parsing body (fail fast)
-    const existing = await databaseService.queryService.getQuery(params.id)
+    const existing = await databaseService.queryService.getQuery(id)
     if (!existing || existing.userId !== user.$id) {
       return NextResponse.json({ error: "Query not found" }, { status: 404 })
     }
@@ -175,7 +177,7 @@ export async function PATCH(
       return NextResponse.json({ error: err.message }, { status: err.status ?? 400 })
     }
 
-    const updated = await databaseService.queryService.updateQuery(params.id, validated as Partial<QueryConfig>)
+    const updated = await databaseService.queryService.updateQuery(id, validated as Partial<QueryConfig>)
     return NextResponse.json(updated)
   } catch (err) {
     console.error("[PATCH /api/queries/[id]] Failed:", err)
@@ -187,14 +189,15 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     // ✅ Auth inside try/catch
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const query = await databaseService.queryService.getQuery(params.id)
+    const query = await databaseService.queryService.getQuery(id)
     if (!query || query.userId !== user.$id) {
       return NextResponse.json({ error: "Query not found" }, { status: 404 })
     }
@@ -203,7 +206,7 @@ export async function DELETE(
     // ✅ parseUserAgent never throws — malformed header gets safe defaults
     const userAgentInfo = parseUserAgent(request.headers.get("x-user-agent"))
 
-    const success = await databaseService.queryService.deleteQuery(params.id, {
+    const success = await databaseService.queryService.deleteQuery(id, {
       userId:    user.$id,
       ipAddress: ip,
       userAgent: userAgentInfo,
@@ -217,7 +220,7 @@ export async function DELETE(
     await databaseService.accessLogService.logAccess(
       user.$id,
       "delete_query",
-      { queryId: params.id, name: query.name },
+      { queryId: id, name: query.name },
       ip,
       userAgentInfo
     )

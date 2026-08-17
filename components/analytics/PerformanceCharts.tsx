@@ -90,9 +90,9 @@ export function PerformanceCharts({
                     //    (that check was copy-pasted from the second
                     //    chart's tooltip and did nothing in this context).
                     //    Formatter now matches the actual keys used below.
-                    formatter={(value: any, name: string) =>
+                    formatter={(value: unknown, name: string | number | undefined) =>
                       name === "responseTime"
-                        ? formatResponseTime(value)
+                        ? formatResponseTime(typeof value === "string" || typeof value === "number" ? value : undefined)
                         : `${value}%`
                     }
                   />
@@ -154,9 +154,9 @@ export function PerformanceCharts({
                   />
                   <Tooltip
                     contentStyle={{ fontSize: 14 }}
-                    formatter={(value: any, name: string) =>
+                    formatter={(value: unknown, name: string | number | undefined) =>
                       name === "avgTime"
-                        ? formatResponseTime(value)
+                        ? formatResponseTime(typeof value === "string" || typeof value === "number" ? value : undefined)
                         : `${value}%`
                     }
                   />

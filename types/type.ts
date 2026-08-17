@@ -33,13 +33,13 @@ export interface QueryConfig {
 export type ExaCategory =
   | "company"
   | "news"
-  | "research paper"
+  | "research_paper"
   | "github"
   | "pdf"
   | "tweet"
-  | "personal site"
-  | "linkedin profile"
-  | "financial report"
+  | "personal_site"
+  | "linkedin_profile"
+  | "financial_report"
 
 export interface ExaSearchOptions {
   query: string
@@ -114,7 +114,7 @@ export interface RankingSnapshot {
     exaVersion?: string
     contentHash?: string
     executionType?: "manual" | "scheduled"
-    source?: "snapshots_api" | "query_run_api" | "analytics_refresh_api" | "cron_scheduler"
+    source?: "snapshots_api" | "query_run_api" | "analytics_refresh_api" | "cron_scheduler" | "appwrite"
     isVectorEnhanced?: boolean
     vectorCount?: number
     semanticProcessingTime?: number
@@ -671,9 +671,32 @@ export interface AlgorithmUpdateEvent {
     queryId:    string
     queryName:  string
     driftScore: number
+    timestamp?: Date | string
   }>
   driftRate:     number
   avgDriftScore: number
   severity:      "minor" | "moderate" | "major"
   description:   string
+  summary?:      string
+  detail?:       string
+  confidence?: {
+    score: number
+    severity: "minor" | "moderate" | "major"
+    signals: {
+      driftRate: number
+      avgDriftScore: number
+      affectedQueryCount: number
+      historicalDeviation: number
+    }
+  }
+  metrics?: {
+    totalQueriesInCategory: number
+    affectedQueryCount: number
+    driftRate: number
+    avgDriftScore: number
+    historicalAvgDrift: number
+    historicalStdDev: number
+    windowStartMs: number
+    windowEndMs: number
+  }
 }

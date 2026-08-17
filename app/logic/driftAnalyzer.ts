@@ -430,7 +430,7 @@ export async function analyzeDrift(
     embeddingMode:          dominantMode,
     //  NEW: decomposed drift aggregates
     avgContentDrift:        n > 0 ? totalContentDrift    / n : 0,
-    decomposedDriftavgCompetitorDrift:     n > 0 ? totalCompetitorDrift / n : 0,
+    avgCompetitorDrift:     n > 0 ? totalCompetitorDrift / n : 0,
     avgRerankDrift:         n > 0 ? totalRerankDrift     / n : 0,
     dominantDriftCause:     aggregateDecomposed.dominantCause,
     //  Latest snapshot's decomposed drift for the detail page

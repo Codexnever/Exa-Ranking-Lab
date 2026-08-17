@@ -28,7 +28,7 @@ const STATUS_CONFIG = {
   full:    { color: "#22c55e", label: "Full coverage",   icon: CheckCircle  },
   partial: { color: "#f97316", label: "Partial coverage", icon: AlertTriangle },
   sparse:  { color: "#ef4444", label: "Sparse coverage", icon: TrendingDown  },
-}
+} as const
 
 export function CoverageGapChart({ snapshots, queryName }: CoverageGapChartProps) {
   const chartData = useMemo(() => {
@@ -82,7 +82,7 @@ export function CoverageGapChart({ snapshots, queryName }: CoverageGapChartProps
   }, [chartData])
 
   const latestCoverage = chartData[chartData.length - 1]
-  const latestStatus   = STATUS_CONFIG[latestCoverage?.status ?? "full"]
+  const latestStatus = STATUS_CONFIG[(latestCoverage?.status ?? "full") as keyof typeof STATUS_CONFIG]
   const StatusIcon     = latestStatus.icon
 
   if (chartData.length === 0) {
@@ -187,7 +187,7 @@ export function CoverageGapChart({ snapshots, queryName }: CoverageGapChartProps
                 <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={v => `${v}%`} />
                 <Tooltip
                   contentStyle={{ fontSize: 12 }}
-                  formatter={(v: any, name: string) => [
+                  formatter={(v: unknown, name: string | number | undefined) => [
                     `${v}%`,
                     name === "coveragePct" ? "Coverage" : name,
                   ]}
