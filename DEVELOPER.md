@@ -129,11 +129,12 @@ app/
     └── appwrite.ts                  # browser SDK (client components)
 
 lib/
-├── services/                        # Business logic — no DB, no HTTP framework
-│   ├── EmbeddingService.ts          # Gemini → OpenAI → position-only fallback
-│   ├── DriftAlertService.ts         # Email + webhook on drift threshold
-│   ├── DriftDecomposer.ts           # Splits drift into content/competitor/rerank
-│   └── AlgorithmUpdateDetector.ts   # Cross-query correlation → algo update event
+├── services/
+│   └── algorithm-detector/          # Modular cross-query update detection
+│       ├── AlgorithmUpdateDetector.ts
+│       ├── ConfidenceScorer.ts
+│       ├── EventPersistence.ts
+│       └── DescriptionBuilder.ts
 ├── middleware/
 │   ├── security/security-middleware.ts   # withEnhancedSecurity
 │   └── authentication/auth-context.tsx   # useAuth hook
@@ -222,7 +223,7 @@ GitHub Actions (*/30 * * * *)
   → POST-PROCESSING (fire-and-forget per user):
       → analyzeDrift() for each successful query
       → DriftAlertService.checkAndAlert() — email if threshold crossed
-      → AlgorithmUpdateDetector.analyze() — detect coordinated drift
+      → AlgorithmUpdateDetector.detect() — detect coordinated drift + confidence
       → persistEvents() to algorithm_events collection
 ```
 
@@ -546,18 +547,41 @@ Indexes: `userId`, `read`, `createdAt DESC`
 
 ### algorithm_events (NEW)
 ```
+
+`COLLECTION_ALGORITHM_EVENTS` defaults to `algorithm_events` for compatibility
+with deployments created before the environment variable was documented.
 userId           string    required
 eventId          string    required
 category         string    required
 driftRate        float     required
 avgDriftScore    float     required
 severity         string    "minor" | "moderate" | "major"
-description      string    required
+description      string    required (generated from structured event at write time)
 affectedCount    integer   required
-affectedQueries  string    JSON array
+affectedQueries  string    JSON array of query drift points
 detectedAt       datetime  required
 ```
 Indexes: `userId`, `detectedAt DESC`, `category`
+
+Schema v2 preserves all fields above and adds optional first-class detector,
+confidence, query-count, baseline, and window attributes plus
+`thresholdsJson` (4096), `evidenceJson` (16384), and `confidenceJson` (8192).
+`metricsJson` is intentionally omitted to stay within Appwrite attribute limits;
+the reader reconstructs metrics from first-class fields and `evidenceJson`.
+`userId` must remain because Appwrite's `$id` identifies a document, not its
+owner, and event listing is scoped by `userId`. Run `npm run provision:algorithm-events-v2 -- --dry-run`
+to inspect, then run it without `--dry-run` before deploying v2-writing code.
+The migration never recreates the collection or modifies old documents.
+
+During a staggered rollout the application checks attribute readiness. If v2
+attributes are missing it writes the legacy payload and emits a warning rather
+than failing scheduled processing. Production order is: provision attributes,
+verify they are available, deploy application code, then verify a new document
+has `schemaVersion=2` and `detectorVersion=2.0`.
+
+Descriptions are generated from the structured event when written. Event documents use deterministic IDs
+scoped by user, category, and UTC correlation-window bucket so repeated cron
+runs update the same event rather than creating duplicates.
 
 ### embedding_cache (NEW — Appwrite, not Weaviate)
 ```
@@ -753,3 +777,135 @@ If you see `USAGE_LIMIT_EXCEEDED (429)`:
 *Last updated: End of full audit session — all ~80 files reviewed*
 *Session covered: security fixes, statistical correctness, UI crash risks,*
 *5 new services, 5 new UI components, type system, folder structure*
+
+## Relevance-Judgment Foundation (Phase 1)
+
+Phase 1 adds only the strict domain, deterministic identity, and Appwrite schema foundation for future search-relevance evaluation. It does not add evaluation APIs, labeling UI, metrics, or detector integration.
+
+### Relevance semantics
+
+Authoritative `RelevanceJudgment` records use a three-level scale:
+
+- `0` — not relevant
+- `1` — relevant
+- `2` — highly relevant
+
+**Unjudged != irrelevant.** Grade `0` is an explicit human judgment. A result is unjudged when no accepted judgment exists. Accepted judgments require grade 0, 1, or 2; pending and conflicted judgments cannot expose an authoritative grade.
+
+`UserFeedback` remains operational, multi-purpose feedback with its existing 1–5 rating and relevance/quality/freshness/authority dimensions. It is not ground truth and is not converted automatically. `RelevanceJudgment` is a separate evaluation-domain type with dataset-version, assessor, status, and provenance fields.
+
+### Canonical URL policy v1
+
+`CANONICALIZATION_VERSION` is `"1"`. The pure helper in `utils/canonicalize-document-url.ts`:
+
+1. accepts only absolute HTTP(S) URLs and fails explicitly for invalid input;
+2. normalizes identity URLs to HTTPS, lowercases the hostname, and removes default ports;
+3. removes fragments;
+4. retains `/` for the root and removes trailing slashes from non-root paths;
+5. removes only `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `utm_id`, `gclid`, `fbclid`, and `msclkid` (case-insensitive); and
+6. preserves and deterministically sorts every remaining meaningful query parameter.
+
+Any behavioral change requires a new canonicalization version. Raw URLs and content hashes remain provenance; neither is the primary identity. The document identity is:
+
+```text
+documentKey = SHA-256(canonicalUrl)
+```
+
+Judgment and benchmark-query keys are likewise deterministic SHA-256 tuple hashes. Snapshot records are not mutated.
+
+### Evaluation collections
+
+Phase 1 provisions three additive Appwrite collections using scalar IDs (no Appwrite relationship attributes):
+
+- `evaluation_datasets` — dataset-version metadata and freeze metadata;
+- `evaluation_queries` — frozen benchmark-query definitions; and
+- `relevance_judgments` — unique query-document judgment state and bounded JSON provenance.
+
+Required environment variables:
+
+```dotenv
+COLLECTION_EVALUATION_DATASETS=evaluation_datasets
+COLLECTION_EVALUATION_QUERIES=evaluation_queries
+COLLECTION_RELEVANCE_JUDGMENTS=relevance_judgments
+```
+
+The provisioning command also needs the existing Appwrite endpoint, project, database, and server API-key variables. Inspect safely without mutation:
+
+```bash
+npm run provision:evaluation-schema -- --dry-run
+# --inspect is an equivalent non-mutating mode
+```
+
+Provision missing collections, attributes, and indexes:
+
+```bash
+npm run provision:evaluation-schema
+```
+
+The script is idempotent, reports existing/missing resources and schema mismatches, and never deletes collections, attributes, indexes, or documents. A mismatch fails for manual review rather than being repaired destructively.
+
+## Evaluation Dataset Lifecycle (Phase 2)
+
+Phase 2 adds owner-scoped dataset-version creation, listing/detail reads, server-authoritative benchmark query snapshotting, and frozen-version cloning. It intentionally does not add judgments, final freezing, labeling, or relevance metrics.
+
+### Dataset families and versions
+
+`familyKey` is the normalized, index-safe lineage shared by versions of one benchmark. A new family starts at version 1 in `draft` status. Version, status, owner/creator, timestamps, counts, and `canonicalizationVersion` are assigned server-side. The unique `familyKey + version` Appwrite index is the final concurrency guard. Clone allocation reads the highest family version and retries a version-creation conflict up to three times; it does not implement a distributed lock.
+
+The initial ownership rule is deliberately simple: only `dataset.ownerUserId` may list/read the dataset, add queries, or clone it. Operational queries must be owned by the same authenticated user.
+
+### Operational query snapshotting
+
+Clients submit only operational query IDs. The server loads each authoritative `QueryConfig` and freezes the query text, category, include/exclude domains, date filters, result count, and the existing `computeConfigHash()` value into `evaluation_queries`. Schedule and tags are not copied because they do not affect retrieval. `computeConfigHash()` keeps its existing semantics (result-affecting configuration but not query text); reproducibility requires both the separately frozen `queryText` and `configHash`.
+
+`sourceQueryId` is provenance only. Editing or deleting the operational query does not mutate or delete the benchmark copy. Membership is idempotent through:
+
+```text
+queryKey = SHA-256(datasetVersionId + "\n" + sourceQueryId)
+```
+
+Example:
+
+```text
+Operational query:
+"latest vector database filtering research"
+
+        ↓ add to benchmark
+
+EvaluationQuery v1
+queryText frozen
+filters frozen
+numResults frozen
+configHash frozen
+
+        ↓ operational query later edited
+
+EvaluationQuery v1 remains unchanged
+```
+
+### Clone behavior
+
+Only a dataset already stored as `frozen` can be cloned. The new version:
+
+- keeps the family key;
+- uses the next available version;
+- records `parentVersionId`;
+- starts as a draft with zero judgments/conflicts;
+- uses the current canonicalization policy version; and
+- copies benchmark query records from the parent, not mutable live queries.
+
+New query keys are generated because the dataset-version ID changes. Judgments are not copied in Phase 2.
+
+### Readiness and final freeze
+
+Dataset detail responses include `QueryFoundationReadiness`. `queryFoundationReady` validates that queries exist, counts agree, IDs are scoped to the dataset, conflicts are absent, and the canonicalization version is present. `fullEvaluationFreezeReady` is always `false` in Phase 2, with pending phases listed explicitly. No `/freeze` endpoint is provided: final freezing requires the future judgment/conflict lifecycle and must not be simulated early.
+
+### Phase 2 routes
+
+- `GET /api/evaluation/datasets` — owner-scoped summaries with status/family filters and bounded pagination.
+- `POST /api/evaluation/datasets` — create version 1 from safe name/description/family input.
+- `GET /api/evaluation/datasets/[id]` — owner-scoped metadata, benchmark queries, and readiness.
+- `POST /api/evaluation/datasets/[id]/queries` — add up to 50 operational query IDs using server-side snapshots.
+- `POST /api/evaluation/datasets/[id]/clone` — clone a frozen version into the next draft.
+
+Phase 2 does not implement `RelevanceJudgmentService`, feedback promotion, adjudication, judgment-aware freezing, UI, metrics, analytics, drift, detector, or algorithm-event integration.

@@ -55,14 +55,16 @@ export default function QueryMonitor() {
   const [monitoringStartTime, setMonitoringStartTime] = useState<number | null>(null)
   const [selectedCategory,    setSelectedCategory] = useState("all")
   const [searchFilter,        setSearchFilter]     = useState("")
-  const [autoRefresh,         setAutoRefresh]      = useState(true)
+  const [autoRefresh,         setAutoRefresh]      = useState(false)
   const [refreshInterval,     setRefreshInterval]  = useState(30)
+  const [isTriggeringCron,    setIsTriggeringCron] = useState(false)
   const [sortBy,              setSortBy]           = useState<"name" | "lastRun" | "successRate" | "avgTime">("lastRun")
 
   // ✅ FIX: ref to prevent concurrent queue processing — the root cause
   // of the infinite loop. Without this, multiple processQueue calls could
   // run simultaneously, each re-queuing the same item.
   const isProcessingQueue = useRef(false)
+  const isRefreshing = useRef(false)
 
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig>({
     isEnabled:              true,
@@ -74,22 +76,45 @@ export default function QueryMonitor() {
     autoRetryOnFailure:     true,
   })
 
+  const refreshMonitorData = useCallback(async () => {
+    if (!user?.$id || isRefreshing.current) return
+    isRefreshing.current = true
+    try {
+      await Promise.allSettled([
+        fetchQueries(user.$id),
+        fetchAllSnapshots(user.$id),
+      ])
+    } finally {
+      isRefreshing.current = false
+    }
+  }, [user?.$id, fetchQueries, fetchAllSnapshots])
+
   // ── Init ───────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!user?.$id) return
-    fetchQueries(user.$id)
-    fetchAllSnapshots(user.$id)
-  }, [user?.$id, fetchQueries, fetchAllSnapshots])
+    void refreshMonitorData()
+  }, [refreshMonitorData])
 
   // ── Auto-refresh ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!autoRefresh || !user?.$id) return
-    const id = setInterval(() => {
-      fetchQueries(user.$id!)
-      fetchAllSnapshots(user.$id!)
-    }, refreshInterval * 1000)
-    return () => clearInterval(id)
-  }, [autoRefresh, refreshInterval, user?.$id, fetchQueries, fetchAllSnapshots])
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    const scheduleNextRefresh = () => {
+      timeoutId = setTimeout(async () => {
+        if (cancelled) return
+        // Avoid background polling while the tab is not visible.
+        if (document.visibilityState === "visible") await refreshMonitorData()
+        if (!cancelled) scheduleNextRefresh()
+      }, refreshInterval * 1000)
+    }
+
+    scheduleNextRefresh()
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [autoRefresh, refreshInterval, user?.$id, refreshMonitorData])
 
   // ── Filtering & sorting ────────────────────────────────────────────────────
   const calculateQuerySuccessRate = useCallback((queryId: string) => {
@@ -878,17 +903,26 @@ export default function QueryMonitor() {
               </div>
               <Button
                 variant="outline" size="sm"
+                disabled={isTriggeringCron}
                 onClick={async () => {
+                  setIsTriggeringCron(true)
                   try {
-                    await secureCall("GET", "/cron/process-scheduled")
-                    toast.success("Manual cron triggered")
+                    const result = await secureCall<{
+                      success: boolean
+                      message?: string
+                      processed?: number
+                    }>("POST", "/scheduler/trigger")
+                    toast.success(result.message ?? `Manual run completed (${result.processed ?? 0} processed)`)
+                    await refreshMonitorData()
                   } catch {
                     toast.error("Failed to trigger cron")
+                  } finally {
+                    setIsTriggeringCron(false)
                   }
                 }}
               >
                 <Play className="w-4 h-4 mr-2" />
-                Trigger Manually
+                {isTriggeringCron ? "Running…" : "Trigger Manually"}
               </Button>
             </CardContent>
           </Card>

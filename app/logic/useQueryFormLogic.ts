@@ -23,8 +23,8 @@ const formSchema = z.object({
     .max(1000, "Query must be less than 1000 characters"),
  
   category: z.enum([
-    "company", "research paper", "news", "pdf", "github",
-    "tweet", "personal site", "linkedin profile", "financial report",
+    "company", "research_paper", "news", "pdf", "github",
+    "tweet", "personal_site", "linkedin_profile", "financial_report",
   ]),
  
   filters: z.object({

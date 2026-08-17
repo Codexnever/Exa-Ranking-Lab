@@ -50,7 +50,7 @@ export function QueryForm({ onSubmit, editingQuery, onUpdate, onCancelEdit, Quer
   } = useQueryFormLogic(onSubmit, editingQuery);
 
   const QueryCategory = {
-    options: ["company", "news", "research paper", "pdf", "github", "tweet", "personal site", "linkedin profile", "financial report"]
+    options: ["company", "news", "research_paper", "pdf", "github", "tweet", "personal_site", "linkedin_profile", "financial_report"]
   };
 const QUERY_FREQUENCIES = [
   "hourly",
@@ -129,7 +129,7 @@ const QUERY_FREQUENCIES = [
                 <SelectContent>
                   {QueryCategory?.options?.map((option: string) => (
                     <SelectItem key={option} value={option}>
-                      {option.charAt(0).toUpperCase() + option.slice(1)}
+                      {option.replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase())}
                     </SelectItem>
                   ))}
                 </SelectContent>

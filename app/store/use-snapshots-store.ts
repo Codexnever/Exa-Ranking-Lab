@@ -8,7 +8,7 @@ import type { RankingSnapshot, RankingChange } from "@/types/type"
 
 const safeStorage = createJSONStorage(() => {
   if (typeof window === "undefined") {
-    return { getItem: () => null, setItem: () => {}, removeItem: () => {} } as Storage
+    return { getItem: () => null, setItem: () => {}, removeItem: () => {} } as unknown as Storage
   }
   return {
     getItem: (key: string) => {
