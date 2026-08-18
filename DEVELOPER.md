@@ -1123,3 +1123,72 @@ Ordering quality degraded significantly.
 The Evaluation History UI adds explicit Before and After selectors, comparison cards, written Improved/Degraded/Stable/Unavailable labels, common-query counts, quality summary, coverage warnings, largest query gains/losses, and aligned drift evidence.
 
 Phase 8 remains responsible for document-level movement evidence, hard-negative mining, retrieval/reranker stage attribution, ANN/filter diagnosis, and retrieval-system comparisons. Phase 7 does not modify detector confidence or classify an algorithm regression.
+
+## Canonical Judged Document Movement (Phase 8)
+
+Phase 8 extends the existing run-comparison response with canonical, accepted-judgment document movement. `DOCUMENT_MOVEMENT_POLICY_VERSION = "1"` pins Canonicalization Policy v1 as its identity dependency, highest-ranked canonical duplicate handling, `rankDelta = beforeRank - afterRank` (positive means upward), grade `>= 1` relevance, material movement at three ranks, top-5/top-10 transition semantics, and deterministic evidence ordering.
+
+Each exact saved-run snapshot is converted once into `CanonicalSnapshotRepresentation`. Raw URL variants are canonicalized with the existing `getDocumentIdentity`; the first occurrence retains its original rank and later canonical duplicates are ignored with counts and warnings. Thus HTTP/HTTPS, fragments, and tracking parameters cannot create fake entrants or drops, while meaningful parameters remain distinct.
+
+Only authoritative accepted judgments are aligned. Grade 0 remains explicitly judged irrelevant, grades 1 and 2 remain relevant/highly relevant, and pending, conflicted, operational-feedback, and unjudged documents are excluded from judged movement truth. An accepted benchmark document absent from both snapshots is retained as `unknown`/`absent_both`, because it affects benchmark truth but has no observed ranking movement.
+
+Movement types are `moved_up`, `moved_down`, `unchanged`, `entered_ranking`, `left_ranking`, and `unknown`. Every movement includes nullable ranks, canonical and raw URL provenance, content-hash change context, relevance meaning, materiality, and generic cutoff transitions: `entered`, `left`, `remained_inside`, or `remained_outside`.
+
+Descriptive evidence categories include highly relevant/relevant winners and losers plus judged-irrelevant winners and losers. Grade-0 promotions are not called hard negatives. Structured reason codes include `HIGHLY_RELEVANT_MOVED_DOWN`, `HIGHLY_RELEVANT_LEFT_TOP_K`, `RELEVANT_MOVED_DOWN`, `RELEVANT_LEFT_TOP_K`, `HIGHLY_RELEVANT_MOVED_UP`, `RELEVANT_ENTERED_TOP_K`, `IRRELEVANT_MOVED_UP`, `IRRELEVANT_ENTERED_TOP_K`, `RELEVANT_DISAPPEARED`, `RELEVANT_APPEARED`, and `NO_JUDGED_DOCUMENT_MOVEMENT`.
+
+The Phase 7 comparison service now loads accepted judgments and the exact Before/After snapshot IDs for each common query, validates frozen dataset/query/snapshot ownership and canonicalization provenance, and attaches query movement plus aggregate largest losses, gains, irrelevant promotions, relevant drops, summary counts, and coverage context. The existing comparison API request remains only `{ beforeRunId, afterRunId }`; clients cannot submit grades, canonical keys, ranks, or evidence reasons.
+
+Bounded diagnosis labels are descriptive rather than causal:
+
+- `ORDERING_LOSS_PATTERN` — nDCG degrades, Recall is broadly stable, relevant documents lose prominence, and judged-irrelevant documents rise.
+- `RELEVANT_DISAPPEARANCE_PATTERN` — Recall degrades alongside relevant top-K losses/disappearance.
+- `RELEVANCE_ORDERING_IMPROVEMENT_PATTERN` — nDCG improves alongside relevant-document gains.
+
+```text
+Query:
+"best vector database for filtered search"
+
+Before:
+
+#1 Doc A — grade 2
+#3 Doc B — grade 2
+#9 Doc X — grade 0
+
+After:
+
+#2 Doc X — grade 0
+#7 Doc A — grade 2
+Doc B absent from top 10
+
+Metrics:
+
+nDCG@10
+0.86 → 0.59
+
+Benchmark Recall@10
+1.00 → 0.50
+
+Evidence:
+
+Doc A:
+grade 2
+#1 → #7
+
+Doc B:
+grade 2
+#3 → absent
+
+Doc X:
+grade 0
+#9 → #2
+
+Interpretation:
+
+Measured relevance degraded.
+Highly relevant documents lost ranking prominence,
+while a judged-irrelevant document moved upward.
+```
+
+The comparison UI adds **What moved?**, highly relevant losses, relevant gains, irrelevant promotions, canonical URLs, rank and top-K transitions, coverage context, and expandable query drilldowns. The explanation says movement evidence is associated with metric change; it never attributes final-ranking movement to retrieval, ANN, filters, fusion, or reranking.
+
+Phase 9 requires stage-level candidate traces before candidate Recall@100, BM25/dense/fusion diagnosis, hard-negative mining, or reranker attribution can be supported. Phase 8 does not change detector confidence, drift math, or metric math.
