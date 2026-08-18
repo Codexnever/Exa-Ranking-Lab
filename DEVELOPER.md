@@ -993,3 +993,20 @@ Clone → v2 draft
 ```
 
 Phase 4 adds `POST /api/evaluation/datasets/[id]/freeze` and the `/evaluation` pages. It still does not calculate nDCG, Recall, MRR, Precision, Hit Rate, relevance deltas, hard negatives, reranker comparisons, or relevance-aware drift.
+
+## Search Relevance Metric Engine (Phase 5)
+
+Phase 5 adds deterministic, on-demand evaluation of explicit snapshots against a frozen dataset version. `EVALUATION_METRIC_VERSION = "1"` pins grade semantics, `2^grade - 1` gain, grade `>= 1` relevance, preservation of unjudged rank positions, highest-ranked-only canonical duplicate handling, benchmark-relative recall, judged-only precision denominators, and unweighted macro aggregation. Changing any of these semantics requires a new metric policy version.
+
+The engine calculates generic positive-integer cutoffs, with `5` and `10` as UI/API defaults:
+
+- **nDCG@K** uses graded gain and logarithmic discount. It is unavailable without accepted relevant benchmark truth.
+- **Benchmark Recall@K** is retrieved accepted relevant benchmark documents divided by all known accepted relevant documents for the evaluation query. It is not exhaustive web recall.
+- **Judged Precision@K** is accepted relevant divided by all accepted judged results in the top K. Unjudged results are excluded from this denominator, never treated as grade 0.
+- **Judgment Coverage@K** is accepted judged results divided by unique evaluated results in the top K.
+- **Reciprocal Rank / MRR** uses the original rank of the first accepted relevant result; no retrieved relevant result contributes zero.
+- **Hit@K** is one when an accepted relevant result occurs inside K and zero otherwise.
+
+`POST /api/evaluation/datasets/[id]/metrics` accepts cutoffs and explicit `{ evaluationQueryId, snapshotId }` selections. The server verifies owner, frozen status, query membership, snapshot ownership/source/config compatibility, judgment scope and canonical identity, then loads relevance truth itself. Legacy snapshots without `configHash` are allowed with a warning. Canonical duplicate results retain the first occurrence and ignore later occurrences without collapsing the original rank positions.
+
+Responses contain per-query metrics/counts/warnings, explicit selected snapshot IDs, macro aggregates, eligible/skipped counts, metric policy version, and `persisted: false`. Metric runs and relevance deltas remain intentionally unpersisted/deferred; judgment documents are not overloaded with metric output. Relevance-aware drift, hard negatives, reranker comparisons, detector integration, feedback promotion, and training exports are not part of Phase 5.
