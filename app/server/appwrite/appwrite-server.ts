@@ -1,20 +1,22 @@
 // server//appwrite-server.ts
 import { Client, Account, Users, Databases, Query, ID } from "node-appwrite";
+import { getServerAppwriteConfig, lazyService } from "@/lib/config/environment";
 
-const serverClient = new Client()
-  .setEndpoint(process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT!)
-  .setProject(process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID!)
-  .setKey(process.env.APPWRITE_API_KEY || process.env.NEXT_PUBLIC_APPWRITE_API_KEY!); // Secure server key
+const createServerClient = () => {
+  const config = getServerAppwriteConfig()
+  return new Client().setEndpoint(config.endpoint).setProject(config.projectId).setKey(config.apiKey)
+}
 
-export const users = new Users(serverClient);
-export const serverAccount = new Account(serverClient);
-export const databases = new Databases(serverClient);
+export const serverClient = lazyService(createServerClient);
+export const users = lazyService(() => new Users(createServerClient()));
+export const serverAccount = lazyService(() => new Account(createServerClient()));
+export const databases = lazyService(() => new Databases(createServerClient()));
 
 // Export server-safe query utilities
-export { serverClient, Query, ID };
+export { Query, ID };
 
 // Server-side safe configuration evaluation
-export const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!;
+export const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID ?? "";
 
 export const COLLECTIONS = {
   USERS:         process.env.COLLECTION_USERS!,

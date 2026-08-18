@@ -8,44 +8,26 @@
 // be called from API route handlers.
 
 import { Client, Account, Databases, Storage, Functions } from "appwrite"
+import { getPublicAppwriteConfig, lazyService } from "@/lib/config/environment"
 
 // ─── Startup config validation ────────────────────────────────────────────────
 //  Fail fast with a clear message rather than cryptic Appwrite errors later.
 // Only validates in browser context — env vars are available at build time
 // for server-side usage.
 
-if (typeof window !== "undefined") {
-  const required: Record<string, string | undefined> = {
-    NEXT_PUBLIC_APPWRITE_ENDPOINT:    process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT,
-    NEXT_PUBLIC_APPWRITE_PROJECT_ID:  process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID,
-    NEXT_PUBLIC_APPWRITE_DATABASE_ID: process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID,
-  }
-  const missing = Object.entries(required)
-    .filter(([, v]) => !v)
-    .map(([k]) => k)
-  if (missing.length > 0) {
-    console.error(
-      `[Appwrite] Missing required environment variables: ${missing.join(", ")}. ` +
-      "Check your .env.local file."
-    )
-  }
-}
-
 // ─── Shared client ────────────────────────────────────────────────────────────
-
-const client = new Client()
-  .setEndpoint(process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT!)
-  .setProject(process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID!)
-
-export const account   = new Account(client)
-export const databases = new Databases(client)
-export const storage   = new Storage(client)
-export const functions = new Functions(client)
-export { client }
+// Construction is deferred until a runtime operation actually needs Appwrite.
+// This keeps static analysis and production builds independent of live secrets.
+const createClient = () => { const config=getPublicAppwriteConfig();return new Client().setEndpoint(config.endpoint).setProject(config.projectId) }
+export const client = lazyService(createClient)
+export const account = lazyService(() => new Account(createClient()))
+export const databases = lazyService(() => new Databases(createClient()))
+export const storage = lazyService(() => new Storage(createClient()))
+export const functions = lazyService(() => new Functions(createClient()))
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-export const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!
+export const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID ?? ""
 
 export const COLLECTIONS = {
   USERS:         process.env.COLLECTION_USERS!,

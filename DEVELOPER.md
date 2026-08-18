@@ -1444,3 +1444,9 @@ Do not call one strategy universally best.
 ```
 
 Phase 12 does not deploy winners, export training data, fine-tune rerankers, perform LTR or automatic tuning, make significance claims, or automatically remediate ranking behavior.
+
+## Phase 13: v1 production finalization
+
+Phase 13 adds no search or relevance algorithms. Appwrite service construction is lazy: importing a route or page no longer requires live credentials during static analysis or production compilation. Runtime access validates public and server configuration centrally and reports the exact missing variable. Optional embedding, vector, email, and strategy providers remain optional.
+
+Release gates are `npm run check-types`, `npm run lint`, `npm test -- --runInBand`, and `npm run build`. GitHub Actions executes the same gates without secrets. The synthetic demo manifest is opt-in and non-writing; it exists to prepare authenticated demo imports without bypassing authoritative APIs. Live schema provisioning, authentication, end-to-end smoke flows, screenshots, and deployment still require a configured development or production project and must be checked in `docs/RELEASE_CHECKLIST.md` before tagging v1.
