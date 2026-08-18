@@ -2,6 +2,7 @@ import type { EvaluationDatasetDetail,EvaluationDatasetVersion,EvaluationQueryJu
 import type { QueryConfig,RankingSnapshot } from "@/types/type"
 import type { EvaluationMetricsResponse,SnapshotSelection } from "@/app/services/evaluation/metrics/types"
 import type { EvaluationRun,EvaluationRunList } from "@/types/evaluation-runs"
+import type { EvaluationRunComparison } from "@/types/evaluation-comparison"
 
 async function request<T>(url:string,init?:RequestInit):Promise<T>{const response=await fetch(url,{...init,headers:{"Content-Type":"application/json",...init?.headers}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status})`);return body as T}
 export const evaluationApi={
@@ -20,4 +21,5 @@ export const evaluationApi={
   saveRun:(id:string,snapshots:SnapshotSelection[],cutoffs:number[]=[5,10])=>request<EvaluationRun>(`/api/evaluation/datasets/${id}/runs`,{method:"POST",body:JSON.stringify({cutoffs,snapshots})}),
   runs:(id:string,limit=20,offset=0)=>request<EvaluationRunList>(`/api/evaluation/datasets/${id}/runs?limit=${limit}&offset=${offset}`),
   runDetail:(id:string,runId:string)=>request<EvaluationRun>(`/api/evaluation/datasets/${id}/runs/${runId}`),
+  compareRuns:(id:string,beforeRunId:string,afterRunId:string)=>request<EvaluationRunComparison>(`/api/evaluation/datasets/${id}/comparisons`,{method:"POST",body:JSON.stringify({beforeRunId,afterRunId})}),
 }

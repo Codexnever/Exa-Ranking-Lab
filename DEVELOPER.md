@@ -1064,3 +1064,62 @@ Therefore Phase 7 can safely calculate:
 ```
 
 Phase 6 stores the provenance needed for this comparison but does not calculate the delta. Metric deltas, compatibility scoring, before/after UI, and relevance-aware drift remain Phase 7 work.
+
+## Relevance-Aware Evaluation Run Comparison (Phase 7)
+
+Phase 7 compares two immutable saved runs without rerunning search or relevance evaluation. `EVALUATION_COMPARISON_VERSION = "1"` and Comparison Policy v1 pin `delta = after - before`, common-query intersection, per-metric availability intersection, winner/loser sorting, deterministic interpretation rules, and the primary-metric fallback order.
+
+### Compatibility and cohorts
+
+Authoritative comparison requires the same `datasetVersionId`, the same Metric Policy version, at least one common cutoff, and at least one common evaluation query. Different frozen dataset versions are not treated as unchanged benchmark truth. A missing cutoff remains unavailable rather than being invented.
+
+When selected query sets differ, comparison uses only the common evaluation-query IDs and returns the only-before/only-after IDs with a prominent warning. Every aggregate metric is recomputed from persisted per-query results where that metric is available in both runs. Phase 7 never subtracts persisted global aggregates from different cohorts.
+
+### Direction and magnitude
+
+The directional epsilon is `0.01`:
+
+- `abs(delta) < 0.01` — stable;
+- `delta >= 0.01` — improved;
+- `delta <= -0.01` — degraded.
+
+Magnitude labels are product interpretation bands, not statistical significance: stable below `0.01`, small below `0.05`, moderate below `0.15`, and large at or above `0.15`. Recall changes in the small band may be described as broadly stable context, while their exact numeric direction remains preserved.
+
+The primary quality metric is nDCG@10, followed by nDCG at the highest common cutoff, MRR, and Benchmark Recall at the highest common cutoff. Judgment Coverage is context rather than quality: either-side coverage below `0.50` or a change of at least `0.20` produces a caution warning.
+
+### Drift evidence and interpretation
+
+For each common query, the comparison adapter loads the exact before/after snapshot IDs stored in the two runs and invokes the existing `calculateDriftScore`; it does not change or combine with that score. The existing detector per-query threshold (`30`) marks substantial drift for the interpretation matrix. Drift remains “how much ranking changed,” while relevance delta remains “how judged quality changed.”
+
+Rule-based summaries distinguish ordering degradation with stable recall, combined quality/recall degradation, ordering improvement with stable recall, stable quality despite substantial drift, and quality unavailable. Wording is descriptive and non-causal: it uses “coincided with” and “pattern suggests,” never statistical significance, a proven regression, or stage attribution.
+
+```text
+Run A
+nDCG@10 = 0.81
+Benchmark Recall@10 = 0.92
+MRR = 0.88
+
+Run B
+nDCG@10 = 0.64
+Benchmark Recall@10 = 0.91
+MRR = 0.52
+
+Existing ranking drift = high
+
+Delta:
+nDCG@10 = -0.17
+Recall@10 = -0.01
+MRR = -0.36
+
+Interpretation:
+
+Ranking changed substantially.
+Known relevant-document retrieval remained nearly stable.
+Ordering quality degraded significantly.
+```
+
+`POST /api/evaluation/datasets/[id]/comparisons` accepts only `{ beforeRunId, afterRunId }`. The server owner-scopes both run reads, requires chronological Before/After order, validates compatibility, and returns deterministic aggregate/per-query deltas, gains/losses, optional aligned drift evidence, warnings, and structured interpretation. Comparisons are not persisted because two immutable run IDs plus the comparison-policy version reproduce the result.
+
+The Evaluation History UI adds explicit Before and After selectors, comparison cards, written Improved/Degraded/Stable/Unavailable labels, common-query counts, quality summary, coverage warnings, largest query gains/losses, and aligned drift evidence.
+
+Phase 8 remains responsible for document-level movement evidence, hard-negative mining, retrieval/reranker stage attribution, ANN/filter diagnosis, and retrieval-system comparisons. Phase 7 does not modify detector confidence or classify an algorithm regression.
