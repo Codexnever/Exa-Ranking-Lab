@@ -1307,3 +1307,68 @@ Do NOT claim a specific model or component caused it.
 ```
 
 Trace completeness constrains every conclusion: final-only traces cannot diagnose candidates, partial traces cover only observed transitions, and missing final stages still permit local metrics but not final retention. Phase 11 must establish hard-negative selection policy and additional stage evidence before hard-negative mining, strategy benchmarking, or component attribution.
+
+## Hard-Negative Mining and Error Analysis (Phase 11)
+
+`HARD_NEGATIVE_POLICY_VERSION = "1"` distinguishes an accepted grade-0 judgment from a hard-negative candidate. Grade 0 only means judged irrelevant. A candidate additionally requires deterministic evidence that the system repeatedly retrieved or ranked that irrelevant canonical document with unusual prominence. Phase 11 uses accepted judgments only, existing canonical `documentKey` identity, immutable runs, exact run snapshots, and unambiguous linked stage traces; it introduces no second label system.
+
+Qualification reasons are `HIGH_FINAL_RANK` (final rank <= 5), `TOP_K_IRRELEVANT` (final rank <= 10), `OUTRANKS_HIGHLY_RELEVANT`, `SURVIVES_PIPELINE`, `IRRELEVANT_DOWNSTREAM_PROMOTION` (at least three ranks), `REPEATED_HIGH_RANK_FALSE_POSITIVE` (top 10 in at least two distinct saved runs), and `PERSISTENT_QUERY_FALSE_POSITIVE`. A grade-0 document at rank 20 with no repetition, outranking, survival, or material promotion does not qualify. Grades 1/2, pending/conflicted judgments, and unjudged documents never qualify.
+
+Severity is a product-analysis label, not probability or statistical confidence. `critical` covers final rank 1, outranking multiple grade-2 documents, or repeated top-3 appearances. `high` covers final top 3, outranking a grade-2 document, pipeline survival ending top 5, or three top-5 appearances. `medium` covers final top 10, material downstream promotion, or repeated top-10 history. Weaker qualifying persistence/survival evidence is `low`. Sorting is deterministic by severity, best rank, occurrence count, and document key.
+
+History is scoped strictly to the same dataset version, evaluation query, and canonical document. It reports occurrences, distinct runs, top-3/top-5/top-10 counts, first/last observation, best/worst/mean/median rank, and recorded pipeline-survival frequency. Different dataset versions and different document keys never merge.
+
+For each occurrence, pairwise evidence lists every accepted grade-1/2 document ranked below the grade-0 document. Counts distinguish relevant and highly relevant documents. These structures are training-data-ready provenance, but they are not exported as preference pairs in Phase 11.
+
+When exactly one compatible trace is linked to the immutable run snapshot, the analysis preserves the grade-0 document's first observed stage, ordered stage ranks, provider-specific score/score-type provenance, all-stage survival, and largest adjacent recorded promotion. Scores of different types are never compared. Multiple compatible traces are treated as ambiguous and omitted with a warning. Stage movement remains descriptive and never claims that retrieval, fusion, or reranking caused the error.
+
+Query summaries report judged grade-0 count, candidate count, top-5/top-10 errors, grade-0 documents outranking grade-2 content, repeated candidates, high/critical counts, and a top candidate. Domain summaries report candidate count, affected-query count, repeated occurrences, top-5 appearances, and severity distribution. They do not suppress, blacklist, or penalize domains.
+
+`GET /api/evaluation/datasets/[id]/hard-negatives` requires a frozen owner-scoped dataset and supports exact `evaluationQueryId`, `runId`, `severity`, `limit`, and `offset` filters. All grades, ranks, reasons, severities, histories, and stage evidence are calculated server-side. Analysis is deterministic and on demand (`persisted = false`) because accepted truth, runs, snapshots, and traces are already immutable.
+
+The frozen evaluation workspace adds **Hard Negative Analysis** with severity/repetition summaries, query drilldowns, canonical candidate detail, occurrence history, outranked relevant evidence, stage paths, score provenance, promotion evidence, and domain summaries. Semantic similarity alone never qualifies a candidate because stored scores may use incompatible provider/stage scales.
+
+```text
+Query:
+"latest OpenAI API pricing"
+
+Grade-0 Doc X:
+Old pricing article
+
+Run A:
+#7
+
+Run B:
+#4
+
+Run C:
+#1
+
+Stage path in Run C:
+Candidate #20
+Fusion #12
+Rerank #3
+Final #1
+
+Grade-2 Doc A:
+Final #5
+
+Evidence:
+
+- High final rank
+- Repeated high-rank false positive
+- Outranks highly relevant document
+- Downstream promotion
+- Survives recorded pipeline
+
+Interpretation:
+
+The judged-irrelevant document repeatedly achieved high ranking
+prominence and outranked accepted highly relevant content.
+
+This is a strong hard-negative candidate.
+
+Do NOT claim a specific component caused it.
+```
+
+Phase 11 does not persist or export training examples, fine-tune rerankers, compare retrieval strategies, suppress domains, make statistical claims, or automatically remediate results. A later phase must define explicit curation/export and benchmarking contracts before those uses are safe.
