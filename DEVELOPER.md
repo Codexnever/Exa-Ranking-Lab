@@ -78,6 +78,8 @@ COLLECTION_ANALYTICS=
 COLLECTION_NOTIFICATIONS=            # new — drift alerts
 COLLECTION_ALGORITHM_EVENTS=         # new — algorithm update detector
 COLLECTION_EMBEDDING_CACHE=          # new — persistent embedding cache
+COLLECTION_EVALUATION_RUNS=          # immutable evaluation-run headers
+COLLECTION_EVALUATION_RUN_QUERIES=   # per-query metric payloads for each run
 NEXT_PUBLIC_COLLECTION_SETTINGS=
 NEXT_PUBLIC_COLLECTION_ACCESS_LOGS=
 COLLECTION_API_USAGE=
@@ -1010,3 +1012,55 @@ The engine calculates generic positive-integer cutoffs, with `5` and `10` as UI/
 `POST /api/evaluation/datasets/[id]/metrics` accepts cutoffs and explicit `{ evaluationQueryId, snapshotId }` selections. The server verifies owner, frozen status, query membership, snapshot ownership/source/config compatibility, judgment scope and canonical identity, then loads relevance truth itself. Legacy snapshots without `configHash` are allowed with a warning. Canonical duplicate results retain the first occurrence and ignore later occurrences without collapsing the original rank positions.
 
 Responses contain per-query metrics/counts/warnings, explicit selected snapshot IDs, macro aggregates, eligible/skipped counts, metric policy version, and `persisted: false`. Metric runs and relevance deltas remain intentionally unpersisted/deferred; judgment documents are not overloaded with metric output. Relevance-aware drift, hard negatives, reranker comparisons, detector integration, feedback promotion, and training exports are not part of Phase 5.
+
+## Persisted Evaluation Runs and Metric History (Phase 6)
+
+Phase 6 adds immutable `EvaluationRun` history without changing Phase 5 formulas. `POST /metrics` remains an on-demand preview. `POST /runs` accepts only cutoffs and explicit query/snapshot selections, invokes the same Phase 5 `EvaluationMetricsService` on the server, and persists its exact output. Clients never submit metrics, warnings, eligibility, or a metric-policy version.
+
+Authoritative runs require a frozen, owner-scoped dataset. Every run receives a new Appwrite ID, even when its inputs match a previous execution, because execution time is part of the audit history. There are no update or delete APIs. A correction or later observation creates another immutable run.
+
+### Storage layout
+
+Two additive Appwrite collections keep payload sizes bounded:
+
+- `evaluation_runs` stores the run header, dataset family/version, Metric Policy version, cutoffs, exact snapshot-selection map, aggregate output, warning summary, counts, creator, and timestamp.
+- `evaluation_run_queries` stores one bounded Phase 5 `PerQueryEvaluationResult` document per selected query.
+
+A single JSON payload could exceed the configured 32 KiB string boundary when evaluating up to 100 queries. Splitting query results prevents that growth while keeping list reads small: run summaries read only `evaluation_runs`, and detail reads join immutable query records by `runId`. The provisioning script remains additive, idempotent, inspectable with `--dry-run`/`--inspect`, mismatch-reporting, and non-destructive.
+
+Required collection variables:
+
+```dotenv
+COLLECTION_EVALUATION_RUNS=evaluation_runs
+COLLECTION_EVALUATION_RUN_QUERIES=evaluation_run_queries
+```
+
+### APIs and UI
+
+- `POST /api/evaluation/datasets/[id]/runs` — recalculate and save one completed authoritative run.
+- `GET /api/evaluation/datasets/[id]/runs?limit=20&offset=0` — newest-first, dataset-version-scoped summaries.
+- `GET /api/evaluation/datasets/[id]/runs/[runId]` — full provenance, aggregate, per-query results, and warnings.
+
+Frozen dataset workspaces retain **Run Evaluation** for previews and add **Save This Run**, which sends only the current cutoffs and explicit selections. **Evaluation History** displays lightweight summaries and loads full immutable detail on demand. Same `datasetVersionId` plus same `metricVersion` establishes comparable benchmark truth for a future phase; different dataset versions may contain changed queries or judgments and must not be treated as directly comparable.
+
+```text
+Frozen Dataset v1
+        ↓
+Run A — Aug 18
+nDCG@10 = 0.74
+
+        ↓ later
+
+Run B — Aug 20
+nDCG@10 = 0.66
+
+Both:
+datasetVersionId = same
+metricVersion = 1
+
+Therefore Phase 7 can safely calculate:
+
+ΔnDCG@10 = -0.08
+```
+
+Phase 6 stores the provenance needed for this comparison but does not calculate the delta. Metric deltas, compatibility scoring, before/after UI, and relevance-aware drift remain Phase 7 work.

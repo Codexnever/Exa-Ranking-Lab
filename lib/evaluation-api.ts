@@ -1,6 +1,7 @@
 import type { EvaluationDatasetDetail,EvaluationDatasetVersion,EvaluationQueryJudgments,RelevanceGrade } from "@/types/evaluation"
 import type { QueryConfig,RankingSnapshot } from "@/types/type"
 import type { EvaluationMetricsResponse,SnapshotSelection } from "@/app/services/evaluation/metrics/types"
+import type { EvaluationRun,EvaluationRunList } from "@/types/evaluation-runs"
 
 async function request<T>(url:string,init?:RequestInit):Promise<T>{const response=await fetch(url,{...init,headers:{"Content-Type":"application/json",...init?.headers}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status})`);return body as T}
 export const evaluationApi={
@@ -16,4 +17,7 @@ export const evaluationApi={
   freeze:(id:string)=>request<EvaluationDatasetDetail>(`/api/evaluation/datasets/${id}/freeze`,{method:"POST"}),
   clone:(id:string)=>request<EvaluationDatasetDetail>(`/api/evaluation/datasets/${id}/clone`,{method:"POST"}),
   metrics:(id:string,snapshots:SnapshotSelection[],cutoffs:number[]=[5,10])=>request<EvaluationMetricsResponse>(`/api/evaluation/datasets/${id}/metrics`,{method:"POST",body:JSON.stringify({cutoffs,snapshots})}),
+  saveRun:(id:string,snapshots:SnapshotSelection[],cutoffs:number[]=[5,10])=>request<EvaluationRun>(`/api/evaluation/datasets/${id}/runs`,{method:"POST",body:JSON.stringify({cutoffs,snapshots})}),
+  runs:(id:string,limit=20,offset=0)=>request<EvaluationRunList>(`/api/evaluation/datasets/${id}/runs?limit=${limit}&offset=${offset}`),
+  runDetail:(id:string,runId:string)=>request<EvaluationRun>(`/api/evaluation/datasets/${id}/runs/${runId}`),
 }

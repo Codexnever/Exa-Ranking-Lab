@@ -31,6 +31,8 @@ const ids = {
   datasets: process.env.COLLECTION_EVALUATION_DATASETS ?? "evaluation_datasets",
   queries: process.env.COLLECTION_EVALUATION_QUERIES ?? "evaluation_queries",
   judgments: process.env.COLLECTION_RELEVANCE_JUDGMENTS ?? "relevance_judgments",
+  runs: process.env.COLLECTION_EVALUATION_RUNS ?? "evaluation_runs",
+  runQueries: process.env.COLLECTION_EVALUATION_RUN_QUERIES ?? "evaluation_run_queries",
 }
 const s = (key, size, required = true) => ({ key, type: "string", size, required })
 const i = (key, required = true, min = undefined, max = undefined) => ({ key, type: "integer", required, min, max })
@@ -71,6 +73,24 @@ const schemas = [
       { key:"dataset_query", type:IndexType.Key, attributes:["datasetVersionId","evaluationQueryId"] },
       { key:"dataset_status", type:IndexType.Key, attributes:["datasetVersionId","status"] },
       { key:"document_key", type:IndexType.Key, attributes:["documentKey"] },
+    ],
+  },
+  {
+    id: ids.runs, name: "Evaluation Runs",
+    attributes: [s("datasetVersionId",64),s("datasetFamilyKey",128),i("datasetVersion",true,1),s("metricVersion",32),e("status",["completed"]),s("cutoffsJson",2048),s("snapshotSelectionsJson",32768),s("aggregateResultJson",32768),s("warningsJson",32768),i("eligibleQueryCount",true,0),i("skippedQueryCount",true,0),i("selectedQueryCount",true,1),d("createdAt"),s("createdByUserId",64)],
+    indexes: [
+      { key:"dataset_created", type:IndexType.Key, attributes:["datasetVersionId","createdAt"], orders:["ASC","DESC"] },
+      { key:"family_version_created", type:IndexType.Key, attributes:["datasetFamilyKey","datasetVersion","createdAt"], orders:["ASC","DESC","DESC"] },
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+    ],
+  },
+  {
+    id: ids.runQueries, name: "Evaluation Run Query Results",
+    attributes: [s("runId",64),s("datasetVersionId",64),s("evaluationQueryId",64),s("snapshotId",64),s("resultJson",32768),d("createdAt")],
+    indexes: [
+      { key:"run_query_unique", type:IndexType.Unique, attributes:["runId","evaluationQueryId"] },
+      { key:"run_query", type:IndexType.Key, attributes:["runId","evaluationQueryId"], orders:["ASC","ASC"] },
+      { key:"dataset_run", type:IndexType.Key, attributes:["datasetVersionId","runId"] },
     ],
   },
 ]

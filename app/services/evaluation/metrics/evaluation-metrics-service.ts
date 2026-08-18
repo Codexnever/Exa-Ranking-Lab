@@ -18,7 +18,7 @@ class AppwriteMetricSnapshotReader implements MetricSnapshotReader {
 
 export interface EvaluationMetricsInput { cutoffs?: number[]; snapshots: SnapshotSelection[] }
 
-function parseInput(value: unknown): { cutoffs: number[]; snapshots: SnapshotSelection[] } {
+export function parseEvaluationMetricsInput(value: unknown): { cutoffs: number[]; snapshots: SnapshotSelection[] } {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid("Metrics input must be an object")
   const raw = value as Record<string, unknown>
   if (Object.keys(raw).some(key => key !== "cutoffs" && key !== "snapshots")) throw invalid("Metrics input contains unsupported fields")
@@ -40,7 +40,7 @@ export class EvaluationMetricsService {
   constructor(private readonly repository: EvaluationRepository = new AppwriteEvaluationRepository(), private readonly snapshotReader: MetricSnapshotReader = new AppwriteMetricSnapshotReader()) {}
 
   async evaluate(ownerUserId: string, datasetId: string, rawInput: EvaluationMetricsInput): Promise<EvaluationMetricsResponse> {
-    const input = parseInput(rawInput)
+    const input = parseEvaluationMetricsInput(rawInput)
     const dataset = await this.repository.getDataset(datasetId)
     if (!dataset) throw new EvaluationError("NOT_FOUND", "Evaluation dataset not found", 404)
     if (dataset.ownerUserId !== ownerUserId) throw new EvaluationError("UNAUTHORIZED", "Evaluation dataset access denied", 403)
