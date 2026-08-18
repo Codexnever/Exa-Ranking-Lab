@@ -33,10 +33,13 @@ const ids = {
   judgments: process.env.COLLECTION_RELEVANCE_JUDGMENTS ?? "relevance_judgments",
   runs: process.env.COLLECTION_EVALUATION_RUNS ?? "evaluation_runs",
   runQueries: process.env.COLLECTION_EVALUATION_RUN_QUERIES ?? "evaluation_run_queries",
+  stageTraces: process.env.COLLECTION_EVALUATION_STAGE_TRACES ?? "evaluation_stage_traces",
+  stageTraceDocuments: process.env.COLLECTION_EVALUATION_STAGE_TRACE_DOCUMENTS ?? "evaluation_stage_trace_documents",
 }
 const s = (key, size, required = true) => ({ key, type: "string", size, required })
 const i = (key, required = true, min = undefined, max = undefined) => ({ key, type: "integer", required, min, max })
 const d = (key, required = true) => ({ key, type: "datetime", required })
+const b = (key, required = true) => ({ key, type: "boolean", required })
 const e = (key, values, required = true) => ({ key, type: "enum", values, required })
 
 const schemas = [
@@ -82,6 +85,26 @@ const schemas = [
       { key:"dataset_created", type:IndexType.Key, attributes:["datasetVersionId","createdAt"], orders:["ASC","DESC"] },
       { key:"family_version_created", type:IndexType.Key, attributes:["datasetFamilyKey","datasetVersion","createdAt"], orders:["ASC","DESC","DESC"] },
       { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+    ],
+  },
+  {
+    id: ids.stageTraces, name: "Evaluation Stage Traces",
+    attributes: [s("traceVersion",32),s("sourceQueryId",64),s("snapshotId",64,false),s("evaluationQueryId",64,false),s("datasetVersionId",64,false),s("queryText",2000,false),s("stagesJson",32768),i("stageCount",true,1,20),e("completeness",["complete","partial","final_only"]),b("completeFinalAlignment",false),s("warningsJson",16384),d("createdAt"),s("createdByUserId",64)],
+    indexes: [
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+      { key:"creator_source_created", type:IndexType.Key, attributes:["createdByUserId","sourceQueryId","createdAt"], orders:["ASC","ASC","DESC"] },
+      { key:"creator_snapshot", type:IndexType.Key, attributes:["createdByUserId","snapshotId"] },
+      { key:"creator_evaluation", type:IndexType.Key, attributes:["createdByUserId","datasetVersionId","evaluationQueryId"] },
+      { key:"creator_dataset_created", type:IndexType.Key, attributes:["createdByUserId","datasetVersionId","createdAt"], orders:["ASC","ASC","DESC"] },
+      { key:"creator_query_created", type:IndexType.Key, attributes:["createdByUserId","evaluationQueryId","createdAt"], orders:["ASC","ASC","DESC"] },
+    ],
+  },
+  {
+    id: ids.stageTraceDocuments, name: "Evaluation Stage Trace Documents",
+    attributes: [s("traceId",64),s("stageId",128),i("stageOrder"),s("documentKey",64),s("canonicalUrl",2048),s("rawUrl",2048),i("rank",false,1),i("rankSort",true,1),s("score",128,false),s("scoreType",128,false),s("title",1000,false),s("domain",255),s("contentHash",256,false),s("metadataJson",4096),i("relevanceGrade",false,0,2)],
+    indexes: [
+      { key:"trace_stage_rank", type:IndexType.Key, attributes:["traceId","stageOrder","rankSort"], orders:["ASC","ASC","ASC"] },
+      { key:"trace_document", type:IndexType.Key, attributes:["traceId","documentKey"] },
     ],
   },
   {
@@ -136,6 +159,7 @@ async function createAttribute(collectionId, attr) {
   if (attr.type === "string") return db.createStringAttribute(databaseId, collectionId, attr.key, attr.size, attr.required)
   if (attr.type === "integer") return db.createIntegerAttribute(databaseId, collectionId, attr.key, attr.required, attr.min, attr.max)
   if (attr.type === "datetime") return db.createDatetimeAttribute(databaseId, collectionId, attr.key, attr.required)
+  if (attr.type === "boolean") return db.createBooleanAttribute(databaseId, collectionId, attr.key, attr.required)
   if (attr.type === "enum") return db.createEnumAttribute(databaseId, collectionId, attr.key, attr.values, attr.required)
   throw new Error(`Unsupported attribute type ${attr.type}`)
 }

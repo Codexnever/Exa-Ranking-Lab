@@ -1192,3 +1192,60 @@ while a judged-irrelevant document moved upward.
 The comparison UI adds **What moved?**, highly relevant losses, relevant gains, irrelevant promotions, canonical URLs, rank and top-K transitions, coverage context, and expandable query drilldowns. The explanation says movement evidence is associated with metric change; it never attributes final-ranking movement to retrieval, ANN, filters, fusion, or reranking.
 
 Phase 9 requires stage-level candidate traces before candidate Recall@100, BM25/dense/fusion diagnosis, hard-negative mining, or reranker attribution can be supported. Phase 8 does not change detector confidence, drift math, or metric math.
+
+## Generic Retrieval Stage Traces (Phase 9)
+
+`EVALUATION_STAGE_TRACE_VERSION = "1"` defines immutable, provider-neutral execution traces. A trace records any ordered subset of `candidate`, `retrieval`, `fusion`, `rerank`, `final`, or `custom` stages; it does not assume that the application has a reranker. Stage identity is a structured ID/type/name/order tuple, while optional provider labels and bounded metadata support Exa, local, BM25, dense, hybrid, or imported experiments without changing the schema.
+
+Every stage URL is resolved by the existing Canonicalization Policy through `getDocumentIdentity`. Documents are joined by `documentKey`, raw URLs remain provenance only, and the highest-ranked canonical occurrence is retained while later variants are counted and ignored. Ranks are one-based or explicitly `null` for unordered candidates. Stage order and rank values are immutable after ingestion.
+
+Headers are stored in `evaluation_stage_traces`; potentially large result sets are split into `evaluation_stage_trace_documents`. Traces are owner-scoped, newest-first, immutable audit records. Separate submissions create separate traces. The additive provisioning script supports inspection/dry-run and never deletes or alters existing evaluation collections.
+
+When `snapshotId` is supplied, the server verifies snapshot ownership and `sourceQueryId`. A recorded `final` stage must exactly match the snapshot's canonical result order and ranks; the snapshot remains authoritative. Optional dataset/evaluation-query linkage is validated explicitly, and only accepted judgments are overlaid. Grade 0 remains judged irrelevant, pending/conflicted judgments are excluded, and documents without accepted truth remain `unjudged`.
+
+Completeness is explicit (`complete`, `partial`, or `final_only`). A recorded stage with a missing document means **absent from that recorded stage**. An unrecorded stage supplies no absence evidence. The inspector therefore never invents a rerank/fusion stage or attributes a transition to one that was not captured.
+
+`DocumentStagePath` reports presence, rank, score, and score type for every recorded stage. Adjacent recorded-stage transitions are `promoted`, `demoted`, `entered`, `lost`, `unchanged`, `retained` (including unranked presence), or `unknown`; `rankDelta = previousRank - nextRank`, so positive means promotion. These facts are observational and non-causal.
+
+APIs:
+
+- `POST /api/evaluation/stage-traces` canonicalizes, validates, aligns, and saves an immutable trace. Clients may submit raw URLs but not authoritative canonical URLs or document keys.
+- `GET /api/evaluation/stage-traces` lists owner-scoped summaries with bounded pagination and optional exact source/snapshot/evaluation/dataset filters.
+- `GET /api/evaluation/stage-traces/[traceId]` reconstructs strict ordered trace detail.
+
+The frozen evaluation workspace includes a **Pipeline Trace** inspector with stage counts, top documents, rank/score, duplicate warnings, accepted-grade overlay, completeness warning, canonical URL, and a selectable document path.
+
+```text
+Query:
+"best vector database for filtered search"
+
+Grade 2 Doc A
+
+Candidate:
+#18
+
+Fusion:
+#11
+
+Rerank:
+#4
+
+Final:
+#7
+
+Observed path:
+
+Candidate #18
+→ Fusion #11
+→ Rerank #4
+→ Final #7
+
+Interpretation in Phase 9:
+
+The highly relevant document was present at every recorded stage.
+It gained rank before reranking and lost rank between rerank and final.
+
+Do NOT yet claim why.
+```
+
+Phase 9 intentionally does not calculate candidate Recall@100, stage-level relevance metrics, hard negatives, or retrieval/reranker failure diagnosis. Phase 10 first requires trustworthy traces linked to the exact evaluated execution before it can add bounded stage-level diagnosis.
