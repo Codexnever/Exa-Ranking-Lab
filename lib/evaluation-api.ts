@@ -6,6 +6,7 @@ import type { EvaluationRunComparison } from "@/types/evaluation-comparison"
 import type { EvaluationExecutionTrace,EvaluationStageTraceList } from "@/types/evaluation-stage-trace"
 import type { StageDiagnosisResult } from "@/types/evaluation-stage-diagnosis"
 import type { HardNegativeAnalysis } from "@/types/evaluation-hard-negatives"
+import type { EvaluationStrategy,StrategyBenchmark,StrategyExecution } from "@/types/evaluation-strategy"
 
 async function request<T>(url:string,init?:RequestInit):Promise<T>{const response=await fetch(url,{...init,headers:{"Content-Type":"application/json",...init?.headers}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status})`);return body as T}
 export const evaluationApi={
@@ -28,6 +29,13 @@ export const evaluationApi={
   stageTraces:(filters:Record<string,string>={})=>request<EvaluationStageTraceList>(`/api/evaluation/stage-traces?${new URLSearchParams(filters)}`),
   stageTrace:(id:string)=>request<EvaluationExecutionTrace>(`/api/evaluation/stage-traces/${id}`),
   stageDiagnosis:(id:string)=>request<StageDiagnosisResult>(`/api/evaluation/stage-traces/${id}/diagnosis`),
+  strategies:(includeArchived=false)=>request<{strategies:EvaluationStrategy[]}>(`/api/evaluation/strategies?includeArchived=${includeArchived}`),
+  createStrategy:(input:unknown)=>request<EvaluationStrategy>("/api/evaluation/strategies",{method:"POST",body:JSON.stringify(input)}),
+  strategy:(id:string)=>request<EvaluationStrategy>(`/api/evaluation/strategies/${id}`),
+  archiveStrategy:(id:string)=>request<EvaluationStrategy>(`/api/evaluation/strategies/${id}/archive`,{method:"POST"}),
+  createStrategyExecution:(datasetId:string,input:unknown)=>request<StrategyExecution>(`/api/evaluation/datasets/${datasetId}/strategy-executions`,{method:"POST",body:JSON.stringify(input)}),
+  strategyExecutions:(datasetId:string,filters:Record<string,string>={})=>request<{executions:StrategyExecution[]}>(`/api/evaluation/datasets/${datasetId}/strategy-executions?${new URLSearchParams(filters)}`),
+  runStrategyBenchmark:(datasetId:string,input:unknown)=>request<StrategyBenchmark>(`/api/evaluation/datasets/${datasetId}/strategy-benchmarks`,{method:"POST",body:JSON.stringify(input)}),
   hardNegatives:(datasetId:string,filters:Record<string,string>={})=>request<HardNegativeAnalysis>(`/api/evaluation/datasets/${datasetId}/hard-negatives?${new URLSearchParams(filters)}`),
   createStageTrace:(input:unknown)=>request<EvaluationExecutionTrace>("/api/evaluation/stage-traces",{method:"POST",body:JSON.stringify(input)}),
 }

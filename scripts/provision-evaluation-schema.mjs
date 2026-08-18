@@ -35,6 +35,9 @@ const ids = {
   runQueries: process.env.COLLECTION_EVALUATION_RUN_QUERIES ?? "evaluation_run_queries",
   stageTraces: process.env.COLLECTION_EVALUATION_STAGE_TRACES ?? "evaluation_stage_traces",
   stageTraceDocuments: process.env.COLLECTION_EVALUATION_STAGE_TRACE_DOCUMENTS ?? "evaluation_stage_trace_documents",
+  strategies: process.env.COLLECTION_EVALUATION_STRATEGIES ?? "evaluation_strategies",
+  strategyExecutions: process.env.COLLECTION_EVALUATION_STRATEGY_EXECUTIONS ?? "evaluation_strategy_executions",
+  strategyExecutionDocuments: process.env.COLLECTION_EVALUATION_STRATEGY_EXECUTION_DOCUMENTS ?? "evaluation_strategy_execution_documents",
 }
 const s = (key, size, required = true) => ({ key, type: "string", size, required })
 const i = (key, required = true, min = undefined, max = undefined) => ({ key, type: "integer", required, min, max })
@@ -105,6 +108,32 @@ const schemas = [
     indexes: [
       { key:"trace_stage_rank", type:IndexType.Key, attributes:["traceId","stageOrder","rankSort"], orders:["ASC","ASC","ASC"] },
       { key:"trace_document", type:IndexType.Key, attributes:["traceId","documentKey"] },
+    ],
+  },
+  {
+    id: ids.strategies, name: "Evaluation Strategies",
+    attributes: [s("name",256),e("type",["keyword","dense","hybrid","reranked","external","custom"]),s("description",2000,false),s("provider",256,false),s("model",256,false),s("configurationJson",16384),s("configHash",64),e("latencyType",["end_to_end","retrieval_only","rerank_only","custom"]),e("status",["active","archived"]),i("executionCount",true,0),d("createdAt"),s("createdByUserId",64),d("archivedAt",false)],
+    indexes: [
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+      { key:"creator_status_created", type:IndexType.Key, attributes:["createdByUserId","status","createdAt"], orders:["ASC","ASC","DESC"] },
+      { key:"creator_hash", type:IndexType.Key, attributes:["createdByUserId","configHash"] },
+    ],
+  },
+  {
+    id: ids.strategyExecutions, name: "Evaluation Strategy Executions",
+    attributes: [s("strategyId",64),s("datasetVersionId",64),s("evaluationQueryId",64),s("sourceQueryId",64),s("queryText",2000),e("source",["native","imported"]),s("configHash",64),i("requestedResultCount",false,1),i("resultCount",true,1,500),s("latencyMs",128,false),e("latencyType",["end_to_end","retrieval_only","rerank_only","custom"]),s("stageTraceId",64,false),s("providerMetadataJson",16384),i("duplicateCanonicalResultsIgnored",true,0),d("createdAt"),s("createdByUserId",64)],
+    indexes: [
+      { key:"dataset_strategy_query_created", type:IndexType.Key, attributes:["datasetVersionId","strategyId","evaluationQueryId","createdAt"], orders:["ASC","ASC","ASC","DESC"] },
+      { key:"strategy_created", type:IndexType.Key, attributes:["strategyId","createdAt"], orders:["ASC","DESC"] },
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+    ],
+  },
+  {
+    id: ids.strategyExecutionDocuments, name: "Evaluation Strategy Execution Documents",
+    attributes: [s("executionId",64),s("documentKey",64),s("canonicalUrl",2048),s("rawUrl",2048),i("rank",true,1,500),s("score",128,false),s("scoreType",128,false),s("title",1000,false),s("domain",255)],
+    indexes: [
+      { key:"execution_rank_unique", type:IndexType.Unique, attributes:["executionId","rank"] },
+      { key:"execution_document_unique", type:IndexType.Unique, attributes:["executionId","documentKey"] },
     ],
   },
   {

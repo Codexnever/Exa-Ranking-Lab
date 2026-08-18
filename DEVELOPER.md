@@ -1372,3 +1372,75 @@ Do NOT claim a specific component caused it.
 ```
 
 Phase 11 does not persist or export training examples, fine-tune rerankers, compare retrieval strategies, suppress domains, make statistical claims, or automatically remediate results. A later phase must define explicit curation/export and benchmarking contracts before those uses are safe.
+
+## Phase 12: Strategy Benchmark Policy v1
+
+Phase 12 compares provider-neutral retrieval and ranking strategies on one **frozen dataset version**, one explicit evaluation-query cohort, and Metric Policy v1. `STRATEGY_BENCHMARK_POLICY_VERSION = "1"` requires 2–10 strategies, identical query coverage, identical cutoffs, macro aggregation, and a `0.01` pairwise tie epsilon. Missing or ambiguous executions fail the authoritative benchmark rather than silently changing the cohort. The output is ordered as **Highest nDCG@10**, not “best strategy,” because quality, latency, error behavior, and stage evidence remain separate dimensions.
+
+### Strategy identity and immutable execution provenance
+
+A strategy records its human name, generic type (`keyword`, `dense`, `hybrid`, `reranked`, `external`, or `custom`), optional provider/model, latency type, and normalized configuration. The server recursively sorts configuration keys and hashes the stable JSON with SHA-256. Volatile timestamps are excluded. Configuration is immutable: changing it means registering a new strategy; archived strategies cannot receive executions.
+
+Native and imported executions share the same immutable representation. Phase 12 provides API-first imports so external BM25, dense, hybrid, or reranking experiments need not exist in this application. The server validates the frozen dataset/query linkage, derives one-based ranks and canonical identities, keeps the highest-ranked canonical duplicate while preserving its original rank, validates optional exact final-stage trace alignment, and rejects client-supplied ranks, canonical URLs, document keys, or metrics. Strategy headers and documents are split across `evaluation_strategy_executions` and `evaluation_strategy_execution_documents` to keep result payloads bounded.
+
+### Metrics, cohort, and latency semantics
+
+The benchmark reuses Metric Policy v1 for nDCG, benchmark-relative Recall, reciprocal rank/MRR, Hit, Judged Precision, and Judgment Coverage. Only accepted judgments are truth. Primary display columns are nDCG@10, Recall@10, MRR, Hit@10, Precision@10, and Coverage@10; generic cutoffs remain supported. Pairwise query outcomes use nDCG@10, then the highest common nDCG cutoff, reciprocal rank, and benchmark recall as deterministic fallbacks. Wins, losses, ties, largest gains, and largest regressions are raw descriptive evidence, not statistical significance.
+
+Latency summaries contain count, mean, median, nearest-rank p95, minimum, and maximum. Missing latency remains unavailable rather than becoming zero. Pairwise latency deltas are calculated only when latency types match (`end_to_end`, `retrieval_only`, `rerank_only`, or `custom`); incompatible types produce a warning. There is intentionally no combined quality/latency score.
+
+### Hard-negative and stage comparison
+
+Each execution receives an execution-scoped Phase 11 error profile: hard-negative candidate count per query, high/critical query rate, top-five grade-0 count, and accepted grade-0 documents outranking grade-2 documents. Persistent history is not mixed into a strategy benchmark without compatible scope. When an exact linked stage trace exists, Phase 10 supplies candidate/final benchmark recall, candidate-to-final retention, grade-2 survival, and downstream loss. Missing trace data is explicitly unavailable; stages are never fabricated.
+
+### API, UI, and persistence
+
+- `POST|GET /api/evaluation/strategies` registers or lists owner-scoped strategies.
+- `GET /api/evaluation/strategies/[strategyId]` reads one strategy; `POST .../archive` archives it.
+- `POST|GET /api/evaluation/datasets/[id]/strategy-executions` imports or lists immutable query executions.
+- `POST /api/evaluation/datasets/[id]/strategy-benchmarks` computes a strict-cohort benchmark from immutable executions. Clients submit strategy IDs, query IDs, cutoffs, and optional exact execution selections—never metric values.
+- `/evaluation/[datasetVersionId]/strategies` provides the Strategy Lab registration, selector, quality/latency table, pairwise wins/losses, hard-negative counts, stage availability, and query regression explorer.
+
+Strategy identity and execution provenance are persisted additively. Benchmark summaries are deliberately computed on demand in v1 (`persisted: false`) because the immutable inputs and policy version reproduce them; benchmark history persistence and file-import UI are deferred. Production work should add operational pagination, import-job handling for large files, and deployment validation before broad rollout.
+
+```text
+Frozen Benchmark v1
+100 queries
+
+Strategy A:
+Dense
+
+Strategy B:
+Hybrid + Reranker
+
+Results:
+
+Dense
+nDCG@10 = 0.71
+Recall@10 = 0.82
+MRR = 0.75
+p95 latency = 42 ms
+
+Hybrid + Reranker
+nDCG@10 = 0.84
+Recall@10 = 0.90
+MRR = 0.86
+p95 latency = 108 ms
+
+Pairwise:
+
+Hybrid + Reranker wins: 61 queries
+Dense wins: 24 queries
+Ties: 15
+
+Hard negatives:
+Dense: 19
+Hybrid + Reranker: 11
+
+Interpretation:
+The reranked hybrid strategy produced higher measured relevance
+on the same frozen benchmark, but with higher latency.
+Do not call one strategy universally best.
+```
+
+Phase 12 does not deploy winners, export training data, fine-tune rerankers, perform LTR or automatic tuning, make significance claims, or automatically remediate ranking behavior.
