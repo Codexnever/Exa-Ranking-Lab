@@ -4,6 +4,7 @@ import type { EvaluationMetricsResponse,SnapshotSelection } from "@/app/services
 import type { EvaluationRun,EvaluationRunList } from "@/types/evaluation-runs"
 import type { EvaluationRunComparison } from "@/types/evaluation-comparison"
 import type { EvaluationExecutionTrace,EvaluationStageTraceList } from "@/types/evaluation-stage-trace"
+import type { StageDiagnosisResult } from "@/types/evaluation-stage-diagnosis"
 
 async function request<T>(url:string,init?:RequestInit):Promise<T>{const response=await fetch(url,{...init,headers:{"Content-Type":"application/json",...init?.headers}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status})`);return body as T}
 export const evaluationApi={
@@ -25,5 +26,6 @@ export const evaluationApi={
   compareRuns:(id:string,beforeRunId:string,afterRunId:string)=>request<EvaluationRunComparison>(`/api/evaluation/datasets/${id}/comparisons`,{method:"POST",body:JSON.stringify({beforeRunId,afterRunId})}),
   stageTraces:(filters:Record<string,string>={})=>request<EvaluationStageTraceList>(`/api/evaluation/stage-traces?${new URLSearchParams(filters)}`),
   stageTrace:(id:string)=>request<EvaluationExecutionTrace>(`/api/evaluation/stage-traces/${id}`),
+  stageDiagnosis:(id:string)=>request<StageDiagnosisResult>(`/api/evaluation/stage-traces/${id}/diagnosis`),
   createStageTrace:(input:unknown)=>request<EvaluationExecutionTrace>("/api/evaluation/stage-traces",{method:"POST",body:JSON.stringify(input)}),
 }

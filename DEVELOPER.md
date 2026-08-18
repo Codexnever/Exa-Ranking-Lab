@@ -1249,3 +1249,61 @@ Do NOT yet claim why.
 ```
 
 Phase 9 intentionally does not calculate candidate Recall@100, stage-level relevance metrics, hard negatives, or retrieval/reranker failure diagnosis. Phase 10 first requires trustworthy traces linked to the exact evaluated execution before it can add bounded stage-level diagnosis.
+
+## Stage-Level Relevance Diagnosis (Phase 10)
+
+`EVALUATION_STAGE_DIAGNOSIS_VERSION = "1"` adds deterministic relevance measurements over immutable, evaluation-linked Stage Trace v1 records. It reuses Metric Policy v1 without changing canonical identity, grade semantics, gain, or unjudged handling: only accepted judgments are truth, grade `>= 1` is relevant, grade 2 is highly relevant, and `gain = 2^grade - 1`.
+
+For ranked stages, Stage Benchmark Recall@K is the fraction of all known accepted relevant benchmark documents found in that recorded stage's top K. It is benchmark-relative, not exhaustive web recall. Hit@K, Judged Precision@K, Judgment Coverage@K, and nDCG@K use the Phase 5 definitions; unjudged documents occupy their ranks but are excluded from judged-precision truth. Primary stage cutoffs are 10, 50, and 100 and always retain their explicit depth labels.
+
+A fully unordered stage receives set-level Benchmark Recall, Hit, Judged Precision, and Judgment Coverage over all unique recorded documents. It never receives nDCG, rank deltas, or top-K metrics because no ordering was observed. Coverage below 0.50 produces a warning rather than a fabricated confidence score.
+
+For each pair of adjacent **recorded** stages, Relevant Survival is accepted relevant documents present in both divided by relevant documents present in the previous stage; Relevant Loss is the complementary observed absence rate. Grade-2 survival is reported separately. Relevant entries are counted descriptively. When both stages are ranked, surviving relevant documents receive mean/median `previousRank - nextRank`, promoted/demoted/unchanged counts, and same-K top-10/top-50 retention. Missing stages are never invented.
+
+When the earliest recorded stage is explicitly `candidate` or `retrieval` and a final stage exists, Candidate-to-Final Retention reports relevant candidate documents still present in final. Candidate Recall@100 and Final Recall@10 remain separately labeled; they are not presented as a same-depth delta. Same-K values may be compared only where both recorded rankings support the requested cutoff.
+
+Descriptive patterns are `RELEVANT_ABSENT_EARLY_PATTERN`, `RELEVANT_DOWNSTREAM_LOSS_PATTERN`, `RELEVANT_DOWNSTREAM_PROMOTION_PATTERN`, `GRADE2_LOSS_PATTERN`, `RERANK_TRANSITION_DEMOTION_PATTERN`, `FINAL_ORDERING_DEGRADATION_PATTERN`, `STAGE_RELEVANCE_STABLE_PATTERN`, and `STAGE_DIAGNOSIS_UNAVAILABLE`. A rerank pattern is emitted only when an actual recorded transition touches a `rerank` stage and relevant documents are lost or materially demoted. Its wording is “across the recorded rerank-stage transition,” never “caused by the reranker.”
+
+`GET /api/evaluation/stage-traces/[traceId]/diagnosis` owner-authorizes the trace, requires exact dataset/evaluation-query linkage, reloads accepted judgments server-side, validates canonical and query provenance, and returns stage metrics, adjacent transitions, candidate-to-final retention, patterns, completeness warnings, and document evidence. No client grades are accepted.
+
+The Pipeline Trace UI adds **Relevance Diagnosis** cards, explicit ranked/unordered availability, coverage, stage Recall/Hit/Precision/nDCG, adjacent survival and rank movement, candidate-to-final retention, structured patterns, and expandable lost/demoted relevant-document evidence.
+
+```text
+Query:
+"best vector database for filtered search"
+
+Accepted relevant benchmark documents:
+12
+
+Candidate stage:
+11 / 12 relevant present
+Benchmark Recall = 0.92
+
+Rerank stage:
+10 / 12 relevant present
+nDCG@10 = 0.77
+
+Final:
+8 / 12 relevant present
+Benchmark Recall@10 = 0.67
+nDCG@10 = 0.59
+
+Grade-2 document:
+Candidate #18
+Rerank #4
+Final absent
+
+Interpretation:
+
+Most known relevant benchmark documents were present in the
+recorded candidate stage, but some relevant documents lost
+presence or ranking prominence downstream.
+
+A highly relevant document was present through reranking and
+was absent from the recorded final ranking.
+
+This is descriptive stage evidence.
+Do NOT claim a specific model or component caused it.
+```
+
+Trace completeness constrains every conclusion: final-only traces cannot diagnose candidates, partial traces cover only observed transitions, and missing final stages still permit local metrics but not final retention. Phase 11 must establish hard-negative selection policy and additional stage evidence before hard-negative mining, strategy benchmarking, or component attribution.
