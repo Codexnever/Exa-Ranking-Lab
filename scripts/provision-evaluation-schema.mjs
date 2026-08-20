@@ -31,10 +31,18 @@ const ids = {
   datasets: process.env.COLLECTION_EVALUATION_DATASETS ?? "evaluation_datasets",
   queries: process.env.COLLECTION_EVALUATION_QUERIES ?? "evaluation_queries",
   judgments: process.env.COLLECTION_RELEVANCE_JUDGMENTS ?? "relevance_judgments",
+  runs: process.env.COLLECTION_EVALUATION_RUNS ?? "evaluation_runs",
+  runQueries: process.env.COLLECTION_EVALUATION_RUN_QUERIES ?? "evaluation_run_queries",
+  stageTraces: process.env.COLLECTION_EVALUATION_STAGE_TRACES ?? "evaluation_stage_traces",
+  stageTraceDocuments: process.env.COLLECTION_EVALUATION_STAGE_TRACE_DOCUMENTS ?? "evaluation_stage_trace_documents",
+  strategies: process.env.COLLECTION_EVALUATION_STRATEGIES ?? "evaluation_strategies",
+  strategyExecutions: process.env.COLLECTION_EVALUATION_STRATEGY_EXECUTIONS ?? "evaluation_strategy_executions",
+  strategyExecutionDocuments: process.env.COLLECTION_EVALUATION_STRATEGY_EXECUTION_DOCUMENTS ?? "evaluation_strategy_execution_documents",
 }
 const s = (key, size, required = true) => ({ key, type: "string", size, required })
 const i = (key, required = true, min = undefined, max = undefined) => ({ key, type: "integer", required, min, max })
 const d = (key, required = true) => ({ key, type: "datetime", required })
+const b = (key, required = true) => ({ key, type: "boolean", required })
 const e = (key, values, required = true) => ({ key, type: "enum", values, required })
 
 const schemas = [
@@ -71,6 +79,70 @@ const schemas = [
       { key:"dataset_query", type:IndexType.Key, attributes:["datasetVersionId","evaluationQueryId"] },
       { key:"dataset_status", type:IndexType.Key, attributes:["datasetVersionId","status"] },
       { key:"document_key", type:IndexType.Key, attributes:["documentKey"] },
+    ],
+  },
+  {
+    id: ids.runs, name: "Evaluation Runs",
+    attributes: [s("datasetVersionId",64),s("datasetFamilyKey",128),i("datasetVersion",true,1),s("metricVersion",32),e("status",["completed"]),s("cutoffsJson",2048),s("snapshotSelectionsJson",32768),s("aggregateResultJson",32768),s("warningsJson",32768),i("eligibleQueryCount",true,0),i("skippedQueryCount",true,0),i("selectedQueryCount",true,1),d("createdAt"),s("createdByUserId",64)],
+    indexes: [
+      { key:"dataset_created", type:IndexType.Key, attributes:["datasetVersionId","createdAt"], orders:["ASC","DESC"] },
+      { key:"family_version_created", type:IndexType.Key, attributes:["datasetFamilyKey","datasetVersion","createdAt"], orders:["ASC","DESC","DESC"] },
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+    ],
+  },
+  {
+    id: ids.stageTraces, name: "Evaluation Stage Traces",
+    attributes: [s("traceVersion",32),s("sourceQueryId",64),s("snapshotId",64,false),s("evaluationQueryId",64,false),s("datasetVersionId",64,false),s("queryText",2000,false),s("stagesJson",32768),i("stageCount",true,1,20),e("completeness",["complete","partial","final_only"]),b("completeFinalAlignment",false),s("warningsJson",16384),d("createdAt"),s("createdByUserId",64)],
+    indexes: [
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+      { key:"creator_source_created", type:IndexType.Key, attributes:["createdByUserId","sourceQueryId","createdAt"], orders:["ASC","ASC","DESC"] },
+      { key:"creator_snapshot", type:IndexType.Key, attributes:["createdByUserId","snapshotId"] },
+      { key:"creator_evaluation", type:IndexType.Key, attributes:["createdByUserId","datasetVersionId","evaluationQueryId"] },
+      { key:"creator_dataset_created", type:IndexType.Key, attributes:["createdByUserId","datasetVersionId","createdAt"], orders:["ASC","ASC","DESC"] },
+      { key:"creator_query_created", type:IndexType.Key, attributes:["createdByUserId","evaluationQueryId","createdAt"], orders:["ASC","ASC","DESC"] },
+    ],
+  },
+  {
+    id: ids.stageTraceDocuments, name: "Evaluation Stage Trace Documents",
+    attributes: [s("traceId",64),s("stageId",128),i("stageOrder"),s("documentKey",64),s("canonicalUrl",2048),s("rawUrl",2048),i("rank",false,1),i("rankSort",true,1),s("score",128,false),s("scoreType",128,false),s("title",1000,false),s("domain",255),s("contentHash",256,false),s("metadataJson",4096),i("relevanceGrade",false,0,2)],
+    indexes: [
+      { key:"trace_stage_rank", type:IndexType.Key, attributes:["traceId","stageOrder","rankSort"], orders:["ASC","ASC","ASC"] },
+      { key:"trace_document", type:IndexType.Key, attributes:["traceId","documentKey"] },
+    ],
+  },
+  {
+    id: ids.strategies, name: "Evaluation Strategies",
+    attributes: [s("name",256),e("type",["keyword","dense","hybrid","reranked","external","custom"]),s("description",2000,false),s("provider",256,false),s("model",256,false),s("configurationJson",16384),s("configHash",64),e("latencyType",["end_to_end","retrieval_only","rerank_only","custom"]),e("status",["active","archived"]),i("executionCount",true,0),d("createdAt"),s("createdByUserId",64),d("archivedAt",false)],
+    indexes: [
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+      { key:"creator_status_created", type:IndexType.Key, attributes:["createdByUserId","status","createdAt"], orders:["ASC","ASC","DESC"] },
+      { key:"creator_hash", type:IndexType.Key, attributes:["createdByUserId","configHash"] },
+    ],
+  },
+  {
+    id: ids.strategyExecutions, name: "Evaluation Strategy Executions",
+    attributes: [s("strategyId",64),s("datasetVersionId",64),s("evaluationQueryId",64),s("sourceQueryId",64),s("queryText",2000),e("source",["native","imported"]),s("configHash",64),i("requestedResultCount",false,1),i("resultCount",true,1,500),s("latencyMs",128,false),e("latencyType",["end_to_end","retrieval_only","rerank_only","custom"]),s("stageTraceId",64,false),s("providerMetadataJson",16384),i("duplicateCanonicalResultsIgnored",true,0),d("createdAt"),s("createdByUserId",64)],
+    indexes: [
+      { key:"dataset_strategy_query_created", type:IndexType.Key, attributes:["datasetVersionId","strategyId","evaluationQueryId","createdAt"], orders:["ASC","ASC","ASC","DESC"] },
+      { key:"strategy_created", type:IndexType.Key, attributes:["strategyId","createdAt"], orders:["ASC","DESC"] },
+      { key:"creator_created", type:IndexType.Key, attributes:["createdByUserId","createdAt"], orders:["ASC","DESC"] },
+    ],
+  },
+  {
+    id: ids.strategyExecutionDocuments, name: "Evaluation Strategy Execution Documents",
+    attributes: [s("executionId",64),s("documentKey",64),s("canonicalUrl",2048),s("rawUrl",2048),i("rank",true,1,500),s("score",128,false),s("scoreType",128,false),s("title",1000,false),s("domain",255)],
+    indexes: [
+      { key:"execution_rank_unique", type:IndexType.Unique, attributes:["executionId","rank"] },
+      { key:"execution_document_unique", type:IndexType.Unique, attributes:["executionId","documentKey"] },
+    ],
+  },
+  {
+    id: ids.runQueries, name: "Evaluation Run Query Results",
+    attributes: [s("runId",64),s("datasetVersionId",64),s("evaluationQueryId",64),s("snapshotId",64),s("resultJson",32768),d("createdAt")],
+    indexes: [
+      { key:"run_query_unique", type:IndexType.Unique, attributes:["runId","evaluationQueryId"] },
+      { key:"run_query", type:IndexType.Key, attributes:["runId","evaluationQueryId"], orders:["ASC","ASC"] },
+      { key:"dataset_run", type:IndexType.Key, attributes:["datasetVersionId","runId"] },
     ],
   },
 ]
@@ -116,6 +188,7 @@ async function createAttribute(collectionId, attr) {
   if (attr.type === "string") return db.createStringAttribute(databaseId, collectionId, attr.key, attr.size, attr.required)
   if (attr.type === "integer") return db.createIntegerAttribute(databaseId, collectionId, attr.key, attr.required, attr.min, attr.max)
   if (attr.type === "datetime") return db.createDatetimeAttribute(databaseId, collectionId, attr.key, attr.required)
+  if (attr.type === "boolean") return db.createBooleanAttribute(databaseId, collectionId, attr.key, attr.required)
   if (attr.type === "enum") return db.createEnumAttribute(databaseId, collectionId, attr.key, attr.values, attr.required)
   throw new Error(`Unsupported attribute type ${attr.type}`)
 }

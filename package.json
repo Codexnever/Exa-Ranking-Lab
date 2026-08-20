@@ -9,10 +9,11 @@
     "test": "jest",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "lint:fix": "next lint --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "provision:algorithm-events-v2": "node scripts/provision-algorithm-events-v2.mjs",
-    "provision:evaluation-schema": "node scripts/provision-evaluation-schema.mjs"
+    "provision:evaluation-schema": "node scripts/provision-evaluation-schema.mjs",
+    "seed:evaluation-demo": "node scripts/seed-evaluation-demo.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "latest",

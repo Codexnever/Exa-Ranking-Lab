@@ -1,0 +1,3 @@
+import {EVALUATION_METRIC_VERSION} from "./metrics/types"
+import {EVALUATION_STAGE_DIAGNOSIS_VERSION} from "@/types/evaluation-stage-diagnosis"
+export const EVALUATION_STAGE_DIAGNOSIS_POLICY=Object.freeze({version:EVALUATION_STAGE_DIAGNOSIS_VERSION,metricVersion:EVALUATION_METRIC_VERSION,relevantGradeThreshold:1,highlyRelevantGrade:2,gain:"2^grade-1",cutoffs:[10,50,100],transitionCutoffs:[10,50],coverageWarningThreshold:.5,earlyRecallThreshold:.8,downstreamLossThreshold:.1,materialRankDelta:3,cohort:"accepted-judgments-for-linked-evaluation-query",unordered:"set-metrics-only",causal:false} as const)

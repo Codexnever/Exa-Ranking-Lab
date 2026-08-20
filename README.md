@@ -1,329 +1,151 @@
 # Exa Ranking Lab
 
-A comprehensive developer tool for analyzing and tracking Exa's search ranking performance. Built with Next.js 15, TypeScript, and Tailwind CSS.
+Exa Ranking Lab is a search-quality observability and evaluation workspace for tracking ranking change, measuring judged relevance, diagnosing document movement across recorded retrieval stages, and comparing search strategies on frozen benchmarks.
 
-## 🚀 Features
+## Why it exists
 
-### Core Functionality
-- **Query Builder**: Create and manage search queries with advanced filtering
-- **Real-time Monitoring**: Execute queries and monitor performance in real-time
-- **Ranking Analysis**: Track ranking changes and performance metrics
-- **Snapshot Management**: Capture and store search result snapshots
-- **Comparison Tools**: Compare rankings between different time periods
-- **Feedback System**: Annotate and rate search result quality
-- **Analytics Dashboard**: Comprehensive insights and performance metrics
+```text
+ranking changed ≠ search quality changed
+```
 
-### Technical Features
-- **Real Exa API Integration**: Direct integration with Exa's search API
-- **Responsive Design**: Mobile-first design with Tailwind CSS
-- **Type Safety**: Full TypeScript implementation
-- **Real-time Updates**: Live query execution monitoring
-- **Data Persistence**: Local storage with export/import capabilities
-- **Modern UI**: Clean, professional interface with shadcn/ui components
+Ranking drift is an operational signal. Human relevance judgments and reproducible metric policy are needed to determine whether measured search quality changed. The Lab keeps global drift, metric deltas, document movement, stage evidence, and strategy tradeoffs separate so the evidence remains auditable.
 
-## 🛠 Technology Stack
+## Core capabilities
 
-### Frontend
-- **Next.js 15**: React framework with App Router
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first CSS framework
-- **shadcn/ui**: Modern UI component library
-- **Recharts**: Data visualization and charts
-- **React Hook Form**: Form handling with validation
-- **Zod**: Schema validation
+- Query execution, immutable snapshots, ranking drift, and algorithm-change evidence
+- Frozen human benchmarks with accepted `0/1/2` judgments and canonical document identity
+- nDCG, benchmark-relative Recall, MRR, Hit, Judged Precision, and Judgment Coverage
+- Immutable evaluation runs, relevance-aware comparison, and query gains/losses
+- Canonical judged-document movement and top-K transitions
+- Generic candidate/retrieval/fusion/rerank/final stage traces and descriptive diagnosis
+- Accepted grade-0 hard-negative candidate and repeated false-positive analysis
+- Imported or native strategy execution benchmarking with quality, latency, error, and stage profiles
 
-### Backend
-- **Next.js API Routes**: Server-side API endpoints
-- **Exa API**: Search and content discovery
-- **Local Storage**: Client-side data persistence
+## Architecture
 
-### Development Tools
-- **ESLint**: Code linting
-- **Prettier**: Code formatting
-- **TypeScript**: Static type checking
+```mermaid
+flowchart TD
+    O[Search / strategy outputs] --> S[Snapshots / stage traces]
+    S --> C[Canonical document identity]
+    C --> B[Frozen human benchmark]
+    B --> M[Metric Policy v1]
+    M --> R[Immutable evaluation runs]
+    R --> X[Run comparison]
+    X --> D[Document movement]
+    S --> G[Stage diagnosis]
+    D --> H[Hard-negative analysis]
+    G --> H
+    H --> L[Strategy benchmarking]
+    O --> P[Ranking drift / algorithm detector]
+    P -. parallel operational evidence .-> X
+```
 
-## 📋 Prerequisites
+The system does not combine these signals into a synthetic score or make unsupported causal claims.
 
-- Node.js 18+ 
-- npm or yarn
-- Exa API key (get one at [exa.ai](https://exa.ai))
+## Quick start
 
-## 🚀 Quick Start
+Requirements: Node.js 22, npm, and an Appwrite project for persisted runtime workflows.
 
-### 1. Clone the Repository
-\`\`\`bash
-git clone https://github.com/your-username/exa-ranking-lab.git
-cd exa-ranking-lab
-\`\`\`
-
-### 2. Install Dependencies
-\`\`\`bash
-npm install
-# or
-yarn install
-\`\`\`
-
-### 3. Environment Setup
-Create a `.env.local` file in the root directory:
-\`\`\`env
-EXA_API_KEY=your_exa_api_key_here
-\`\`\`
-
-### 4. Start Development Server
-\`\`\`bash
+```bash
+npm ci
+cp .env.example .env.local
+# Fill the required Appwrite values in .env.local
+npm run provision:evaluation-schema -- --dry-run
+npm run provision:evaluation-schema
 npm run dev
-# or
-yarn dev
-\`\`\`
+```
 
-Visit [http://localhost:3000](http://localhost:3000) to see the application.
+Open <http://localhost:3000>. Appwrite clients initialize lazily, so type checking and production compilation do not require live secrets; an actual runtime Appwrite operation fails with a clear missing-variable error until configuration is supplied.
 
-## 📖 User Guide
+## Environment setup
 
-### Getting Started
+`.env.example` is grouped by subsystem. The important classes are:
 
-1. **Configure API Key**
-   - Navigate to Settings → API Configuration
-   - Enter your Exa API key
-   - Test the connection to ensure it's working
+| Class | Variables | When required |
+|---|---|---|
+| Core runtime | `NEXT_PUBLIC_APPWRITE_ENDPOINT`, `NEXT_PUBLIC_APPWRITE_PROJECT_ID`, `NEXT_PUBLIC_APPWRITE_DATABASE_ID`, `APPWRITE_API_KEY`, core collection IDs | Authentication and persisted application operations |
+| Evaluation | evaluation dataset/query/judgment/run collection IDs | Frozen benchmark workflows |
+| Stage trace | stage trace header/document collection IDs | Trace capture and stage diagnosis |
+| Strategy | strategy/execution/document collection IDs | Strategy Lab persistence |
+| Optional providers | `GEMINI_API_KEY`, `OPENAI_API_KEY`, `WEAVIATE_*`, `RESEND_API_KEY` | Only their embedding, vector, or notification paths |
+| Scheduling/deployment | `CRON_SECRET`, `APP_URL`, `NEXT_PUBLIC_APP_URL` | Scheduled jobs and deployed callbacks |
+| Provisioning only | server Appwrite API key and database/project configuration | Schema provisioning scripts |
 
-2. **Create Your First Query**
-   - Go to Query Builder
-   - Fill in query details (name, search terms, category)
-   - Configure filters (domains, result count)
-   - Set up scheduling if needed
-   - Save and run the query
+Exa credentials are normally managed through the authenticated Settings workflow. Optional embedding/vector credentials are not required for core evaluation startup. Never commit `.env.local`.
 
-3. **Monitor Results**
-   - Use Query Monitor to track execution
-   - View real-time progress and results
-   - Check for any errors or issues
+## Appwrite provisioning
 
-### Core Workflows
+The additive provisioning script covers evaluation datasets, queries, relevance judgments, runs, run-query results, stage traces/documents, strategies, and strategy execution headers/documents.
 
-#### Query Management
-1. **Create Query**: Define search parameters and filters
-2. **Execute Query**: Run manually or on schedule
-3. **Monitor Progress**: Real-time execution tracking
-4. **Review Results**: Analyze search results and rankings
+```bash
+node --check scripts/provision-evaluation-schema.mjs
+npm run provision:evaluation-schema -- --dry-run  # inspect only
+npm run provision:evaluation-schema -- --inspect  # inspect only
+npm run provision:evaluation-schema               # apply additive changes
+```
 
-#### Ranking Analysis
-1. **Capture Snapshots**: Store search results at specific times
-2. **Compare Rankings**: Analyze changes between snapshots
-3. **Track Performance**: Monitor ranking stability and volatility
-4. **Generate Reports**: Export data and insights
+It never deletes collections or attributes. Existing schema mismatches are reported for manual review. Live inspection and application require valid Appwrite credentials.
 
-#### Feedback & Annotation
-1. **Rate Results**: Provide quality ratings for search results
-2. **Add Comments**: Detailed feedback on result relevance
-3. **Track Improvements**: Monitor how feedback affects rankings
-4. **Export Feedback**: Share insights with team members
+## Development and verification
 
-### Page Overview
+```bash
+npm run dev
+npm run check-types
+npm run lint
+npm test -- --runInBand
+npm run build
+```
 
-#### Dashboard
-- Overview of all queries and recent activity
-- Key performance metrics and trends
-- Quick access to run queries
-- Recent snapshots and changes
+The GitHub Actions CI workflow runs the same type, lint, test, and build gates without embedding secrets.
 
-#### Query Builder
-- Create and edit search queries
-- Configure advanced filters and parameters
-- Set up automated scheduling
-- Tag and categorize queries
+## Demo evaluation flow
 
-#### Query Monitor
-- Real-time query execution tracking
-- Progress monitoring and status updates
-- Error handling and retry mechanisms
-- Batch execution capabilities
+The optional demo command validates a synthetic, non-writing import bundle containing a frozen dataset description, two queries, two run descriptors, a comparison, a candidate → rerank → final trace, and two imported strategies:
 
-#### Analytics
-- Comprehensive performance metrics
-- Ranking stability and volatility analysis
-- Domain diversity tracking
-- Response time monitoring
-- Trend analysis and insights
+```bash
+npm run seed:evaluation-demo
+npm run seed:evaluation-demo -- --write /tmp/exa-ranking-lab-demo.json
+```
 
-#### Snapshots
-- Historical search result storage
-- Snapshot comparison tools
-- Export and sharing capabilities
-- Performance tracking over time
+`--write` uses exclusive creation and will not overwrite a file. The bundle never writes directly to Appwrite or bypasses server authorization; import it through authenticated APIs after provisioning. See [the demo script](docs/DEMO_SCRIPT.md) for the 3–5 minute walkthrough.
 
-#### Compare Rankings
-- Side-by-side snapshot comparison
-- Ranking change analysis
-- Position movement tracking
-- Visual change indicators
+## Strategy Lab
 
-#### Feedback
-- Result quality rating system
-- Detailed feedback and comments
-- Relevance and authority scoring
-- Feedback trend analysis
+Open `/evaluation/<frozen-dataset-id>/strategies`. Register provider-neutral strategy configurations, import immutable execution outputs through the API, and compare the same query cohort under Metric Policy v1. Tables keep ranking quality, compatible latency, hard negatives, and optional stage evidence separate. “Highest nDCG@10” is not a universal-best claim.
 
-#### Settings
-- API key configuration
-- Notification preferences
-- Application settings
-- Data management tools
-- Security settings
+## Metric semantics
 
-## 🔧 Configuration
+- `0`: accepted not relevant; `1`: accepted relevant; `2`: accepted highly relevant.
+- **Unjudged is not irrelevant.** Unjudged results occupy ranking positions for nDCG but never become grade 0 truth.
+- **nDCG@K** measures graded ordering quality with gain `2^grade - 1`.
+- **Benchmark Recall@K** is the fraction of known accepted relevant benchmark documents present—not exhaustive web recall.
+- **MRR** uses the first accepted relevant result.
+- **Hit@K** reports whether any accepted relevant result appears in the cutoff.
+- **Judged Precision@K** divides judged relevant results by judged results; unjudged results are excluded from its denominator.
+- **Judgment Coverage@K** reports how much of the evaluated ranking has accepted truth and qualifies interpretation.
+- **Stage Recall** uses the same benchmark-relative truth over one recorded stage; missing stages are not inferred.
+- A **hard-negative candidate** is accepted grade 0 plus high-prominence, persistence, outranking, or stage-survival evidence—not every grade-0 document and not automatically training data.
 
-### API Configuration
-The application requires an Exa API key to function. Configure it in:
-1. Environment variables (`.env.local`)
-2. Settings page (runtime configuration)
+## Screenshots
 
-### Notification Settings
-Configure notifications for:
-- Query completion
-- Query failures
-- Weekly reports
-- Ranking changes
+Release screenshots must be captured from a configured runtime or verified deployment. They are intentionally not fabricated in source control when Appwrite/auth/browser infrastructure is unavailable. The required views are tracked in [the release checklist](docs/RELEASE_CHECKLIST.md).
 
-### Data Management
-- Export all data as JSON
-- Clear application data
-- Monitor storage usage
-- Backup and restore
+## Security and provenance
 
-## 📊 Analytics & Metrics
+Evaluation APIs are owner scoped and reject foreign datasets, runs, traces, strategies, and unsupported client authority fields. Canonical keys, metric values, evidence reasons, and severities are calculated on the server. Payloads and list endpoints are bounded. Server API keys must remain server-only.
 
-### Key Performance Indicators
-- **Ranking Stability**: Percentage of results maintaining position
-- **Volatility Index**: Measure of ranking fluctuation
-- **Domain Diversity**: Number of unique domains in results
-- **Response Time**: Average API response time
-- **Success Rate**: Percentage of successful queries
+## Current limitations
 
-### Tracking Capabilities
-- Position changes over time
-- New content discovery
-- Domain authority trends
-- Query performance metrics
-- User feedback patterns
+- A live Appwrite project is required for authenticated runtime and infrastructure smoke tests.
+- Strategy outputs may be imported instead of executed natively.
+- Stage diagnosis depends on exactly recorded stages and is descriptive, not causal.
+- Hard-negative analysis depends on accepted human grade-0 judgments.
+- Benchmark Recall is benchmark-relative.
+- Comparisons are descriptive and do not claim statistical significance.
+- Optional semantic/vector/notification paths depend on external provider availability.
 
-## 🔒 Security
+## v1 status
 
-### Data Protection
-- API keys encrypted in storage
-- Secure API communication (HTTPS)
-- Local data storage (no external databases)
-- Export/import for data portability
+The Phase 1–12 product roadmap is feature-complete. Phase 13 adds release engineering, reproducible environment documentation, lazy runtime configuration, CI, demo assets, and verification gates. A release is only declared ready after live Appwrite schema, authentication, smoke-flow, screenshot, and deployment validation complete.
 
-### Best Practices
-- Regular API key rotation
-- Monitor API usage and limits
-- Secure environment variable storage
-- Regular data backups
-
-## 🚀 Deployment
-
-### Vercel (Recommended)
-1. Connect your GitHub repository to Vercel
-2. Add environment variables in Vercel dashboard
-3. Deploy automatically on push to main branch
-
-### Other Platforms
-The application can be deployed to any platform supporting Next.js:
-- Netlify
-- Railway
-- DigitalOcean App Platform
-- AWS Amplify
-
-### Environment Variables
-Required for production:
-\`\`\`env
-EXA_API_KEY=your_production_api_key
-\`\`\`
-
-## 🤝 Contributing
-
-### Development Setup
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-### Code Standards
-- TypeScript for all new code
-- ESLint configuration compliance
-- Responsive design principles
-- Accessibility best practices
-
-### Testing
-- Test API integrations thoroughly
-- Verify responsive design
-- Check accessibility compliance
-- Validate TypeScript types
-
-## 📝 API Reference
-
-### Exa API Integration
-The application integrates with Exa's search API:
-- Search endpoint: `POST /search`
-- Similar content: `POST /findSimilar`
-- Content retrieval: `POST /contents`
-
-### Internal API Endpoints
-- `GET /api/queries` - List all queries
-- `POST /api/queries` - Create new query
-- `POST /api/queries/[id]/run` - Execute query
-- `GET /api/snapshots` - List snapshots
-- `GET /api/analytics` - Get analytics data
-- `POST /api/feedback` - Submit feedback
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### API Connection Errors
-- Verify API key is correct
-- Check network connectivity
-- Ensure API key has sufficient quota
-- Test connection in Settings
-
-#### Query Execution Failures
-- Check query parameters
-- Verify domain filters are valid
-- Ensure result count is within limits
-- Review error messages in console
-
-#### Performance Issues
-- Reduce number of results per query
-- Increase query intervals
-- Clear old snapshots
-- Check browser storage limits
-
-### Getting Help
-- Check the console for error messages
-- Review API documentation at [exa.ai](https://exa.ai)
-- Submit issues on GitHub
-- Contact support for API-related issues
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Exa](https://exa.ai) for providing the search API
-- [shadcn/ui](https://ui.shadcn.com) for the component library
-- [Vercel](https://vercel.com) for hosting and deployment
-- [Next.js](https://nextjs.org) team for the amazing framework
-
-## 📞 Support
-
-For support and questions:
-- GitHub Issues: [Create an issue](https://github.com/your-username/exa-ranking-lab/issues)
-- Documentation: [Wiki](https://github.com/your-username/exa-ranking-lab/wiki)
-- Email: support@exa-ranking-lab.com
-
----
-
-Built with ❤️ by the Exa Ranking Lab team
+Detailed policy and storage documentation lives in [DEVELOPER.md](DEVELOPER.md).

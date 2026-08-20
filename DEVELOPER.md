@@ -78,6 +78,8 @@ COLLECTION_ANALYTICS=
 COLLECTION_NOTIFICATIONS=            # new — drift alerts
 COLLECTION_ALGORITHM_EVENTS=         # new — algorithm update detector
 COLLECTION_EMBEDDING_CACHE=          # new — persistent embedding cache
+COLLECTION_EVALUATION_RUNS=          # immutable evaluation-run headers
+COLLECTION_EVALUATION_RUN_QUERIES=   # per-query metric payloads for each run
 NEXT_PUBLIC_COLLECTION_SETTINGS=
 NEXT_PUBLIC_COLLECTION_ACCESS_LOGS=
 COLLECTION_API_USAGE=
@@ -755,10 +757,6 @@ If you see `USAGE_LIMIT_EXCEEDED (429)`:
 - `coverageGap` metric tracks this over time — a widening gap = topic coverage decay
 - Blog post "Canon" (April 2026) confirms this is by design
 
-### Weaviate relationship
-- Bob van Luijt (founder) replied to cold email — warm connection exists
-- Follow-up email should: show working product, BQ+PQ usage depth, real drift numbers
-- `docs/weaviate-schema.md` — keep updated, attach to outreach
 
 ### Embedding model
 - `gemini-embedding-2-preview` is the ONLY correct model string
@@ -993,3 +991,458 @@ Clone → v2 draft
 ```
 
 Phase 4 adds `POST /api/evaluation/datasets/[id]/freeze` and the `/evaluation` pages. It still does not calculate nDCG, Recall, MRR, Precision, Hit Rate, relevance deltas, hard negatives, reranker comparisons, or relevance-aware drift.
+
+## Search Relevance Metric Engine (Phase 5)
+
+Phase 5 adds deterministic, on-demand evaluation of explicit snapshots against a frozen dataset version. `EVALUATION_METRIC_VERSION = "1"` pins grade semantics, `2^grade - 1` gain, grade `>= 1` relevance, preservation of unjudged rank positions, highest-ranked-only canonical duplicate handling, benchmark-relative recall, judged-only precision denominators, and unweighted macro aggregation. Changing any of these semantics requires a new metric policy version.
+
+The engine calculates generic positive-integer cutoffs, with `5` and `10` as UI/API defaults:
+
+- **nDCG@K** uses graded gain and logarithmic discount. It is unavailable without accepted relevant benchmark truth.
+- **Benchmark Recall@K** is retrieved accepted relevant benchmark documents divided by all known accepted relevant documents for the evaluation query. It is not exhaustive web recall.
+- **Judged Precision@K** is accepted relevant divided by all accepted judged results in the top K. Unjudged results are excluded from this denominator, never treated as grade 0.
+- **Judgment Coverage@K** is accepted judged results divided by unique evaluated results in the top K.
+- **Reciprocal Rank / MRR** uses the original rank of the first accepted relevant result; no retrieved relevant result contributes zero.
+- **Hit@K** is one when an accepted relevant result occurs inside K and zero otherwise.
+
+`POST /api/evaluation/datasets/[id]/metrics` accepts cutoffs and explicit `{ evaluationQueryId, snapshotId }` selections. The server verifies owner, frozen status, query membership, snapshot ownership/source/config compatibility, judgment scope and canonical identity, then loads relevance truth itself. Legacy snapshots without `configHash` are allowed with a warning. Canonical duplicate results retain the first occurrence and ignore later occurrences without collapsing the original rank positions.
+
+Responses contain per-query metrics/counts/warnings, explicit selected snapshot IDs, macro aggregates, eligible/skipped counts, metric policy version, and `persisted: false`. Metric runs and relevance deltas remain intentionally unpersisted/deferred; judgment documents are not overloaded with metric output. Relevance-aware drift, hard negatives, reranker comparisons, detector integration, feedback promotion, and training exports are not part of Phase 5.
+
+## Persisted Evaluation Runs and Metric History (Phase 6)
+
+Phase 6 adds immutable `EvaluationRun` history without changing Phase 5 formulas. `POST /metrics` remains an on-demand preview. `POST /runs` accepts only cutoffs and explicit query/snapshot selections, invokes the same Phase 5 `EvaluationMetricsService` on the server, and persists its exact output. Clients never submit metrics, warnings, eligibility, or a metric-policy version.
+
+Authoritative runs require a frozen, owner-scoped dataset. Every run receives a new Appwrite ID, even when its inputs match a previous execution, because execution time is part of the audit history. There are no update or delete APIs. A correction or later observation creates another immutable run.
+
+### Storage layout
+
+Two additive Appwrite collections keep payload sizes bounded:
+
+- `evaluation_runs` stores the run header, dataset family/version, Metric Policy version, cutoffs, exact snapshot-selection map, aggregate output, warning summary, counts, creator, and timestamp.
+- `evaluation_run_queries` stores one bounded Phase 5 `PerQueryEvaluationResult` document per selected query.
+
+A single JSON payload could exceed the configured 32 KiB string boundary when evaluating up to 100 queries. Splitting query results prevents that growth while keeping list reads small: run summaries read only `evaluation_runs`, and detail reads join immutable query records by `runId`. The provisioning script remains additive, idempotent, inspectable with `--dry-run`/`--inspect`, mismatch-reporting, and non-destructive.
+
+Required collection variables:
+
+```dotenv
+COLLECTION_EVALUATION_RUNS=evaluation_runs
+COLLECTION_EVALUATION_RUN_QUERIES=evaluation_run_queries
+```
+
+### APIs and UI
+
+- `POST /api/evaluation/datasets/[id]/runs` — recalculate and save one completed authoritative run.
+- `GET /api/evaluation/datasets/[id]/runs?limit=20&offset=0` — newest-first, dataset-version-scoped summaries.
+- `GET /api/evaluation/datasets/[id]/runs/[runId]` — full provenance, aggregate, per-query results, and warnings.
+
+Frozen dataset workspaces retain **Run Evaluation** for previews and add **Save This Run**, which sends only the current cutoffs and explicit selections. **Evaluation History** displays lightweight summaries and loads full immutable detail on demand. Same `datasetVersionId` plus same `metricVersion` establishes comparable benchmark truth for a future phase; different dataset versions may contain changed queries or judgments and must not be treated as directly comparable.
+
+```text
+Frozen Dataset v1
+        ↓
+Run A — Aug 18
+nDCG@10 = 0.74
+
+        ↓ later
+
+Run B — Aug 20
+nDCG@10 = 0.66
+
+Both:
+datasetVersionId = same
+metricVersion = 1
+
+Therefore Phase 7 can safely calculate:
+
+ΔnDCG@10 = -0.08
+```
+
+Phase 6 stores the provenance needed for this comparison but does not calculate the delta. Metric deltas, compatibility scoring, before/after UI, and relevance-aware drift remain Phase 7 work.
+
+## Relevance-Aware Evaluation Run Comparison (Phase 7)
+
+Phase 7 compares two immutable saved runs without rerunning search or relevance evaluation. `EVALUATION_COMPARISON_VERSION = "1"` and Comparison Policy v1 pin `delta = after - before`, common-query intersection, per-metric availability intersection, winner/loser sorting, deterministic interpretation rules, and the primary-metric fallback order.
+
+### Compatibility and cohorts
+
+Authoritative comparison requires the same `datasetVersionId`, the same Metric Policy version, at least one common cutoff, and at least one common evaluation query. Different frozen dataset versions are not treated as unchanged benchmark truth. A missing cutoff remains unavailable rather than being invented.
+
+When selected query sets differ, comparison uses only the common evaluation-query IDs and returns the only-before/only-after IDs with a prominent warning. Every aggregate metric is recomputed from persisted per-query results where that metric is available in both runs. Phase 7 never subtracts persisted global aggregates from different cohorts.
+
+### Direction and magnitude
+
+The directional epsilon is `0.01`:
+
+- `abs(delta) < 0.01` — stable;
+- `delta >= 0.01` — improved;
+- `delta <= -0.01` — degraded.
+
+Magnitude labels are product interpretation bands, not statistical significance: stable below `0.01`, small below `0.05`, moderate below `0.15`, and large at or above `0.15`. Recall changes in the small band may be described as broadly stable context, while their exact numeric direction remains preserved.
+
+The primary quality metric is nDCG@10, followed by nDCG at the highest common cutoff, MRR, and Benchmark Recall at the highest common cutoff. Judgment Coverage is context rather than quality: either-side coverage below `0.50` or a change of at least `0.20` produces a caution warning.
+
+### Drift evidence and interpretation
+
+For each common query, the comparison adapter loads the exact before/after snapshot IDs stored in the two runs and invokes the existing `calculateDriftScore`; it does not change or combine with that score. The existing detector per-query threshold (`30`) marks substantial drift for the interpretation matrix. Drift remains “how much ranking changed,” while relevance delta remains “how judged quality changed.”
+
+Rule-based summaries distinguish ordering degradation with stable recall, combined quality/recall degradation, ordering improvement with stable recall, stable quality despite substantial drift, and quality unavailable. Wording is descriptive and non-causal: it uses “coincided with” and “pattern suggests,” never statistical significance, a proven regression, or stage attribution.
+
+```text
+Run A
+nDCG@10 = 0.81
+Benchmark Recall@10 = 0.92
+MRR = 0.88
+
+Run B
+nDCG@10 = 0.64
+Benchmark Recall@10 = 0.91
+MRR = 0.52
+
+Existing ranking drift = high
+
+Delta:
+nDCG@10 = -0.17
+Recall@10 = -0.01
+MRR = -0.36
+
+Interpretation:
+
+Ranking changed substantially.
+Known relevant-document retrieval remained nearly stable.
+Ordering quality degraded significantly.
+```
+
+`POST /api/evaluation/datasets/[id]/comparisons` accepts only `{ beforeRunId, afterRunId }`. The server owner-scopes both run reads, requires chronological Before/After order, validates compatibility, and returns deterministic aggregate/per-query deltas, gains/losses, optional aligned drift evidence, warnings, and structured interpretation. Comparisons are not persisted because two immutable run IDs plus the comparison-policy version reproduce the result.
+
+The Evaluation History UI adds explicit Before and After selectors, comparison cards, written Improved/Degraded/Stable/Unavailable labels, common-query counts, quality summary, coverage warnings, largest query gains/losses, and aligned drift evidence.
+
+Phase 8 remains responsible for document-level movement evidence, hard-negative mining, retrieval/reranker stage attribution, ANN/filter diagnosis, and retrieval-system comparisons. Phase 7 does not modify detector confidence or classify an algorithm regression.
+
+## Canonical Judged Document Movement (Phase 8)
+
+Phase 8 extends the existing run-comparison response with canonical, accepted-judgment document movement. `DOCUMENT_MOVEMENT_POLICY_VERSION = "1"` pins Canonicalization Policy v1 as its identity dependency, highest-ranked canonical duplicate handling, `rankDelta = beforeRank - afterRank` (positive means upward), grade `>= 1` relevance, material movement at three ranks, top-5/top-10 transition semantics, and deterministic evidence ordering.
+
+Each exact saved-run snapshot is converted once into `CanonicalSnapshotRepresentation`. Raw URL variants are canonicalized with the existing `getDocumentIdentity`; the first occurrence retains its original rank and later canonical duplicates are ignored with counts and warnings. Thus HTTP/HTTPS, fragments, and tracking parameters cannot create fake entrants or drops, while meaningful parameters remain distinct.
+
+Only authoritative accepted judgments are aligned. Grade 0 remains explicitly judged irrelevant, grades 1 and 2 remain relevant/highly relevant, and pending, conflicted, operational-feedback, and unjudged documents are excluded from judged movement truth. An accepted benchmark document absent from both snapshots is retained as `unknown`/`absent_both`, because it affects benchmark truth but has no observed ranking movement.
+
+Movement types are `moved_up`, `moved_down`, `unchanged`, `entered_ranking`, `left_ranking`, and `unknown`. Every movement includes nullable ranks, canonical and raw URL provenance, content-hash change context, relevance meaning, materiality, and generic cutoff transitions: `entered`, `left`, `remained_inside`, or `remained_outside`.
+
+Descriptive evidence categories include highly relevant/relevant winners and losers plus judged-irrelevant winners and losers. Grade-0 promotions are not called hard negatives. Structured reason codes include `HIGHLY_RELEVANT_MOVED_DOWN`, `HIGHLY_RELEVANT_LEFT_TOP_K`, `RELEVANT_MOVED_DOWN`, `RELEVANT_LEFT_TOP_K`, `HIGHLY_RELEVANT_MOVED_UP`, `RELEVANT_ENTERED_TOP_K`, `IRRELEVANT_MOVED_UP`, `IRRELEVANT_ENTERED_TOP_K`, `RELEVANT_DISAPPEARED`, `RELEVANT_APPEARED`, and `NO_JUDGED_DOCUMENT_MOVEMENT`.
+
+The Phase 7 comparison service now loads accepted judgments and the exact Before/After snapshot IDs for each common query, validates frozen dataset/query/snapshot ownership and canonicalization provenance, and attaches query movement plus aggregate largest losses, gains, irrelevant promotions, relevant drops, summary counts, and coverage context. The existing comparison API request remains only `{ beforeRunId, afterRunId }`; clients cannot submit grades, canonical keys, ranks, or evidence reasons.
+
+Bounded diagnosis labels are descriptive rather than causal:
+
+- `ORDERING_LOSS_PATTERN` — nDCG degrades, Recall is broadly stable, relevant documents lose prominence, and judged-irrelevant documents rise.
+- `RELEVANT_DISAPPEARANCE_PATTERN` — Recall degrades alongside relevant top-K losses/disappearance.
+- `RELEVANCE_ORDERING_IMPROVEMENT_PATTERN` — nDCG improves alongside relevant-document gains.
+
+```text
+Query:
+"best vector database for filtered search"
+
+Before:
+
+#1 Doc A — grade 2
+#3 Doc B — grade 2
+#9 Doc X — grade 0
+
+After:
+
+#2 Doc X — grade 0
+#7 Doc A — grade 2
+Doc B absent from top 10
+
+Metrics:
+
+nDCG@10
+0.86 → 0.59
+
+Benchmark Recall@10
+1.00 → 0.50
+
+Evidence:
+
+Doc A:
+grade 2
+#1 → #7
+
+Doc B:
+grade 2
+#3 → absent
+
+Doc X:
+grade 0
+#9 → #2
+
+Interpretation:
+
+Measured relevance degraded.
+Highly relevant documents lost ranking prominence,
+while a judged-irrelevant document moved upward.
+```
+
+The comparison UI adds **What moved?**, highly relevant losses, relevant gains, irrelevant promotions, canonical URLs, rank and top-K transitions, coverage context, and expandable query drilldowns. The explanation says movement evidence is associated with metric change; it never attributes final-ranking movement to retrieval, ANN, filters, fusion, or reranking.
+
+Phase 9 requires stage-level candidate traces before candidate Recall@100, BM25/dense/fusion diagnosis, hard-negative mining, or reranker attribution can be supported. Phase 8 does not change detector confidence, drift math, or metric math.
+
+## Generic Retrieval Stage Traces (Phase 9)
+
+`EVALUATION_STAGE_TRACE_VERSION = "1"` defines immutable, provider-neutral execution traces. A trace records any ordered subset of `candidate`, `retrieval`, `fusion`, `rerank`, `final`, or `custom` stages; it does not assume that the application has a reranker. Stage identity is a structured ID/type/name/order tuple, while optional provider labels and bounded metadata support Exa, local, BM25, dense, hybrid, or imported experiments without changing the schema.
+
+Every stage URL is resolved by the existing Canonicalization Policy through `getDocumentIdentity`. Documents are joined by `documentKey`, raw URLs remain provenance only, and the highest-ranked canonical occurrence is retained while later variants are counted and ignored. Ranks are one-based or explicitly `null` for unordered candidates. Stage order and rank values are immutable after ingestion.
+
+Headers are stored in `evaluation_stage_traces`; potentially large result sets are split into `evaluation_stage_trace_documents`. Traces are owner-scoped, newest-first, immutable audit records. Separate submissions create separate traces. The additive provisioning script supports inspection/dry-run and never deletes or alters existing evaluation collections.
+
+When `snapshotId` is supplied, the server verifies snapshot ownership and `sourceQueryId`. A recorded `final` stage must exactly match the snapshot's canonical result order and ranks; the snapshot remains authoritative. Optional dataset/evaluation-query linkage is validated explicitly, and only accepted judgments are overlaid. Grade 0 remains judged irrelevant, pending/conflicted judgments are excluded, and documents without accepted truth remain `unjudged`.
+
+Completeness is explicit (`complete`, `partial`, or `final_only`). A recorded stage with a missing document means **absent from that recorded stage**. An unrecorded stage supplies no absence evidence. The inspector therefore never invents a rerank/fusion stage or attributes a transition to one that was not captured.
+
+`DocumentStagePath` reports presence, rank, score, and score type for every recorded stage. Adjacent recorded-stage transitions are `promoted`, `demoted`, `entered`, `lost`, `unchanged`, `retained` (including unranked presence), or `unknown`; `rankDelta = previousRank - nextRank`, so positive means promotion. These facts are observational and non-causal.
+
+APIs:
+
+- `POST /api/evaluation/stage-traces` canonicalizes, validates, aligns, and saves an immutable trace. Clients may submit raw URLs but not authoritative canonical URLs or document keys.
+- `GET /api/evaluation/stage-traces` lists owner-scoped summaries with bounded pagination and optional exact source/snapshot/evaluation/dataset filters.
+- `GET /api/evaluation/stage-traces/[traceId]` reconstructs strict ordered trace detail.
+
+The frozen evaluation workspace includes a **Pipeline Trace** inspector with stage counts, top documents, rank/score, duplicate warnings, accepted-grade overlay, completeness warning, canonical URL, and a selectable document path.
+
+```text
+Query:
+"best vector database for filtered search"
+
+Grade 2 Doc A
+
+Candidate:
+#18
+
+Fusion:
+#11
+
+Rerank:
+#4
+
+Final:
+#7
+
+Observed path:
+
+Candidate #18
+→ Fusion #11
+→ Rerank #4
+→ Final #7
+
+Interpretation in Phase 9:
+
+The highly relevant document was present at every recorded stage.
+It gained rank before reranking and lost rank between rerank and final.
+
+Do NOT yet claim why.
+```
+
+Phase 9 intentionally does not calculate candidate Recall@100, stage-level relevance metrics, hard negatives, or retrieval/reranker failure diagnosis. Phase 10 first requires trustworthy traces linked to the exact evaluated execution before it can add bounded stage-level diagnosis.
+
+## Stage-Level Relevance Diagnosis (Phase 10)
+
+`EVALUATION_STAGE_DIAGNOSIS_VERSION = "1"` adds deterministic relevance measurements over immutable, evaluation-linked Stage Trace v1 records. It reuses Metric Policy v1 without changing canonical identity, grade semantics, gain, or unjudged handling: only accepted judgments are truth, grade `>= 1` is relevant, grade 2 is highly relevant, and `gain = 2^grade - 1`.
+
+For ranked stages, Stage Benchmark Recall@K is the fraction of all known accepted relevant benchmark documents found in that recorded stage's top K. It is benchmark-relative, not exhaustive web recall. Hit@K, Judged Precision@K, Judgment Coverage@K, and nDCG@K use the Phase 5 definitions; unjudged documents occupy their ranks but are excluded from judged-precision truth. Primary stage cutoffs are 10, 50, and 100 and always retain their explicit depth labels.
+
+A fully unordered stage receives set-level Benchmark Recall, Hit, Judged Precision, and Judgment Coverage over all unique recorded documents. It never receives nDCG, rank deltas, or top-K metrics because no ordering was observed. Coverage below 0.50 produces a warning rather than a fabricated confidence score.
+
+For each pair of adjacent **recorded** stages, Relevant Survival is accepted relevant documents present in both divided by relevant documents present in the previous stage; Relevant Loss is the complementary observed absence rate. Grade-2 survival is reported separately. Relevant entries are counted descriptively. When both stages are ranked, surviving relevant documents receive mean/median `previousRank - nextRank`, promoted/demoted/unchanged counts, and same-K top-10/top-50 retention. Missing stages are never invented.
+
+When the earliest recorded stage is explicitly `candidate` or `retrieval` and a final stage exists, Candidate-to-Final Retention reports relevant candidate documents still present in final. Candidate Recall@100 and Final Recall@10 remain separately labeled; they are not presented as a same-depth delta. Same-K values may be compared only where both recorded rankings support the requested cutoff.
+
+Descriptive patterns are `RELEVANT_ABSENT_EARLY_PATTERN`, `RELEVANT_DOWNSTREAM_LOSS_PATTERN`, `RELEVANT_DOWNSTREAM_PROMOTION_PATTERN`, `GRADE2_LOSS_PATTERN`, `RERANK_TRANSITION_DEMOTION_PATTERN`, `FINAL_ORDERING_DEGRADATION_PATTERN`, `STAGE_RELEVANCE_STABLE_PATTERN`, and `STAGE_DIAGNOSIS_UNAVAILABLE`. A rerank pattern is emitted only when an actual recorded transition touches a `rerank` stage and relevant documents are lost or materially demoted. Its wording is “across the recorded rerank-stage transition,” never “caused by the reranker.”
+
+`GET /api/evaluation/stage-traces/[traceId]/diagnosis` owner-authorizes the trace, requires exact dataset/evaluation-query linkage, reloads accepted judgments server-side, validates canonical and query provenance, and returns stage metrics, adjacent transitions, candidate-to-final retention, patterns, completeness warnings, and document evidence. No client grades are accepted.
+
+The Pipeline Trace UI adds **Relevance Diagnosis** cards, explicit ranked/unordered availability, coverage, stage Recall/Hit/Precision/nDCG, adjacent survival and rank movement, candidate-to-final retention, structured patterns, and expandable lost/demoted relevant-document evidence.
+
+```text
+Query:
+"best vector database for filtered search"
+
+Accepted relevant benchmark documents:
+12
+
+Candidate stage:
+11 / 12 relevant present
+Benchmark Recall = 0.92
+
+Rerank stage:
+10 / 12 relevant present
+nDCG@10 = 0.77
+
+Final:
+8 / 12 relevant present
+Benchmark Recall@10 = 0.67
+nDCG@10 = 0.59
+
+Grade-2 document:
+Candidate #18
+Rerank #4
+Final absent
+
+Interpretation:
+
+Most known relevant benchmark documents were present in the
+recorded candidate stage, but some relevant documents lost
+presence or ranking prominence downstream.
+
+A highly relevant document was present through reranking and
+was absent from the recorded final ranking.
+
+This is descriptive stage evidence.
+Do NOT claim a specific model or component caused it.
+```
+
+Trace completeness constrains every conclusion: final-only traces cannot diagnose candidates, partial traces cover only observed transitions, and missing final stages still permit local metrics but not final retention. Phase 11 must establish hard-negative selection policy and additional stage evidence before hard-negative mining, strategy benchmarking, or component attribution.
+
+## Hard-Negative Mining and Error Analysis (Phase 11)
+
+`HARD_NEGATIVE_POLICY_VERSION = "1"` distinguishes an accepted grade-0 judgment from a hard-negative candidate. Grade 0 only means judged irrelevant. A candidate additionally requires deterministic evidence that the system repeatedly retrieved or ranked that irrelevant canonical document with unusual prominence. Phase 11 uses accepted judgments only, existing canonical `documentKey` identity, immutable runs, exact run snapshots, and unambiguous linked stage traces; it introduces no second label system.
+
+Qualification reasons are `HIGH_FINAL_RANK` (final rank <= 5), `TOP_K_IRRELEVANT` (final rank <= 10), `OUTRANKS_HIGHLY_RELEVANT`, `SURVIVES_PIPELINE`, `IRRELEVANT_DOWNSTREAM_PROMOTION` (at least three ranks), `REPEATED_HIGH_RANK_FALSE_POSITIVE` (top 10 in at least two distinct saved runs), and `PERSISTENT_QUERY_FALSE_POSITIVE`. A grade-0 document at rank 20 with no repetition, outranking, survival, or material promotion does not qualify. Grades 1/2, pending/conflicted judgments, and unjudged documents never qualify.
+
+Severity is a product-analysis label, not probability or statistical confidence. `critical` covers final rank 1, outranking multiple grade-2 documents, or repeated top-3 appearances. `high` covers final top 3, outranking a grade-2 document, pipeline survival ending top 5, or three top-5 appearances. `medium` covers final top 10, material downstream promotion, or repeated top-10 history. Weaker qualifying persistence/survival evidence is `low`. Sorting is deterministic by severity, best rank, occurrence count, and document key.
+
+History is scoped strictly to the same dataset version, evaluation query, and canonical document. It reports occurrences, distinct runs, top-3/top-5/top-10 counts, first/last observation, best/worst/mean/median rank, and recorded pipeline-survival frequency. Different dataset versions and different document keys never merge.
+
+For each occurrence, pairwise evidence lists every accepted grade-1/2 document ranked below the grade-0 document. Counts distinguish relevant and highly relevant documents. These structures are training-data-ready provenance, but they are not exported as preference pairs in Phase 11.
+
+When exactly one compatible trace is linked to the immutable run snapshot, the analysis preserves the grade-0 document's first observed stage, ordered stage ranks, provider-specific score/score-type provenance, all-stage survival, and largest adjacent recorded promotion. Scores of different types are never compared. Multiple compatible traces are treated as ambiguous and omitted with a warning. Stage movement remains descriptive and never claims that retrieval, fusion, or reranking caused the error.
+
+Query summaries report judged grade-0 count, candidate count, top-5/top-10 errors, grade-0 documents outranking grade-2 content, repeated candidates, high/critical counts, and a top candidate. Domain summaries report candidate count, affected-query count, repeated occurrences, top-5 appearances, and severity distribution. They do not suppress, blacklist, or penalize domains.
+
+`GET /api/evaluation/datasets/[id]/hard-negatives` requires a frozen owner-scoped dataset and supports exact `evaluationQueryId`, `runId`, `severity`, `limit`, and `offset` filters. All grades, ranks, reasons, severities, histories, and stage evidence are calculated server-side. Analysis is deterministic and on demand (`persisted = false`) because accepted truth, runs, snapshots, and traces are already immutable.
+
+The frozen evaluation workspace adds **Hard Negative Analysis** with severity/repetition summaries, query drilldowns, canonical candidate detail, occurrence history, outranked relevant evidence, stage paths, score provenance, promotion evidence, and domain summaries. Semantic similarity alone never qualifies a candidate because stored scores may use incompatible provider/stage scales.
+
+```text
+Query:
+"latest OpenAI API pricing"
+
+Grade-0 Doc X:
+Old pricing article
+
+Run A:
+#7
+
+Run B:
+#4
+
+Run C:
+#1
+
+Stage path in Run C:
+Candidate #20
+Fusion #12
+Rerank #3
+Final #1
+
+Grade-2 Doc A:
+Final #5
+
+Evidence:
+
+- High final rank
+- Repeated high-rank false positive
+- Outranks highly relevant document
+- Downstream promotion
+- Survives recorded pipeline
+
+Interpretation:
+
+The judged-irrelevant document repeatedly achieved high ranking
+prominence and outranked accepted highly relevant content.
+
+This is a strong hard-negative candidate.
+
+Do NOT claim a specific component caused it.
+```
+
+Phase 11 does not persist or export training examples, fine-tune rerankers, compare retrieval strategies, suppress domains, make statistical claims, or automatically remediate results. A later phase must define explicit curation/export and benchmarking contracts before those uses are safe.
+
+## Phase 12: Strategy Benchmark Policy v1
+
+Phase 12 compares provider-neutral retrieval and ranking strategies on one **frozen dataset version**, one explicit evaluation-query cohort, and Metric Policy v1. `STRATEGY_BENCHMARK_POLICY_VERSION = "1"` requires 2–10 strategies, identical query coverage, identical cutoffs, macro aggregation, and a `0.01` pairwise tie epsilon. Missing or ambiguous executions fail the authoritative benchmark rather than silently changing the cohort. The output is ordered as **Highest nDCG@10**, not “best strategy,” because quality, latency, error behavior, and stage evidence remain separate dimensions.
+
+### Strategy identity and immutable execution provenance
+
+A strategy records its human name, generic type (`keyword`, `dense`, `hybrid`, `reranked`, `external`, or `custom`), optional provider/model, latency type, and normalized configuration. The server recursively sorts configuration keys and hashes the stable JSON with SHA-256. Volatile timestamps are excluded. Configuration is immutable: changing it means registering a new strategy; archived strategies cannot receive executions.
+
+Native and imported executions share the same immutable representation. Phase 12 provides API-first imports so external BM25, dense, hybrid, or reranking experiments need not exist in this application. The server validates the frozen dataset/query linkage, derives one-based ranks and canonical identities, keeps the highest-ranked canonical duplicate while preserving its original rank, validates optional exact final-stage trace alignment, and rejects client-supplied ranks, canonical URLs, document keys, or metrics. Strategy headers and documents are split across `evaluation_strategy_executions` and `evaluation_strategy_execution_documents` to keep result payloads bounded.
+
+### Metrics, cohort, and latency semantics
+
+The benchmark reuses Metric Policy v1 for nDCG, benchmark-relative Recall, reciprocal rank/MRR, Hit, Judged Precision, and Judgment Coverage. Only accepted judgments are truth. Primary display columns are nDCG@10, Recall@10, MRR, Hit@10, Precision@10, and Coverage@10; generic cutoffs remain supported. Pairwise query outcomes use nDCG@10, then the highest common nDCG cutoff, reciprocal rank, and benchmark recall as deterministic fallbacks. Wins, losses, ties, largest gains, and largest regressions are raw descriptive evidence, not statistical significance.
+
+Latency summaries contain count, mean, median, nearest-rank p95, minimum, and maximum. Missing latency remains unavailable rather than becoming zero. Pairwise latency deltas are calculated only when latency types match (`end_to_end`, `retrieval_only`, `rerank_only`, or `custom`); incompatible types produce a warning. There is intentionally no combined quality/latency score.
+
+### Hard-negative and stage comparison
+
+Each execution receives an execution-scoped Phase 11 error profile: hard-negative candidate count per query, high/critical query rate, top-five grade-0 count, and accepted grade-0 documents outranking grade-2 documents. Persistent history is not mixed into a strategy benchmark without compatible scope. When an exact linked stage trace exists, Phase 10 supplies candidate/final benchmark recall, candidate-to-final retention, grade-2 survival, and downstream loss. Missing trace data is explicitly unavailable; stages are never fabricated.
+
+### API, UI, and persistence
+
+- `POST|GET /api/evaluation/strategies` registers or lists owner-scoped strategies.
+- `GET /api/evaluation/strategies/[strategyId]` reads one strategy; `POST .../archive` archives it.
+- `POST|GET /api/evaluation/datasets/[id]/strategy-executions` imports or lists immutable query executions.
+- `POST /api/evaluation/datasets/[id]/strategy-benchmarks` computes a strict-cohort benchmark from immutable executions. Clients submit strategy IDs, query IDs, cutoffs, and optional exact execution selections—never metric values.
+- `/evaluation/[datasetVersionId]/strategies` provides the Strategy Lab registration, selector, quality/latency table, pairwise wins/losses, hard-negative counts, stage availability, and query regression explorer.
+
+Strategy identity and execution provenance are persisted additively. Benchmark summaries are deliberately computed on demand in v1 (`persisted: false`) because the immutable inputs and policy version reproduce them; benchmark history persistence and file-import UI are deferred. Production work should add operational pagination, import-job handling for large files, and deployment validation before broad rollout.
+
+```text
+Frozen Benchmark v1
+100 queries
+
+Strategy A:
+Dense
+
+Strategy B:
+Hybrid + Reranker
+
+Results:
+
+Dense
+nDCG@10 = 0.71
+Recall@10 = 0.82
+MRR = 0.75
+p95 latency = 42 ms
+
+Hybrid + Reranker
+nDCG@10 = 0.84
+Recall@10 = 0.90
+MRR = 0.86
+p95 latency = 108 ms
+
+Pairwise:
+
+Hybrid + Reranker wins: 61 queries
+Dense wins: 24 queries
+Ties: 15
+
+Hard negatives:
+Dense: 19
+Hybrid + Reranker: 11
+
+Interpretation:
+The reranked hybrid strategy produced higher measured relevance
+on the same frozen benchmark, but with higher latency.
+Do not call one strategy universally best.
+```
+
+Phase 12 does not deploy winners, export training data, fine-tune rerankers, perform LTR or automatic tuning, make significance claims, or automatically remediate ranking behavior.
+
+## Phase 13: v1 production finalization
+
+Phase 13 adds no search or relevance algorithms. Appwrite service construction is lazy: importing a route or page no longer requires live credentials during static analysis or production compilation. Runtime access validates public and server configuration centrally and reports the exact missing variable. Optional embedding, vector, email, and strategy providers remain optional.
+
+Release gates are `npm run check-types`, `npm run lint`, `npm test -- --runInBand`, and `npm run build`. GitHub Actions executes the same gates without secrets. The synthetic demo manifest is opt-in and non-writing; it exists to prepare authenticated demo imports without bypassing authoritative APIs. Live schema provisioning, authentication, end-to-end smoke flows, screenshots, and deployment still require a configured development or production project and must be checked in `docs/RELEASE_CHECKLIST.md` before tagging v1.
