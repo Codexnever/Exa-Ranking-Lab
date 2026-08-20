@@ -757,10 +757,6 @@ If you see `USAGE_LIMIT_EXCEEDED (429)`:
 - `coverageGap` metric tracks this over time — a widening gap = topic coverage decay
 - Blog post "Canon" (April 2026) confirms this is by design
 
-### Weaviate relationship
-- Bob van Luijt (founder) replied to cold email — warm connection exists
-- Follow-up email should: show working product, BQ+PQ usage depth, real drift numbers
-- `docs/weaviate-schema.md` — keep updated, attach to outreach
 
 ### Embedding model
 - `gemini-embedding-2-preview` is the ONLY correct model string
