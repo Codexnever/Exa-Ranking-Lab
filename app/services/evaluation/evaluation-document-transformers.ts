@@ -40,7 +40,7 @@ export function transformEvaluationDatasetDocument(input: unknown): EvaluationDa
   assertEvaluationDatasetVersion(dataset)
   return dataset
 }
-export function transformEvaluationQueryDocument(input: unknown): EvaluationQuery {
+export function transformEvaluationQueryDocument(input: unknown, options: { config?: Record<string, unknown> } = {}): EvaluationQuery {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new TypeError("Evaluation query document must be an object")
   const doc = input as Record<string, unknown>
   const category = requiredString(doc, "category")
@@ -48,6 +48,9 @@ export function transformEvaluationQueryDocument(input: unknown): EvaluationQuer
   const numResults = doc.numResults
   if (!Number.isInteger(numResults) || (numResults as number) <= 0) throw new TypeError("numResults must be a positive integer")
   let searchConfig: Record<string, unknown> | undefined
+  if (options.config) {
+    if (options.config.evaluationQueryId !== doc.$id || options.config.datasetVersionId !== doc.datasetVersionId || options.config.configHash !== doc.configHash) throw new TypeError("Stored query configuration does not match its query")
+  }
   if (typeof doc.searchConfigJson === "string" && doc.searchConfigJson) {
     try { searchConfig = JSON.parse(doc.searchConfigJson) } catch { throw new TypeError("searchConfigJson must be valid JSON") }
     if (!searchConfig || typeof searchConfig !== "object" || Array.isArray(searchConfig)) throw new TypeError("searchConfigJson must contain an object")

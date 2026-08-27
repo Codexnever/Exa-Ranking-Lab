@@ -23,6 +23,7 @@ class MemoryRepository implements EvaluationRepository {
   async listQueries(datasetId:string) { return copy(this.queries.filter(q=>q.datasetVersionId===datasetId)) }
   async createQuery(data:Omit<EvaluationQuery,"id">) { const found=this.queries.find(q=>q.queryKey===data.queryKey);if(found)return copy(found);const item={...copy(data),id:`evaluation-query-${++this.sequence}`};this.queries.push(item);return copy(item) }
   async getQuery(id:string){return copy(this.queries.find(q=>q.id===id)??null)}
+  async deleteQuery(id:string){this.queries=this.queries.filter(q=>q.id!==id)}
   async getJudgment(){return null}
   async getJudgmentByKey(){return null}
   async listJudgments(datasetId:string,queryId?:string){return copy(this.judgments.filter(j=>j.datasetVersionId===datasetId&&(!queryId||j.evaluationQueryId===queryId)))}

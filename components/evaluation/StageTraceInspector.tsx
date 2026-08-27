@@ -1,11 +1,166 @@
-"use client"
-import {useMemo,useState} from "react"
-import type {EvaluationExecutionTrace,EvaluationStageTraceSummary} from "@/types/evaluation-stage-trace"
-import {documentStagePath} from "@/app/services/evaluation/evaluation-stage-trace-calculations"
-import {Card,CardContent,CardHeader,CardTitle} from "@/components/ui/card"
-import {Button} from "@/components/ui/button"
-import {Select,SelectContent,SelectItem,SelectTrigger,SelectValue} from "@/components/ui/select"
-import type {StageDiagnosisResult} from "@/types/evaluation-stage-diagnosis"
-import {StageDiagnosisPanel} from "./StageDiagnosisPanel"
-const rank=(value:number|null)=>value===null?"Unranked":`#${value}`
-export function StageTraceInspector({traces,trace,diagnosis,onOpen}:{traces:EvaluationStageTraceSummary[];trace?:EvaluationExecutionTrace;diagnosis?:StageDiagnosisResult;onOpen:(id:string)=>void}){const[documentKey,setDocumentKey]=useState("");const documents=useMemo(()=>trace?[...new Map(trace.stages.flatMap(stage=>stage.documents).map(document=>[document.documentKey,document])).values()]:[],[trace]);const path=trace&&documentKey?documentStagePath(trace,documentKey):undefined;return <section className="space-y-4" aria-label="Pipeline Trace"><h2 className="text-xl font-semibold">Pipeline Trace</h2>{!traces.length?<p className="text-sm text-muted-foreground">No stage traces are attached to this evaluation dataset.</p>:<div className="flex flex-wrap gap-2">{traces.map(item=><Button key={item.id} variant={trace?.id===item.id?"default":"outline"} onClick={()=>onOpen(item.id)}>{new Date(item.createdAt).toLocaleString()} · {item.stageCount} stages</Button>)}</div>}{trace&&<><Card><CardHeader><CardTitle>Stage Trace · Policy v{trace.traceVersion}</CardTitle></CardHeader><CardContent className="space-y-2"><p>{trace.completeness.recordedStageCount} recorded stages · <strong>{trace.completeness.status}</strong></p>{trace.completeness.status!=="complete"&&<p className="text-sm">Partial trace: an unrecorded stage is not evidence that a document was absent.</p>}<div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">{trace.stages.map(stage=><Card key={stage.id}><CardHeader><CardTitle>{stage.name}</CardTitle></CardHeader><CardContent><p className="text-sm">{stage.type} · {stage.documents.length} canonical results</p>{stage.documents.slice(0,5).map(document=><p className="truncate text-sm" key={document.documentKey}>{rank(document.rank)} {document.title??document.canonicalUrl}{document.score!==null?` · score ${document.score}`:""} · {document.relevanceGrade===null?"Unjudged":`Grade ${document.relevanceGrade} — ${document.relevanceMeaning}`}</p>)}{stage.duplicateCanonicalResultsIgnored>0&&<p className="text-sm">{stage.duplicateCanonicalResultsIgnored} canonical duplicate result(s) ignored.</p>}</CardContent></Card>)}</div></CardContent></Card><Card><CardHeader><CardTitle>Document Path</CardTitle></CardHeader><CardContent className="space-y-3"><Select value={documentKey} onValueChange={setDocumentKey}><SelectTrigger><SelectValue placeholder="Select a canonical document"/></SelectTrigger><SelectContent>{documents.map(document=><SelectItem key={document.documentKey} value={document.documentKey}>{document.title??document.canonicalUrl}</SelectItem>)}</SelectContent></Select>{path&&<div><p><strong>{path.title??path.canonicalUrl}</strong> · {path.relevanceGrade===null?"Unjudged":`Grade ${path.relevanceGrade} — ${path.relevanceMeaning}`}</p><p className="break-all text-xs text-muted-foreground">{path.canonicalUrl}</p>{path.stages.map(stage=><p key={stage.stageId}>{stage.stageId}: {stage.present?rank(stage.rank):"Absent from recorded stage"}{stage.score!==null?` · score ${stage.score}`:""}</p>)}{path.transitions.map(item=><p className="text-sm text-muted-foreground" key={`${item.fromStageId}-${item.toStageId}`}>{item.fromStageId} → {item.toStageId}: {item.type}{item.rankDelta!==null?` (${item.rankDelta>0?"+":""}${item.rankDelta})`:""}</p>)}</div>}</CardContent></Card>{diagnosis&&<StageDiagnosisPanel diagnosis={diagnosis}/>}</>}</section>}
+"use client";
+import { useMemo, useState } from "react";
+import type {
+  EvaluationExecutionTrace,
+  EvaluationStageTraceSummary,
+} from "@/types/evaluation-stage-trace";
+import { documentStagePath } from "@/app/services/evaluation/evaluation-stage-trace-calculations";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { StageDiagnosisResult } from "@/types/evaluation-stage-diagnosis";
+import { StageDiagnosisPanel } from "./StageDiagnosisPanel";
+const rank = (value: number | null) => (value === null ? "Unranked" : `#${value}`);
+export function StageTraceInspector({
+  traces,
+  trace,
+  diagnosis,
+  onOpen,
+}: {
+  traces: EvaluationStageTraceSummary[];
+  trace?: EvaluationExecutionTrace;
+  diagnosis?: StageDiagnosisResult;
+  onOpen: (id: string) => void;
+}) {
+  const [documentKey, setDocumentKey] = useState("");
+  const documents = useMemo(
+    () =>
+      trace
+        ? [
+            ...new Map(
+              trace.stages
+                .flatMap(stage => stage.documents)
+                .map(document => [document.documentKey, document]),
+            ).values(),
+          ]
+        : [],
+    [trace],
+  );
+  const path = trace && documentKey ? documentStagePath(trace, documentKey) : undefined;
+  return (
+    <section className="space-y-4" aria-label="Pipeline Trace">
+      <h2 className="text-xl font-semibold">Pipeline Trace</h2>
+      {!traces.length ? (
+        <p className="text-sm text-muted-foreground">
+          No stage traces are attached to this evaluation dataset.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {traces.map(item => (
+            <Button
+              key={item.id}
+              variant={trace?.id === item.id ? "default" : "outline"}
+              onClick={() => onOpen(item.id)}
+            >
+              {new Date(item.createdAt).toLocaleString()} · {item.stageCount} stages
+            </Button>
+          ))}
+        </div>
+      )}
+      {trace && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Stage Trace · Policy v{trace.traceVersion}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <p>
+                {trace.completeness.recordedStageCount} recorded stages ·{" "}
+                <strong>{trace.completeness.status}</strong>
+              </p>
+              {trace.completeness.status !== "complete" && (
+                <p className="text-sm">
+                  Partial trace: an unrecorded stage is not evidence that a document was absent.
+                </p>
+              )}
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {trace.stages.map(stage => (
+                  <Card key={stage.id}>
+                    <CardHeader>
+                      <CardTitle>{stage.name}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm">
+                        {stage.type} · {stage.documents.length} canonical results
+                      </p>
+                      {stage.documents.slice(0, 5).map(document => (
+                        <p className="truncate text-sm" key={document.documentKey}>
+                          {rank(document.rank)} {document.title ?? document.canonicalUrl}
+                          {document.score !== null ? ` · score ${document.score}` : ""} ·{" "}
+                          {document.relevanceGrade === null
+                            ? "Unjudged"
+                            : `Grade ${document.relevanceGrade} — ${document.relevanceMeaning}`}
+                        </p>
+                      ))}
+                      {stage.duplicateCanonicalResultsIgnored > 0 && (
+                        <p className="text-sm">
+                          {stage.duplicateCanonicalResultsIgnored} canonical duplicate result(s)
+                          ignored.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Document Path</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Select value={documentKey} onValueChange={setDocumentKey}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a canonical document" />
+                </SelectTrigger>
+                <SelectContent>
+                  {documents.map(document => (
+                    <SelectItem key={document.documentKey} value={document.documentKey}>
+                      {document.title ?? document.canonicalUrl}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {path && (
+                <div>
+                  <p>
+                    <strong>{path.title ?? path.canonicalUrl}</strong> ·{" "}
+                    {path.relevanceGrade === null
+                      ? "Unjudged"
+                      : `Grade ${path.relevanceGrade} — ${path.relevanceMeaning}`}
+                  </p>
+                  <p className="break-all text-xs text-muted-foreground">{path.canonicalUrl}</p>
+                  {path.stages.map(stage => (
+                    <p key={stage.stageId}>
+                      {stage.stageId}:{" "}
+                      {stage.present ? rank(stage.rank) : "Absent from recorded stage"}
+                      {stage.score !== null ? ` · score ${stage.score}` : ""}
+                    </p>
+                  ))}
+                  {path.transitions.map(item => (
+                    <p
+                      className="text-sm text-muted-foreground"
+                      key={`${item.fromStageId}-${item.toStageId}`}
+                    >
+                      {item.fromStageId} → {item.toStageId}: {item.type}
+                      {item.rankDelta !== null
+                        ? ` (${item.rankDelta > 0 ? "+" : ""}${item.rankDelta})`
+                        : ""}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          {diagnosis && <StageDiagnosisPanel diagnosis={diagnosis} />}
+        </>
+      )}
+    </section>
+  );
+}

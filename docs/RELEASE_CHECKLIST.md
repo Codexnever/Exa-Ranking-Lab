@@ -30,6 +30,6 @@
 ## Release operations
 - [ ] Deployment health checked
 - [ ] Git remote configured
-- [ ] `feat/relevance-foundation` pushed
+- [ ] `codex/review-project-documentation` pushed
 - [ ] Release notes reviewed
 - [ ] Optional `v1.0.0` tag approved (do not create automatically)

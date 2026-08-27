@@ -77,6 +77,24 @@ Exa credentials are normally managed through the authenticated Settings workflow
 
 The additive provisioning script covers evaluation datasets, queries, relevance judgments, runs, run-query results, stage traces/documents, strategies, and strategy execution headers/documents.
 
+Evaluation configuration uses stable logical environment-variable names mapped to isolated v1 physical collections:
+
+```dotenv
+COLLECTION_EVALUATION_DATASETS=evaluation_datasets_v1
+COLLECTION_EVALUATION_QUERIES=evaluation_queries_v1
+COLLECTION_EVALUATION_QUERY_CONFIGS=evaluation_query_configs_v1
+COLLECTION_RELEVANCE_JUDGMENTS=relevance_judgments_v2
+COLLECTION_RELEVANCE_JUDGMENT_PAYLOADS=relevance_judgment_payloads_v1
+COLLECTION_EVALUATION_PAYLOAD_CHUNKS=evaluation_payload_chunks_v1
+COLLECTION_EVALUATION_RUNS=evaluation_runs_v1
+COLLECTION_EVALUATION_RUN_QUERIES=evaluation_run_queries_v1
+COLLECTION_EVALUATION_STAGE_TRACES=evaluation_stage_traces_v1
+COLLECTION_EVALUATION_STAGE_TRACE_DOCUMENTS=evaluation_stage_docs_v1
+COLLECTION_EVALUATION_STRATEGIES=evaluation_strategies_v1
+COLLECTION_EVALUATION_STRATEGY_EXECUTIONS=evaluation_strategy_execs_v1
+COLLECTION_EVALUATION_STRATEGY_EXECUTION_DOCUMENTS=evaluation_strategy_docs_v1
+```
+
 ```bash
 node --check scripts/provision-evaluation-schema.mjs
 npm run provision:evaluation-schema -- --dry-run  # inspect only
@@ -85,6 +103,10 @@ npm run provision:evaluation-schema               # apply additive changes
 ```
 
 It never deletes collections or attributes. Existing schema mismatches are reported for manual review. Live inspection and application require valid Appwrite credentials.
+
+### Optional legacy cleanup
+
+Legacy collections such as `evaluation_datasets`, `evaluation_queries`, and `relevance_judgments` are never deleted by the provisioner. Cleanup is optional and manual, and must happen only after all 13 active collections pass final inspection. Before any manual cleanup, independently confirm that every legacy collection has zero documents and that runtime environment variables point to the verified active collections.
 
 ## Development and verification
 

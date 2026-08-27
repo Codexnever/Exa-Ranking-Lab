@@ -1,6 +1,6 @@
 # Phase 13 release-blocker inventory
 
-Last local audit: 2026-08-18 on `feat/relevance-foundation`.
+Last local audit: 2026-08-27 on `codex/review-project-documentation`.
 
 ## Resolved in code
 
@@ -12,10 +12,10 @@ Last local audit: 2026-08-18 on `feat/relevance-foundation`.
 
 ## External blockers before declaring v1 released
 
-1. No Appwrite endpoint, project, database, or server API key is available in this environment. Live schema inspect/provision, authentication, and authoritative evaluation API smoke flows remain unverified.
+1. Live Appwrite schema provisioning and repository parity are verified for all 13 active evaluation collections, but authenticated end-to-end evaluation API smoke flows remain unverified.
 2. No deployment credentials or confirmed deployment target are available. Deployment health is unverified.
-3. No Git remote is configured, so CI cannot be observed and the branch cannot be pushed.
-4. No browser executable is installed. Authenticated product screenshots cannot be captured locally.
+3. CI must pass on the pushed release commit.
+4. Authenticated product screenshots have not been captured from a verified deployment.
 5. The inherited lint baseline contains warnings, although there are zero lint errors and the lint command succeeds. These warnings should be reduced incrementally after v1 rather than through release-risk formatting churn.
 
 Do not mark `V1 RELEASE READY` until the infrastructure and deployment items in `RELEASE_CHECKLIST.md` are completed against the intended environment.

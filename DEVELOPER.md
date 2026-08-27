@@ -1377,7 +1377,7 @@ Phase 12 compares provider-neutral retrieval and ranking strategies on one **fro
 
 A strategy records its human name, generic type (`keyword`, `dense`, `hybrid`, `reranked`, `external`, or `custom`), optional provider/model, latency type, and normalized configuration. The server recursively sorts configuration keys and hashes the stable JSON with SHA-256. Volatile timestamps are excluded. Configuration is immutable: changing it means registering a new strategy; archived strategies cannot receive executions.
 
-Native and imported executions share the same immutable representation. Phase 12 provides API-first imports so external BM25, dense, hybrid, or reranking experiments need not exist in this application. The server validates the frozen dataset/query linkage, derives one-based ranks and canonical identities, keeps the highest-ranked canonical duplicate while preserving its original rank, validates optional exact final-stage trace alignment, and rejects client-supplied ranks, canonical URLs, document keys, or metrics. Strategy headers and documents are split across `evaluation_strategy_executions` and `evaluation_strategy_execution_documents` to keep result payloads bounded.
+Native and imported executions share the same immutable representation. Phase 12 provides API-first imports so external BM25, dense, hybrid, or reranking experiments need not exist in this application. The server validates the frozen dataset/query linkage, derives one-based ranks and canonical identities, keeps the highest-ranked canonical duplicate while preserving its original rank, validates optional exact final-stage trace alignment, and rejects client-supplied ranks, canonical URLs, document keys, or metrics. Strategy headers and documents are split across `evaluation_strategy_executions` and `evaluation_strategy_exec_documents` to keep result payloads bounded.
 
 ### Metrics, cohort, and latency semantics
 
@@ -1446,3 +1446,11 @@ Phase 12 does not deploy winners, export training data, fine-tune rerankers, per
 Phase 13 adds no search or relevance algorithms. Appwrite service construction is lazy: importing a route or page no longer requires live credentials during static analysis or production compilation. Runtime access validates public and server configuration centrally and reports the exact missing variable. Optional embedding, vector, email, and strategy providers remain optional.
 
 Release gates are `npm run check-types`, `npm run lint`, `npm test -- --runInBand`, and `npm run build`. GitHub Actions executes the same gates without secrets. The synthetic demo manifest is opt-in and non-writing; it exists to prepare authenticated demo imports without bypassing authoritative APIs. Live schema provisioning, authentication, end-to-end smoke flows, screenshots, and deployment still require a configured development or production project and must be checked in `docs/RELEASE_CHECKLIST.md` before tagging v1.
+
+### Versioned evaluation storage
+
+Stable evaluation environment-variable names map to these isolated physical collections: `evaluation_datasets_v1`, `evaluation_queries_v1`, `evaluation_query_configs_v1`, `relevance_judgments_v2`, `relevance_judgment_payloads_v1`, `evaluation_payload_chunks_v1`, `evaluation_runs_v1`, `evaluation_run_queries_v1`, `evaluation_stage_traces_v1`, `evaluation_stage_docs_v1`, `evaluation_strategies_v1`, `evaluation_strategy_execs_v1`, and `evaluation_strategy_docs_v1`. Application services resolve them only through centralized collection constants.
+
+Legacy collections are preserved. Cleanup is optional, manual, and outside the provisioning script. It may occur only after all 13 active collections pass final inspection, runtime configuration points to those collections, and each legacy collection is independently confirmed to contain zero documents. The provisioner never deletes legacy collections, attributes, indexes, or documents.
+
+Evaluation query headers use `evaluation_queries_v1`; optional search configuration is stored in `evaluation_query_configs_v1` and is server-written only.

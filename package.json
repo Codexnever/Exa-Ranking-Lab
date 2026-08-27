@@ -66,7 +66,7 @@
     "lucide-react": "^0.511.0",
     "next": "^16.2.12",
     "next-themes": "^0.4.6",
-    "node-appwrite": "^17.0.0",
+    "node-appwrite": "^28.0.0",
     "node-cron": "^4.2.1",
     "nodemailer": "latest",
     "pdfkit": "^0.17.1",
@@ -88,8 +88,8 @@
     "zustand": "^5.0.5"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.14",
     "@types/file-saver": "^2.0.7",
+    "@types/jest": "^29.5.14",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

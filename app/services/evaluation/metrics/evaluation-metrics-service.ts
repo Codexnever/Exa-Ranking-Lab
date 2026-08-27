@@ -37,7 +37,7 @@ export function parseEvaluationMetricsInput(value: unknown): { cutoffs: number[]
 }
 
 export class EvaluationMetricsService {
-  constructor(private readonly repository: EvaluationRepository = new AppwriteEvaluationRepository(), private readonly snapshotReader: MetricSnapshotReader = new AppwriteMetricSnapshotReader()) {}
+  constructor(private readonly repository: EvaluationRepository = new AppwriteEvaluationRepository(), private readonly snapshotReader: MetricSnapshotReader = new AppwriteMetricSnapshotReader()) { }
 
   async evaluate(ownerUserId: string, datasetId: string, rawInput: EvaluationMetricsInput): Promise<EvaluationMetricsResponse> {
     const input = parseEvaluationMetricsInput(rawInput)

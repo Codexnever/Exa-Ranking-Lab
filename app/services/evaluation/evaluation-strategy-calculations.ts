@@ -1,12 +1,227 @@
-import {createHash} from "crypto"
-import type {StrategyBenchmarkResult,StrategyComparison,StrategyErrorSummary,StrategyLatencySummary,StrategyLatencyType,StrategyQueryResult,StrategyStageSummary,StrategyWinLoss} from "@/types/evaluation-strategy"
-import {STRATEGY_BENCHMARK_POLICY as POLICY} from "./strategy-benchmark-policy"
-function normalize(value:unknown):unknown{if(Array.isArray(value))return value.map(normalize);if(value&&typeof value==="object"){const record=value as Record<string,unknown>;return Object.fromEntries(Object.keys(record).sort().filter(key=>record[key]!==undefined).map(key=>[key,normalize(record[key])]))}if(typeof value==="number"&&!Number.isFinite(value))throw new TypeError("Strategy configuration contains a non-finite number");return value}
-export function canonicalStrategyConfiguration(input:{type:string;provider?:string|null;model?:string|null;latencyType:string;configuration?:Record<string,unknown>}){return normalize({type:input.type,provider:input.provider??null,model:input.model??null,latencyType:input.latencyType,configuration:input.configuration??{}})}
-export function strategyConfigHash(input:Parameters<typeof canonicalStrategyConfiguration>[0]){return createHash("sha256").update(JSON.stringify(canonicalStrategyConfiguration(input))).digest("hex")}
-export function latencySummary(values:Array<number|null>,latencyType:StrategyLatencyType):StrategyLatencySummary{const sorted=values.filter((value):value is number=>value!==null).sort((a,b)=>a-b);if(!sorted.length)return{available:false,latencyType,count:0,mean:null,median:null,p95:null,min:null,max:null};const middle=Math.floor(sorted.length/2),median=sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2,p95=sorted[Math.max(0,Math.ceil(sorted.length*.95)-1)];return{available:true,latencyType,count:sorted.length,mean:sorted.reduce((sum,value)=>sum+value,0)/sorted.length,median,p95,min:sorted[0],max:sorted.at(-1)!}}
-const cutoffValue=(query:StrategyQueryResult,cutoff:number,key:"ndcg"|"benchmarkRecall")=>query.metrics.metrics.find(item=>item.cutoff===cutoff)?.[key].value??null
-function primary(a:StrategyQueryResult,b:StrategyQueryResult){for(const cutoff of [10,...[...new Set(a.metrics.metrics.map(m=>m.cutoff).filter(k=>b.metrics.metrics.some(n=>n.cutoff===k)))].sort((x,y)=>y-x)]){const av=cutoffValue(a,cutoff,"ndcg"),bv=cutoffValue(b,cutoff,"ndcg");if(av!==null&&bv!==null)return{metric:`nDCG@${cutoff}`,before:av,after:bv}}if(Number.isFinite(a.metrics.reciprocalRank)&&Number.isFinite(b.metrics.reciprocalRank))return{metric:"RR",before:a.metrics.reciprocalRank,after:b.metrics.reciprocalRank};for(const cutoff of [...a.metrics.metrics.map(m=>m.cutoff)].sort((x,y)=>y-x)){const av=cutoffValue(a,cutoff,"benchmarkRecall"),bv=cutoffValue(b,cutoff,"benchmarkRecall");if(av!==null&&bv!==null)return{metric:`Benchmark Recall@${cutoff}`,before:av,after:bv}}return{metric:"Unavailable",before:null,after:null}}
-export function compareStrategies(a:StrategyBenchmarkResult,b:StrategyBenchmarkResult):StrategyComparison{const byB=new Map(b.queries.map(query=>[query.evaluationQueryId,query])),queryOutcomes:StrategyWinLoss[]=a.queries.map(query=>{const other=byB.get(query.evaluationQueryId);if(!other)return{evaluationQueryId:query.evaluationQueryId,queryText:query.queryText,metric:"Unavailable",before:null,after:null,delta:null,outcome:"unavailable"};const value=primary(query,other),delta=value.before===null||value.after===null?null:value.after-value.before,outcome=delta===null?"unavailable" as const:Math.abs(delta)<POLICY.tieEpsilon?"tie" as const:delta>0?"win" as const:"loss" as const;return{evaluationQueryId:query.evaluationQueryId,queryText:query.queryText,...value,delta,outcome}}),wins=queryOutcomes.filter(item=>item.outcome==="win").length,losses=queryOutcomes.filter(item=>item.outcome==="loss").length,ties=queryOutcomes.filter(item=>item.outcome==="tie").length,unavailable=queryOutcomes.filter(item=>item.outcome==="unavailable").length,comparable=wins+losses+ties,metricDeltas=queryOutcomes.flatMap(item=>item.delta===null?[]:[item.delta]),warnings:string[]=[];if(a.latency.latencyType!==b.latency.latencyType)warnings.push(`Latency types differ (${a.latency.latencyType} vs ${b.latency.latencyType}); latency delta is unavailable.`);if(!a.stage.available||!b.stage.available)warnings.push("Stage diagnosis comparison is unavailable because one or both strategies lack compatible traces.");return{strategyAId:a.strategy.id,strategyBId:b.strategy.id,primaryMetric:"nDCG@10 with documented fallback",wins,losses,ties,unavailable,comparableQueries:comparable,winRate:comparable?wins/comparable:null,lossRate:comparable?losses/comparable:null,metricDelta:metricDeltas.length?metricDeltas.reduce((sum,value)=>sum+value,0)/metricDeltas.length:null,latencyDeltaMs:a.latency.latencyType===b.latency.latencyType&&a.latency.mean!==null&&b.latency.mean!==null?b.latency.mean-a.latency.mean:null,hardNegativeDelta:b.errors.hardNegativeCandidateCount-a.errors.hardNegativeCandidateCount,queryOutcomes,largestWins:queryOutcomes.filter(i=>i.outcome==="win").sort((x,y)=>y.delta!-x.delta!).slice(0,10),largestLosses:queryOutcomes.filter(i=>i.outcome==="loss").sort((x,y)=>x.delta!-y.delta!).slice(0,10),warnings}}
-export function errorSummary(queries:StrategyQueryResult[]):StrategyErrorSummary{const candidates=queries.reduce((sum,q)=>sum+q.hardNegativeCount,0),high=queries.reduce((sum,q)=>sum+q.highCriticalHardNegativeCount,0),highQueries=queries.filter(q=>q.highCriticalHardNegativeCount>0).length;return{hardNegativeCandidateCount:candidates,highCriticalCount:high,top5Grade0Count:queries.reduce((sum,q)=>sum+q.top5Grade0Count,0),outranksGrade2Count:queries.reduce((sum,q)=>sum+q.grade0OutranksGrade2Count,0),queriesWithHighCritical:highQueries,candidateRatePerQuery:queries.length?candidates/queries.length:0,highCriticalQueryRate:queries.length?highQueries/queries.length:0}}
-export function aggregateStage(values:StrategyStageSummary[]):StrategyStageSummary{const available=values.filter(value=>value.available),mean=(selector:(value:StrategyStageSummary)=>number|null)=>{const list=available.flatMap(value=>{const item=selector(value);return item===null?[]:[item]});return list.length?list.reduce((s,v)=>s+v,0)/list.length:null};return{available:available.length===values.length&&values.length>0,candidateBenchmarkRecall:mean(v=>v.candidateBenchmarkRecall),finalBenchmarkRecall:mean(v=>v.finalBenchmarkRecall),candidateToFinalRetention:mean(v=>v.candidateToFinalRetention),grade2Survival:mean(v=>v.grade2Survival),downstreamRelevantLoss:mean(v=>v.downstreamRelevantLoss),irrelevantDownstreamPromotions:available.reduce((s,v)=>s+v.irrelevantDownstreamPromotions,0),warning:available.length===values.length?null:"Stage comparison is unavailable for one or more query executions."}}
+import { createHash } from "crypto";
+import type {
+  StrategyBenchmarkResult,
+  StrategyComparison,
+  StrategyErrorSummary,
+  StrategyLatencySummary,
+  StrategyLatencyType,
+  StrategyQueryResult,
+  StrategyStageSummary,
+  StrategyWinLoss,
+} from "@/types/evaluation-strategy";
+import { STRATEGY_BENCHMARK_POLICY as POLICY } from "./strategy-benchmark-policy";
+function normalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalize);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .filter(key => record[key] !== undefined)
+        .map(key => [key, normalize(record[key])]),
+    );
+  }
+  if (typeof value === "number" && !Number.isFinite(value))
+    throw new TypeError("Strategy configuration contains a non-finite number");
+  return value;
+}
+export function canonicalStrategyConfiguration(input: {
+  type: string;
+  provider?: string | null;
+  model?: string | null;
+  latencyType: string;
+  configuration?: Record<string, unknown>;
+}) {
+  return normalize({
+    type: input.type,
+    provider: input.provider ?? null,
+    model: input.model ?? null,
+    latencyType: input.latencyType,
+    configuration: input.configuration ?? {},
+  });
+}
+export function strategyConfigHash(input: Parameters<typeof canonicalStrategyConfiguration>[0]) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalStrategyConfiguration(input)))
+    .digest("hex");
+}
+export function latencySummary(
+  values: Array<number | null>,
+  latencyType: StrategyLatencyType,
+): StrategyLatencySummary {
+  const sorted = values.filter((value): value is number => value !== null).sort((a, b) => a - b);
+  if (!sorted.length)
+    return {
+      available: false,
+      latencyType,
+      count: 0,
+      mean: null,
+      median: null,
+      p95: null,
+      min: null,
+      max: null,
+    };
+  const middle = Math.floor(sorted.length / 2),
+    median = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
+    p95 = sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)];
+  return {
+    available: true,
+    latencyType,
+    count: sorted.length,
+    mean: sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
+    median,
+    p95,
+    min: sorted[0],
+    max: sorted.at(-1)!,
+  };
+}
+const cutoffValue = (query: StrategyQueryResult, cutoff: number, key: "ndcg" | "benchmarkRecall") =>
+  query.metrics.metrics.find(item => item.cutoff === cutoff)?.[key].value ?? null;
+function primary(a: StrategyQueryResult, b: StrategyQueryResult) {
+  for (const cutoff of [
+    10,
+    ...[
+      ...new Set(
+        a.metrics.metrics
+          .map(m => m.cutoff)
+          .filter(k => b.metrics.metrics.some(n => n.cutoff === k)),
+      ),
+    ].sort((x, y) => y - x),
+  ]) {
+    const av = cutoffValue(a, cutoff, "ndcg"),
+      bv = cutoffValue(b, cutoff, "ndcg");
+    if (av !== null && bv !== null) return { metric: `nDCG@${cutoff}`, before: av, after: bv };
+  }
+  if (Number.isFinite(a.metrics.reciprocalRank) && Number.isFinite(b.metrics.reciprocalRank))
+    return { metric: "RR", before: a.metrics.reciprocalRank, after: b.metrics.reciprocalRank };
+  for (const cutoff of [...a.metrics.metrics.map(m => m.cutoff)].sort((x, y) => y - x)) {
+    const av = cutoffValue(a, cutoff, "benchmarkRecall"),
+      bv = cutoffValue(b, cutoff, "benchmarkRecall");
+    if (av !== null && bv !== null)
+      return { metric: `Benchmark Recall@${cutoff}`, before: av, after: bv };
+  }
+  return { metric: "Unavailable", before: null, after: null };
+}
+export function compareStrategies(
+  a: StrategyBenchmarkResult,
+  b: StrategyBenchmarkResult,
+): StrategyComparison {
+  const byB = new Map(b.queries.map(query => [query.evaluationQueryId, query])),
+    queryOutcomes: StrategyWinLoss[] = a.queries.map(query => {
+      const other = byB.get(query.evaluationQueryId);
+      if (!other)
+        return {
+          evaluationQueryId: query.evaluationQueryId,
+          queryText: query.queryText,
+          metric: "Unavailable",
+          before: null,
+          after: null,
+          delta: null,
+          outcome: "unavailable",
+        };
+      const value = primary(query, other),
+        delta = value.before === null || value.after === null ? null : value.after - value.before,
+        outcome =
+          delta === null
+            ? ("unavailable" as const)
+            : Math.abs(delta) < POLICY.tieEpsilon
+              ? ("tie" as const)
+              : delta > 0
+                ? ("win" as const)
+                : ("loss" as const);
+      return {
+        evaluationQueryId: query.evaluationQueryId,
+        queryText: query.queryText,
+        ...value,
+        delta,
+        outcome,
+      };
+    }),
+    wins = queryOutcomes.filter(item => item.outcome === "win").length,
+    losses = queryOutcomes.filter(item => item.outcome === "loss").length,
+    ties = queryOutcomes.filter(item => item.outcome === "tie").length,
+    unavailable = queryOutcomes.filter(item => item.outcome === "unavailable").length,
+    comparable = wins + losses + ties,
+    metricDeltas = queryOutcomes.flatMap(item => (item.delta === null ? [] : [item.delta])),
+    warnings: string[] = [];
+  if (a.latency.latencyType !== b.latency.latencyType)
+    warnings.push(
+      `Latency types differ (${a.latency.latencyType} vs ${b.latency.latencyType}); latency delta is unavailable.`,
+    );
+  if (!a.stage.available || !b.stage.available)
+    warnings.push(
+      "Stage diagnosis comparison is unavailable because one or both strategies lack compatible traces.",
+    );
+  return {
+    strategyAId: a.strategy.id,
+    strategyBId: b.strategy.id,
+    primaryMetric: "nDCG@10 with documented fallback",
+    wins,
+    losses,
+    ties,
+    unavailable,
+    comparableQueries: comparable,
+    winRate: comparable ? wins / comparable : null,
+    lossRate: comparable ? losses / comparable : null,
+    metricDelta: metricDeltas.length
+      ? metricDeltas.reduce((sum, value) => sum + value, 0) / metricDeltas.length
+      : null,
+    latencyDeltaMs:
+      a.latency.latencyType === b.latency.latencyType &&
+      a.latency.mean !== null &&
+      b.latency.mean !== null
+        ? b.latency.mean - a.latency.mean
+        : null,
+    hardNegativeDelta: b.errors.hardNegativeCandidateCount - a.errors.hardNegativeCandidateCount,
+    queryOutcomes,
+    largestWins: queryOutcomes
+      .filter(i => i.outcome === "win")
+      .sort((x, y) => y.delta! - x.delta!)
+      .slice(0, 10),
+    largestLosses: queryOutcomes
+      .filter(i => i.outcome === "loss")
+      .sort((x, y) => x.delta! - y.delta!)
+      .slice(0, 10),
+    warnings,
+  };
+}
+export function errorSummary(queries: StrategyQueryResult[]): StrategyErrorSummary {
+  const candidates = queries.reduce((sum, q) => sum + q.hardNegativeCount, 0),
+    high = queries.reduce((sum, q) => sum + q.highCriticalHardNegativeCount, 0),
+    highQueries = queries.filter(q => q.highCriticalHardNegativeCount > 0).length;
+  return {
+    hardNegativeCandidateCount: candidates,
+    highCriticalCount: high,
+    top5Grade0Count: queries.reduce((sum, q) => sum + q.top5Grade0Count, 0),
+    outranksGrade2Count: queries.reduce((sum, q) => sum + q.grade0OutranksGrade2Count, 0),
+    queriesWithHighCritical: highQueries,
+    candidateRatePerQuery: queries.length ? candidates / queries.length : 0,
+    highCriticalQueryRate: queries.length ? highQueries / queries.length : 0,
+  };
+}
+export function aggregateStage(values: StrategyStageSummary[]): StrategyStageSummary {
+  const available = values.filter(value => value.available),
+    mean = (selector: (value: StrategyStageSummary) => number | null) => {
+      const list = available.flatMap(value => {
+        const item = selector(value);
+        return item === null ? [] : [item];
+      });
+      return list.length ? list.reduce((s, v) => s + v, 0) / list.length : null;
+    };
+  return {
+    available: available.length === values.length && values.length > 0,
+    candidateBenchmarkRecall: mean(v => v.candidateBenchmarkRecall),
+    finalBenchmarkRecall: mean(v => v.finalBenchmarkRecall),
+    candidateToFinalRetention: mean(v => v.candidateToFinalRetention),
+    grade2Survival: mean(v => v.grade2Survival),
+    downstreamRelevantLoss: mean(v => v.downstreamRelevantLoss),
+    irrelevantDownstreamPromotions: available.reduce(
+      (s, v) => s + v.irrelevantDownstreamPromotions,
+      0,
+    ),
+    warning:
+      available.length === values.length
+        ? null
+        : "Stage comparison is unavailable for one or more query executions.",
+  };
+}

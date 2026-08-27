@@ -12,6 +12,7 @@ class Repo implements EvaluationRepository{
  async updateDataset(id:string,d:Partial<Pick<EvaluationDatasetVersion,"queryCount"|"judgmentCount"|"conflictCount"|"updatedAt">>){const x=this.datasets.find(v=>v.id===id)!;Object.assign(x,copy(d));return copy(x)}
  async getDataset(id:string){return copy(this.datasets.find(v=>v.id===id)??null)} async listDatasets(_o:string,_p:DatasetListOptions){return copy(this.datasets)} async listFamily(){return copy(this.datasets)} async listQueries(id:string){return copy(this.queries.filter(q=>q.datasetVersionId===id))}
  async createQuery(q:Omit<EvaluationQuery,"id">){const x={...copy(q),id:`q${++this.n}`};this.queries.push(x);return copy(x)} async getQuery(id:string){return copy(this.queries.find(q=>q.id===id)??null)}
+ async deleteQuery(id:string){this.queries=this.queries.filter(q=>q.id!==id)}
  async getJudgment(id:string){return copy(this.judgments.find(j=>j.id===id)??null)} async getJudgmentByKey(key:string){return copy(this.judgments.find(j=>j.judgmentKey===key)??null)} async listJudgments(d:string,q?:string){return copy(this.judgments.filter(j=>j.datasetVersionId===d&&(!q||j.evaluationQueryId===q)))}
  async createJudgment(j:Omit<RelevanceJudgment,"id">){if(this.judgments.some(x=>x.judgmentKey===j.judgmentKey))throw new EvaluationError("CONFLICT","duplicate",409);const x={...copy(j),id:`j${++this.n}`};this.judgments.push(x);return copy(x)} async updateJudgment(j:RelevanceJudgment){const i=this.judgments.findIndex(x=>x.id===j.id);this.judgments[i]=copy(j);return copy(j)}
 }

@@ -1,3 +1,18 @@
 import {STRATEGY_BENCHMARK_POLICY_VERSION} from "@/types/evaluation-strategy"
 import {EVALUATION_METRIC_VERSION} from "./metrics/types"
-export const STRATEGY_BENCHMARK_POLICY=Object.freeze({version:STRATEGY_BENCHMARK_POLICY_VERSION,metricVersion:EVALUATION_METRIC_VERSION,minimumStrategies:2,maximumStrategies:10,maximumResultsPerExecution:500,cutoffs:[5,10,50],tieEpsilon:.01,queryCohort:"strict-identical",aggregation:"macro",latencyPercentile:"nearest-rank-p95",hardNegativeRateDenominator:"queries-evaluated",unavailable:"never-invent-zero",combinedScore:false,persistedBenchmark:false} as const)
+export const STRATEGY_BENCHMARK_POLICY=Object.freeze({
+    version:STRATEGY_BENCHMARK_POLICY_VERSION,
+    metricVersion:EVALUATION_METRIC_VERSION,
+    minimumStrategies:2,
+    maximumStrategies:10,
+    maximumResultsPerExecution:500,
+    cutoffs:[5,10,50],
+    tieEpsilon:.01,
+    queryCohort:"strict-identical",
+    aggregation:"macro",
+    latencyPercentile:"nearest-rank-p95",
+    hardNegativeRateDenominator:"queries-evaluated",
+    unavailable:"never-invent-zero",
+    combinedScore:false,
+    persistedBenchmark:false
+} as const)

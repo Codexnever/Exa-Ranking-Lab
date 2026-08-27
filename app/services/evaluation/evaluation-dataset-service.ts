@@ -7,6 +7,7 @@ import type { EvaluationDatasetDetail, EvaluationDatasetStatus, EvaluationDatase
 import { transformEvaluationDatasetDocument, transformEvaluationQueryDocument, transformRelevanceJudgmentDocument } from "./evaluation-document-transformers"
 import { EvaluationError, invalid } from "./evaluation-errors"
 import { normalizeFamilyKey, parseCloneInput, parseCreateDatasetInput, parseQueryIds } from "./evaluation-input-validation"
+import { sha256, splitPayload } from "./evaluation-payload-codec"
 
 export interface DatasetListOptions { status?: EvaluationDatasetStatus; familyKey?: string; limit: number; offset: number }
 export interface EvaluationRepository {
@@ -18,6 +19,7 @@ export interface EvaluationRepository {
   listQueries(datasetVersionId: string): Promise<EvaluationQuery[]>
   createQuery(query: Omit<EvaluationQuery, "id">): Promise<EvaluationQuery>
   getQuery(id: string): Promise<EvaluationQuery | null>
+  deleteQuery(id: string): Promise<void>
   getJudgment(id: string): Promise<RelevanceJudgment | null>
   getJudgmentByKey(key: string): Promise<RelevanceJudgment | null>
   listJudgments(datasetVersionId: string, evaluationQueryId?: string): Promise<RelevanceJudgment[]>
@@ -39,6 +41,14 @@ function storageError(error: unknown, action: string): never {
   throw new EvaluationError("STORAGE_ERROR", `Failed to ${action}`, 500)
 }
 
+const stableSearchConfig = (value: Record<string, unknown>): string => {
+  const sort = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(sort)
+    if (input && typeof input === "object") return Object.fromEntries(Object.entries(input as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sort(v)]))
+    return input
+  }
+  return JSON.stringify(sort(value))
+}
 export class AppwriteEvaluationRepository implements EvaluationRepository {
   async createDataset(data: Omit<EvaluationDatasetVersion, "id">): Promise<EvaluationDatasetVersion> {
     try {
@@ -86,32 +96,48 @@ export class AppwriteEvaluationRepository implements EvaluationRepository {
   }
   async listQueries(datasetVersionId: string): Promise<EvaluationQuery[]> {
     try {
-      const output: EvaluationQuery[] = []; let offset = 0
+      const headers: Record<string, unknown>[] = []; let offset = 0
       while (true) {
-        const result = await databases.listDocuments(DATABASE_ID,COLLECTIONS.EVALUATION_QUERIES,[Query.equal("datasetVersionId",datasetVersionId),Query.orderAsc("queryKey"),Query.limit(500),Query.offset(offset)])
-        output.push(...result.documents.map(transformEvaluationQueryDocument)); offset += result.documents.length
-        if (result.documents.length < 500) return output
+        const result = await databases.listDocuments(DATABASE_ID, COLLECTIONS.EVALUATION_QUERIES, [Query.equal("datasetVersionId", datasetVersionId), Query.orderAsc("queryKey"), Query.limit(500), Query.offset(offset)])
+        headers.push(...result.documents as Record<string, unknown>[]); offset += result.documents.length
+        if (result.documents.length < 500) break
       }
+      const configs: Record<string, unknown>[] = []; offset = 0
+      while (true) {
+        const result = await databases.listDocuments(DATABASE_ID, COLLECTIONS.EVALUATION_QUERY_CONFIGS, [Query.equal("datasetVersionId", datasetVersionId), Query.limit(500), Query.offset(offset)])
+        configs.push(...result.documents as Record<string, unknown>[]); offset += result.documents.length
+        if (result.documents.length < 500) break
+      }
+      const byQuery = new Map(configs.map(config => [String(config.evaluationQueryId), config]))
+      return headers.map(header => transformEvaluationQueryDocument({...header, ...(byQuery.has(String(header.$id)) ? { searchConfigJson: (byQuery.get(String(header.$id)) as Record<string, unknown>).searchConfigJson } : {})}, { config: byQuery.get(String(header.$id)) }))
     } catch (error) { storageError(error, "list evaluation queries") }
   }
   async createQuery(query: Omit<EvaluationQuery, "id">): Promise<EvaluationQuery> {
+    const id = ID.unique(); const configJson = query.searchConfig ? stableSearchConfig(query.searchConfig) : undefined
+    if (configJson && configJson.length > 8192) throw new EvaluationError("INVALID_INPUT", "searchConfig exceeds the 8192-character limit", 400)
     try {
-      const doc = await databases.createDocument(DATABASE_ID,COLLECTIONS.EVALUATION_QUERIES,ID.unique(),{
-        datasetVersionId:query.datasetVersionId,sourceQueryId:query.sourceQueryId,queryKey:query.queryKey,name:query.name,
-        queryText:query.queryText,category:query.category,includeDomainsJson:JSON.stringify(query.filters.includeDomains ?? []),
-        excludeDomainsJson:JSON.stringify(query.filters.excludeDomains ?? []),
-        ...(query.filters.startDate ? { startDate:new Date(query.filters.startDate).toISOString() } : {}),
-        ...(query.filters.endDate ? { endDate:new Date(query.filters.endDate).toISOString() } : {}),
-        numResults:query.filters.numResults,configHash:query.configHash,...(query.searchConfig ? { searchConfigJson:JSON.stringify(query.searchConfig) } : {}),
-        createdAt:query.createdAt.toISOString(),createdByUserId:query.createdByUserId,
-      })
-      return transformEvaluationQueryDocument(doc)
+      const payload = { datasetVersionId:query.datasetVersionId,sourceQueryId:query.sourceQueryId,queryKey:query.queryKey,name:query.name,queryText:query.queryText,category:query.category,includeDomainsJson:JSON.stringify(query.filters.includeDomains ?? []),excludeDomainsJson:JSON.stringify(query.filters.excludeDomains ?? []),...(query.filters.startDate ? { startDate:new Date(query.filters.startDate).toISOString() } : {}),...(query.filters.endDate ? { endDate:new Date(query.filters.endDate).toISOString() } : {}),numResults:query.filters.numResults,configHash:query.configHash,createdAt:query.createdAt.toISOString(),createdByUserId:query.createdByUserId }
+      const doc = await databases.createDocument(DATABASE_ID,COLLECTIONS.EVALUATION_QUERIES,id,payload)
+      if (configJson) {
+        try { await databases.createDocument(DATABASE_ID,COLLECTIONS.EVALUATION_QUERY_CONFIGS,id,{ evaluationQueryId:id,datasetVersionId:query.datasetVersionId,searchConfigJson:configJson,configHash:query.configHash,createdAt:query.createdAt.toISOString(),createdByUserId:query.createdByUserId }) }
+        catch (error) { try { await databases.deleteDocument(DATABASE_ID,COLLECTIONS.EVALUATION_QUERIES,id) } catch {} throw error }
+      }
+      return transformEvaluationQueryDocument({...doc, ...(configJson ? { searchConfigJson: configJson } : {})})
     } catch (error) { storageError(error, "create evaluation query") }
   }
   async getQuery(id: string): Promise<EvaluationQuery | null> {
-    try { return transformEvaluationQueryDocument(await databases.getDocument(DATABASE_ID,COLLECTIONS.EVALUATION_QUERIES,id)) } catch(error) { if((error as {code?:number})?.code===404)return null; storageError(error,"read evaluation query") }
-  }
-  async getJudgment(id: string): Promise<RelevanceJudgment | null> {
+    try {
+      const doc = await databases.getDocument(DATABASE_ID,COLLECTIONS.EVALUATION_QUERIES,id) as Record<string, unknown>
+      let config: Record<string, unknown> | undefined
+      try { config = await databases.getDocument(DATABASE_ID,COLLECTIONS.EVALUATION_QUERY_CONFIGS,id) as Record<string, unknown> } catch (error) { if ((error as {code?:number})?.code !== 404) throw error }
+      return transformEvaluationQueryDocument({...doc, ...(config ? { searchConfigJson: config.searchConfigJson } : {})}, { config })
+    } catch(error) { if((error as {code?:number})?.code===404)return null; storageError(error,"read evaluation query") }
+  }  async deleteQuery(id: string): Promise<void> {
+    try {
+      try { await databases.deleteDocument(DATABASE_ID, COLLECTIONS.EVALUATION_QUERY_CONFIGS, id) } catch (error) { if ((error as {code?:number})?.code !== 404) throw error }
+      await databases.deleteDocument(DATABASE_ID, COLLECTIONS.EVALUATION_QUERIES, id)
+    } catch (error) { storageError(error, "delete evaluation query") }
+  }  async getJudgment(id: string): Promise<RelevanceJudgment | null> {
     try { return transformRelevanceJudgmentDocument(await databases.getDocument(DATABASE_ID,COLLECTIONS.RELEVANCE_JUDGMENTS,id)) } catch(error) { if((error as {code?:number})?.code===404)return null; storageError(error,"read relevance judgment") }
   }
   async getJudgmentByKey(key: string): Promise<RelevanceJudgment | null> {
@@ -121,16 +147,42 @@ export class AppwriteEvaluationRepository implements EvaluationRepository {
     const filters=[Query.equal("datasetVersionId",datasetVersionId)]; if(evaluationQueryId)filters.push(Query.equal("evaluationQueryId",evaluationQueryId)); return this.listJudgmentsByFilters(filters)
   }
   async createJudgment(judgment: Omit<RelevanceJudgment,"id">): Promise<RelevanceJudgment> {
-    try { return transformRelevanceJudgmentDocument(await databases.createDocument(DATABASE_ID,COLLECTIONS.RELEVANCE_JUDGMENTS,ID.unique(),this.judgmentPayload(judgment))) } catch(error) { storageError(error,"create relevance judgment") }
+    const id = ID.unique()
+    try {
+      const evidence = await this.writeEvidence(judgment, id)
+      const doc = await databases.createDocument(DATABASE_ID, COLLECTIONS.RELEVANCE_JUDGMENTS, id, this.judgmentPayload(judgment, evidence))
+      const payload = await this.loadEvidence(id, judgment.datasetVersionId, evidence.revision)
+      return transformRelevanceJudgmentDocument({...doc, assessmentsJson:JSON.stringify(payload.assessments), sourceFeedbackIdsJson:JSON.stringify(payload.sourceFeedbackIds), sourceSnapshotIdsJson:JSON.stringify(payload.sourceSnapshotIds), observedRawUrlsJson:JSON.stringify(payload.observedRawUrls), observedContentHashesJson:JSON.stringify(payload.observedContentHashes)})
+    } catch(error) { try { await databases.deleteDocument(DATABASE_ID, COLLECTIONS.RELEVANCE_JUDGMENTS, id) } catch {} ; storageError(error,"create relevance judgment") }
   }
   async updateJudgment(judgment: RelevanceJudgment): Promise<RelevanceJudgment> {
-    try { return transformRelevanceJudgmentDocument(await databases.updateDocument(DATABASE_ID,COLLECTIONS.RELEVANCE_JUDGMENTS,judgment.id,this.judgmentPayload(judgment))) } catch(error) { storageError(error,"update relevance judgment") }
+    try {
+      const evidence = await this.writeEvidence(judgment, judgment.id)
+      const doc = await databases.updateDocument(DATABASE_ID, COLLECTIONS.RELEVANCE_JUDGMENTS, judgment.id, this.judgmentPayload(judgment, evidence))
+      const payload = await this.loadEvidence(judgment.id, judgment.datasetVersionId, evidence.revision)
+      return transformRelevanceJudgmentDocument({...doc, assessmentsJson:JSON.stringify(payload.assessments), sourceFeedbackIdsJson:JSON.stringify(payload.sourceFeedbackIds), sourceSnapshotIdsJson:JSON.stringify(payload.sourceSnapshotIds), observedRawUrlsJson:JSON.stringify(payload.observedRawUrls), observedContentHashesJson:JSON.stringify(payload.observedContentHashes)})
+    } catch(error) { storageError(error,"update relevance judgment") }
+  }  private async listJudgmentsByFilters(filters: string[]): Promise<RelevanceJudgment[]> {
+    try { const output:RelevanceJudgment[]=[];let offset=0;while(true){const result=await databases.listDocuments(DATABASE_ID,COLLECTIONS.RELEVANCE_JUDGMENTS,[...filters,Query.limit(500),Query.offset(offset)]);for (const doc of result.documents as Record<string, unknown>[]) { const payload = await this.loadEvidence(String(doc.$id), String(doc.datasetVersionId), String(doc.evidenceRevision)); output.push(transformRelevanceJudgmentDocument({...doc, assessmentsJson:JSON.stringify(payload.assessments), sourceFeedbackIdsJson:JSON.stringify(payload.sourceFeedbackIds), sourceSnapshotIdsJson:JSON.stringify(payload.sourceSnapshotIds), observedRawUrlsJson:JSON.stringify(payload.observedRawUrls), observedContentHashesJson:JSON.stringify(payload.observedContentHashes)})) };offset+=result.documents.length;if(result.documents.length<500)return output} } catch(error){storageError(error,"list relevance judgments")}
   }
-  private async listJudgmentsByFilters(filters: string[]): Promise<RelevanceJudgment[]> {
-    try { const output:RelevanceJudgment[]=[];let offset=0;while(true){const result=await databases.listDocuments(DATABASE_ID,COLLECTIONS.RELEVANCE_JUDGMENTS,[...filters,Query.limit(500),Query.offset(offset)]);output.push(...result.documents.map(transformRelevanceJudgmentDocument));offset+=result.documents.length;if(result.documents.length<500)return output} } catch(error){storageError(error,"list relevance judgments")}
+  private async loadEvidence(judgmentId: string, datasetVersionId: string, revision: string): Promise<Record<string, unknown>> {
+    const rows = await databases.listDocuments(DATABASE_ID, COLLECTIONS.RELEVANCE_JUDGMENT_PAYLOADS, [Query.equal("judgmentId", judgmentId), Query.equal("datasetVersionId", datasetVersionId), Query.equal("evidenceRevision", revision), Query.orderAsc("chunkIndex"), Query.limit(100)])
+    const ordered = [...rows.documents].sort((a,b) => Number(a.chunkIndex) - Number(b.chunkIndex))
+    if (!ordered.length) throw new TypeError("Judgment evidence payload is missing")
+    const raw = ordered.map(row => String(row.payloadChunk)).join("")
+    let value: unknown; try { value = JSON.parse(raw) } catch { throw new TypeError("Judgment evidence payload is malformed JSON") }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Judgment evidence payload must be an object")
+    return value as Record<string, unknown>
   }
-  private judgmentPayload(j: Omit<RelevanceJudgment,"id">|RelevanceJudgment) {
-    return {judgmentKey:j.judgmentKey,datasetVersionId:j.datasetVersionId,evaluationQueryId:j.evaluationQueryId,sourceQueryId:j.sourceQueryId,documentKey:j.documentKey,canonicalUrl:j.canonicalUrl,domain:j.domain,relevanceGrade:j.relevanceGrade,status:j.status,source:j.source,assessmentsJson:JSON.stringify(j.assessments),sourceFeedbackIdsJson:JSON.stringify(j.sourceFeedbackIds),sourceSnapshotIdsJson:JSON.stringify(j.sourceSnapshotIds),observedRawUrlsJson:JSON.stringify(j.observedRawUrls),observedContentHashesJson:JSON.stringify(j.observedContentHashes),rationale:j.rationale??null,intent:j.intent??null,subtopic:j.subtopic??null,createdAt:j.createdAt.toISOString(),createdByUserId:j.createdByUserId,updatedAt:j.updatedAt.toISOString(),updatedByUserId:j.updatedByUserId,acceptedAt:j.acceptedAt?.toISOString()??null,acceptedByUserId:j.acceptedByUserId??null}
+  private async writeEvidence(j: Omit<RelevanceJudgment,"id">|RelevanceJudgment, id: string) {
+    const revision = `${j.updatedAt.toISOString()}-${j.updatedByUserId}`.slice(0,64)
+    const raw = JSON.stringify({ assessments:j.assessments, sourceFeedbackIds:j.sourceFeedbackIds, sourceSnapshotIds:j.sourceSnapshotIds, observedRawUrls:j.observedRawUrls, observedContentHashes:j.observedContentHashes })
+    const chunks = splitPayload(raw); const payloadHash = sha256(raw)
+    for (let index=0; index<chunks.length; index++) await databases.createDocument(DATABASE_ID, COLLECTIONS.RELEVANCE_JUDGMENT_PAYLOADS, `${id}_${revision}_${index}`, { judgmentId:id,datasetVersionId:j.datasetVersionId,evidenceRevision:revision,chunkIndex:index,chunkCount:chunks.length,payloadChunk:chunks[index],payloadHash,createdAt:j.updatedAt.toISOString(),createdByUserId:j.updatedByUserId })
+    return { revision, payloadHash, chunkCount: chunks.length }
+  }
+  private judgmentPayload(j: Omit<RelevanceJudgment,"id">|RelevanceJudgment, evidence?: { revision:string; payloadHash:string; chunkCount:number }) {
+    return {judgmentKey:j.judgmentKey,datasetVersionId:j.datasetVersionId,evaluationQueryId:j.evaluationQueryId,sourceQueryId:j.sourceQueryId,documentKey:j.documentKey,canonicalUrl:j.canonicalUrl,domain:j.domain,relevanceGrade:j.relevanceGrade,status:j.status,source:j.source,evidenceRevision:evidence?.revision ?? "legacy",evidencePayloadHash:evidence?.payloadHash ?? "legacy",evidenceChunkCount:evidence?.chunkCount ?? 1,rationale:j.rationale??null,intent:j.intent??null,subtopic:j.subtopic??null,createdAt:j.createdAt.toISOString(),createdByUserId:j.createdByUserId,updatedAt:j.updatedAt.toISOString(),updatedByUserId:j.updatedByUserId,acceptedAt:j.acceptedAt?.toISOString()??null,acceptedByUserId:j.acceptedByUserId??null}
   }
 }
 class AppwriteOperationalQueryReader implements OperationalQueryReader {
@@ -193,7 +245,8 @@ export class EvaluationDatasetService {
     const copied: EvaluationQuery[] = []
     const copiedAt = new Date()
     for (const source of parentQueries) {
-      const { id: _sourceId, ...definition } = source
+      const definition = { ...source }
+      delete (definition as Partial<EvaluationQuery>).id
       copied.push(await this.repository.createQuery({ ...definition,datasetVersionId:clone.id,queryKey:createEvaluationQueryKey(clone.id,source.sourceQueryId),filters:{...source.filters,includeDomains:[...(source.filters.includeDomains ?? [])],excludeDomains:[...(source.filters.excludeDomains ?? [])]},createdAt:copiedAt,createdByUserId:ownerUserId }))
     }
     const updated = await this.repository.updateDataset(clone.id,{queryCount:copied.length,updatedAt:new Date()})

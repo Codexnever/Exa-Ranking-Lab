@@ -4,7 +4,17 @@ import {defineConfig,globalIgnores} from "eslint/config"
 const compat=new FlatCompat({baseDirectory:import.meta.dirname})
 export default defineConfig([
   ...compat.extends("next/core-web-vitals","next/typescript"),
-  globalIgnores([".next/**","out/**","build/**","coverage/**"]),
+  globalIgnores([
+    "Microsoft/**",
+    ".tmp-appdata/**",
+    ".tmp-localappdata/**",
+    ".npm-cache/**",
+    ".next/**",
+    "coverage/**",
+    "node_modules/**",
+    "out/**",
+    "build/**",
+  ]),
   {
     // Existing application debt is surfaced without blocking the v1 release.
     // New code is still type-checked and all findings remain visible in CI.

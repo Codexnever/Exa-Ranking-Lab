@@ -1,9 +1,59 @@
-import {NextResponse,type NextRequest} from "next/server"
-import {withEnhancedSecurity} from "@/lib/middleware/security/security-middleware"
-import type {SecurityContext} from "@/types/type"
-import {evaluationStageTraceService} from "@/app/services/evaluation/evaluation-stage-trace-service"
-import {EvaluationError,invalid} from "@/app/services/evaluation/evaluation-errors"
-const page=(params:URLSearchParams,key:string,fallback:number)=>{const value=params.get(key);if(value===null)return fallback;if(!/^\d+$/.test(value))throw invalid(`${key} must be a non-negative integer`);return Number(value)}
-async function handler(request:NextRequest,context:SecurityContext){try{if(request.method==="POST"){const input=await request.json().catch(()=>{throw invalid("Request body must be valid JSON")});return NextResponse.json(await evaluationStageTraceService.create(context.user.$id,input),{status:201})}const params=request.nextUrl.searchParams;return NextResponse.json(await evaluationStageTraceService.list(context.user.$id,{sourceQueryId:params.get("sourceQueryId")??undefined,snapshotId:params.get("snapshotId")??undefined,evaluationQueryId:params.get("evaluationQueryId")??undefined,datasetVersionId:params.get("datasetVersionId")??undefined,limit:page(params,"limit",20),offset:page(params,"offset",0)}))}catch(error){if(error instanceof EvaluationError||error instanceof TypeError)return NextResponse.json({error:error.message,code:error instanceof EvaluationError?error.code:"INVALID_INPUT"},{status:error instanceof EvaluationError?error.status:400});console.error("[StageTraces] failed",error);return NextResponse.json({error:"Stage trace operation failed"},{status:500})}}
-export const GET=withEnhancedSecurity(handler,{allowedMethods:["GET"],logAttempts:true})
-export const POST=withEnhancedSecurity(handler,{allowedMethods:["POST"],logAttempts:true})
+import { NextResponse, type NextRequest } from "next/server";
+import { withEnhancedSecurity } from "@/lib/middleware/security/security-middleware";
+import type { SecurityContext } from "@/types/type";
+import { evaluationStageTraceService } from "@/app/services/evaluation/evaluation-stage-trace-service";
+import { EvaluationError, invalid } from "@/app/services/evaluation/evaluation-errors";
+import { EVALUATION_STAGE_TRACE_POLICY } from "@/app/services/evaluation/stage-trace-policy";
+const page = (params: URLSearchParams, key: string, fallback: number) => {
+  const value = params.get(key);
+  if (value === null) return fallback;
+  if (!/^\d+$/.test(value)) throw invalid(`${key} must be a non-negative integer`);
+  return Number(value);
+};
+async function handler(request: NextRequest, context: SecurityContext) {
+  try {
+    if (request.method === "POST") {
+      const declaredLength = Number(request.headers.get("content-length") ?? 0);
+      if (Number.isFinite(declaredLength) && declaredLength > EVALUATION_STAGE_TRACE_POLICY.maxRequestBytes) {
+        throw new EvaluationError("PROVENANCE_LIMIT", "Stage trace request exceeds the body-size limit", 413);
+      }
+      const raw = await request.text();
+      if (Buffer.byteLength(raw, "utf8") > EVALUATION_STAGE_TRACE_POLICY.maxRequestBytes) {
+        throw new EvaluationError("PROVENANCE_LIMIT", "Stage trace request exceeds the body-size limit", 413);
+      }
+      let input: unknown;
+      try {
+        input = JSON.parse(raw);
+      } catch {
+        throw invalid("Request body must be valid JSON");
+      }
+      return NextResponse.json(await evaluationStageTraceService.create(context.user.$id, input), {
+        status: 201,
+      });
+    }
+    const params = request.nextUrl.searchParams;
+    return NextResponse.json(
+      await evaluationStageTraceService.list(context.user.$id, {
+        sourceQueryId: params.get("sourceQueryId") ?? undefined,
+        snapshotId: params.get("snapshotId") ?? undefined,
+        evaluationQueryId: params.get("evaluationQueryId") ?? undefined,
+        datasetVersionId: params.get("datasetVersionId") ?? undefined,
+        limit: page(params, "limit", 20),
+        offset: page(params, "offset", 0),
+      }),
+    );
+  } catch (error) {
+    if (error instanceof EvaluationError || error instanceof TypeError)
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error instanceof EvaluationError ? error.code : "INVALID_INPUT",
+        },
+        { status: error instanceof EvaluationError ? error.status : 400 },
+      );
+    console.error("[StageTraces] failed", error);
+    return NextResponse.json({ error: "Stage trace operation failed" }, { status: 500 });
+  }
+}
+export const GET = withEnhancedSecurity(handler, { allowedMethods: ["GET"], logAttempts: true });
+export const POST = withEnhancedSecurity(handler, { allowedMethods: ["POST"], logAttempts: true });

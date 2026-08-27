@@ -21,7 +21,7 @@ const databaseId = process.env.APPWRITE_DATABASE_ID ?? process.env.NEXT_PUBLIC_A
 const collectionId = process.env.COLLECTION_ALGORITHM_EVENTS ?? "algorithm_events"
 const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT
 const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID
-const apiKey = process.env.APPWRITE_API_KEY ?? process.env.NEXT_PUBLIC_APPWRITE_API_KEY
+const apiKey = process.env.APPWRITE_API_KEY
 const dryRun = process.argv.includes("--dry-run")
 
 if (!endpoint || !projectId || !apiKey || !databaseId) {
