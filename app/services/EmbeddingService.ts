@@ -206,8 +206,7 @@ export class EmbeddingService {
 
   private async getFromAppwriteCache(contentHash: string): Promise<number[] | null> {
     try {
-      const { databases } = await import("@/app/server/appwrite/appwrite-server")
-      const { Query }     = await import("node-appwrite")
+      const { databases, Query } = await import("@/app/server/appwrite/appwrite")
       const result = await databases.listDocuments(
         process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!,
         EMBED_CACHE_COLLECTION,
@@ -227,7 +226,7 @@ export class EmbeddingService {
     vector:      number[]
   ): Promise<void> {
     try {
-      const { databases, ID } = await import("@/app/server/appwrite/appwrite-server")
+      const { databases, ID } = await import("@/app/server/appwrite/appwrite")
       await databases.createDocument(
         process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!,
         EMBED_CACHE_COLLECTION,

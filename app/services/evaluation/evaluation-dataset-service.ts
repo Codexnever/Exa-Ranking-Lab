@@ -178,7 +178,7 @@ export class AppwriteEvaluationRepository implements EvaluationRepository {
     const revision = `${j.updatedAt.toISOString()}-${j.updatedByUserId}`.slice(0,64)
     const raw = JSON.stringify({ assessments:j.assessments, sourceFeedbackIds:j.sourceFeedbackIds, sourceSnapshotIds:j.sourceSnapshotIds, observedRawUrls:j.observedRawUrls, observedContentHashes:j.observedContentHashes })
     const chunks = splitPayload(raw); const payloadHash = sha256(raw)
-    for (let index=0; index<chunks.length; index++) await databases.createDocument(DATABASE_ID, COLLECTIONS.RELEVANCE_JUDGMENT_PAYLOADS, `${id}_${revision}_${index}`, { judgmentId:id,datasetVersionId:j.datasetVersionId,evidenceRevision:revision,chunkIndex:index,chunkCount:chunks.length,payloadChunk:chunks[index],payloadHash,createdAt:j.updatedAt.toISOString(),createdByUserId:j.updatedByUserId })
+    for (let index=0; index<chunks.length; index++) await databases.createDocument(DATABASE_ID, COLLECTIONS.RELEVANCE_JUDGMENT_PAYLOADS, ID.unique(), { judgmentId:id,datasetVersionId:j.datasetVersionId,evidenceRevision:revision,chunkIndex:index,chunkCount:chunks.length,payloadChunk:chunks[index],payloadHash,createdAt:j.updatedAt.toISOString(),createdByUserId:j.updatedByUserId })
     return { revision, payloadHash, chunkCount: chunks.length }
   }
   private judgmentPayload(j: Omit<RelevanceJudgment,"id">|RelevanceJudgment, evidence?: { revision:string; payloadHash:string; chunkCount:number }) {

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useAuth } from "@/lib/middleware/authentication/auth-context"
-import { databases, DATABASE_ID, COLLECTIONS, Query } from "@/app/server/appwrite/appwrite-server"
+import { databases, DATABASE_ID, COLLECTIONS, Query } from "@/app/server/appwrite/appwrite"
 
 export function useAccessLogsLogic() {
   const { user } = useAuth()

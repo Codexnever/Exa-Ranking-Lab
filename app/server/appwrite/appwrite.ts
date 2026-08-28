@@ -7,7 +7,7 @@
 // login/register/logout/getCurrentAccount are client-only and should never
 // be called from API route handlers.
 
-import { Client, Account, Databases, Storage, Functions } from "appwrite"
+import { Client, Account, Databases, Storage, Functions, Query, ID } from "appwrite"
 import { EVALUATION_COLLECTION_DEFAULTS, getPublicAppwriteConfig, lazyService } from "@/lib/config/environment"
 
 // ─── Startup config validation ────────────────────────────────────────────────
@@ -24,6 +24,10 @@ export const account = lazyService(() => new Account(createClient()))
 export const databases = lazyService(() => new Databases(createClient()))
 export const storage = lazyService(() => new Storage(createClient()))
 export const functions = lazyService(() => new Functions(createClient()))
+
+// Browser-safe query/document helpers. Client modules must import these from
+// the Web SDK boundary, never from appwrite-server/node-appwrite.
+export { Query, ID }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 

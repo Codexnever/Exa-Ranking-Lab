@@ -3,7 +3,6 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { toast } from "sonner"                          // ✅ static import, not dynamic
 import type { AnalyticsData, RankingSnapshot, QueryConfig } from "@/types/type"
-import { AppwriteAnalyticsService } from "@/app/services/appwrite/analytics/AppwriteAnalyticsService"
 import { analyticsCalculations } from "@/app/logic/analyticsLogic"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,10 +37,6 @@ interface AnalyticsActions {
 }
 
 type AnalyticsStore = AnalyticsState & AnalyticsActions
-
-// ─── Service singleton (module-level, not in store state) ─────────────────────
-// Keeping service outside store state avoids serialization issues with persist.
-const appwriteService = new AppwriteAnalyticsService(false)
 
 // ─── Snapshot hash ────────────────────────────────────────────────────────────
 // Include both id and timestamp for stable dedup — id alone may not be unique.
@@ -194,7 +189,31 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
         timeRangeMs = 30 * 24 * 60 * 60 * 1000,
         queries = []
       ) => {
-        return appwriteService.getAnalytics(userId, timeRangeMs, queries)
+        if (!userId?.trim()) {
+          throw new Error("Valid userId is required for Appwrite analytics")
+        }
+
+        // Appwrite reads remain server-side so node-appwrite and the API key
+        // never enter the browser bundle. The route authenticates the session
+        // and derives the authoritative user ID; this client ID is validation
+        // only and is intentionally not sent over the wire.
+        void queries
+        const day = 24 * 60 * 60 * 1000
+        const timeRange = timeRangeMs <= 7 * day
+          ? "7d"
+          : timeRangeMs <= 30 * day
+            ? "30d"
+            : timeRangeMs <= 90 * day
+              ? "90d"
+              : "1y"
+        const response = await fetch(`/api/analytics?timeRange=${timeRange}`, {
+          credentials: "include",
+        })
+        const result = await response.json()
+        if (!response.ok) {
+          throw new Error(result.error ?? `Analytics API error: ${response.status}`)
+        }
+        return result as AnalyticsData
       },
 
       _getWeaviateAnalytics: async (
