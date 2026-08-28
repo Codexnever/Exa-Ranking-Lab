@@ -226,22 +226,30 @@ export class EmbeddingService {
     vector:      number[]
   ): Promise<void> {
     try {
-      const { databases, ID } = await import("@/app/server/appwrite/appwrite")
+      const { databases } = await import("@/app/server/appwrite/appwrite")
       await databases.createDocument(
         process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!,
         EMBED_CACHE_COLLECTION,
-        ID.unique(),
+        this.createCacheDocumentId(),
         {
           contentHash,
           vector:   JSON.stringify(vector),
           storedAt: new Date().toISOString(),
         }
       )
-    } catch (err: any) {
-      if (err?.code !== 409) {
-        console.warn("[EmbeddingService] Appwrite cache store failed:", err?.message)
+    } catch (err: unknown) {
+      const error = err as { code?: number; message?: string }
+      if (error.code !== 409) {
+        console.warn("[EmbeddingService] Appwrite cache store failed:", error.message)
       }
     }
+  }
+
+  private createCacheDocumentId(): string {
+    // Keep this browser-facing service independent of SDK ID helper exports.
+    // Appwrite accepts IDs up to 36 characters; a UUID without separators is
+    // 32 lowercase hexadecimal characters and remains cryptographically unique.
+    return globalThis.crypto.randomUUID().replaceAll("-", "")
   }
 
   // ── Gemini API ─────────────────────────────────────────────────────────────
