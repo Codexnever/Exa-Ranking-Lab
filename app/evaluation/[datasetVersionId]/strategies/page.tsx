@@ -1,32 +1,39 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { evaluationApi } from "@/lib/evaluation-api";
 import { StrategyLab } from "@/components/evaluation/StrategyLab";
-import type { EvaluationStrategy, StrategyBenchmark } from "@/types/evaluation-strategy";
+import type {
+  EvaluationStrategy,
+  StrategyBenchmark,
+  StrategyExecution,
+} from "@/types/evaluation-strategy";
 import type { EvaluationDatasetDetail } from "@/types/evaluation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 export default function StrategyLabPage() {
   const { datasetVersionId } = useParams<{ datasetVersionId: string }>(),
     [detail, setDetail] = useState<EvaluationDatasetDetail>(),
     [strategies, setStrategies] = useState<EvaluationStrategy[]>([]),
+    [executions, setExecutions] = useState<StrategyExecution[]>([]),
     [benchmark, setBenchmark] = useState<StrategyBenchmark>(),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
-  async function refresh() {
-    const [d, s] = await Promise.all([
+  const refresh = useCallback(async () => {
+    const [d, s, e] = await Promise.all([
       evaluationApi.detail(datasetVersionId),
       evaluationApi.strategies(),
+      evaluationApi.strategyExecutions(datasetVersionId),
     ]);
     setDetail(d);
     setStrategies(s.strategies);
-  }
+    setExecutions(e.executions);
+  }, [datasetVersionId]);
   useEffect(() => {
     refresh()
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [datasetVersionId]);
+  }, [refresh]);
   if (error)
     return (
       <Alert variant="destructive">
@@ -40,6 +47,7 @@ export default function StrategyLabPage() {
       <StrategyLab
         strategies={strategies}
         queries={detail.queries}
+        executions={executions}
         benchmark={benchmark}
         loading={loading}
         onCreate={async input => {
@@ -50,6 +58,19 @@ export default function StrategyLabPage() {
             await refresh();
           } catch (e) {
             setError(e instanceof Error ? e.message : "Strategy creation failed");
+          } finally {
+            setLoading(false);
+          }
+        }}
+        onCreateExecution={async input => {
+          setLoading(true);
+          try {
+            setError("");
+            await evaluationApi.createStrategyExecution(datasetVersionId, input);
+            await refresh();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Strategy execution creation failed");
+            throw e;
           } finally {
             setLoading(false);
           }
