@@ -7,6 +7,7 @@ import type {
   ResolvedDetectionThresholds,
 } from "./types"
 import type { DriftAnalysisResult, DriftTimelinePoint } from "@/types/type"
+import { CHANGE_TYPE_DEFAULTS } from "./constants"
 
 interface EvidenceInput {
   observedResults: DriftAnalysisResult[]
@@ -36,6 +37,16 @@ function average(values: number[]): number | null {
   return values.length > 0
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : null
+}
+
+function classifyChange(points: NonNullable<DriftTimelinePoint["decomposedDrift"]>[]): RankingChangeEvidence["changeType"] {
+  if (points.length < CHANGE_TYPE_DEFAULTS.MIN_DECOMPOSED_POINTS) return "unknown"
+  const contentOrIndex = average(points.map(point => Math.max(point.contentDrift, point.competitorDrift))) ?? 0
+  const ranking = average(points.map(point => point.rerankDrift)) ?? 0
+  if (contentOrIndex <= 0 && ranking <= 0) return "unknown"
+  if (ranking >= contentOrIndex * CHANGE_TYPE_DEFAULTS.DOMINANCE_RATIO) return "ranking"
+  if (contentOrIndex >= ranking * CHANGE_TYPE_DEFAULTS.DOMINANCE_RATIO) return "content_or_index"
+  return "mixed"
 }
 
 export class EvidenceBuilder {
@@ -109,6 +120,11 @@ export class EvidenceBuilder {
 
     const detectionReasons: DetectionReason[] = [
       {
+        code: "observation_coverage",
+        passed: observedQueryCount >= thresholds.minQueriesInCategory,
+        message: `${observedQueryCount} current queries had valid in-window observations; ${thresholds.minQueriesInCategory} are required.`,
+      },
+      {
         code: "coordination",
         passed: observedQueryCount >= thresholds.minQueriesInCategory
           && driftRate >= thresholds.driftRateThreshold,
@@ -128,14 +144,14 @@ export class EvidenceBuilder {
         ? {
             code: "historical_baseline",
             passed: baselinePassed,
-            message: baseline.standardDeviation === 0
-              ? `Observed-query average drift ${currentObservedAverageDrift.toFixed(1)} was compared with the zero-variance baseline plus the ${thresholds.baselineAbsoluteEpsilon}-point engineering noise floor.`
-              : `Current drift was ${historicalDeviation?.toFixed(2) ?? "—"} standard deviations above the historical mean; threshold ${thresholds.baselineDeviationThreshold}.`,
+            message: baseline.robustSigma === 0
+              ? `Observed-query average drift ${currentObservedAverageDrift.toFixed(1)} was compared with median ${baseline.median.toFixed(1)} plus the ${thresholds.baselineAbsoluteEpsilon}-point engineering noise floor.`
+              : `Current drift was ${historicalDeviation?.toFixed(2) ?? "—"} robust deviations above the historical median; threshold ${thresholds.baselineDeviationThreshold}.`,
           }
         : {
             code: "baseline_fallback",
             passed: true,
-            message: `Fixed thresholds were used because ${baseline.historicalQueryCount} query histories and ${baseline.historicalObservationCount} observations were available; ${thresholds.minBaselineQueries} queries and ${thresholds.minBaselineSamples} observations are required.`,
+            message: `Unverified fixed thresholds were used. ${baseline.availabilityReason}`,
           },
     ]
 
@@ -173,9 +189,19 @@ export class EvidenceBuilder {
       baselineSampleCount: baseline.sampleCount,
       historicalObservationCount: baseline.historicalObservationCount,
       historicalQueryCount: baseline.historicalQueryCount,
+      historicalWindowCount: baseline.windowCount,
+      baselineMedian: baseline.median,
+      baselineMedianAbsoluteDeviation: baseline.medianAbsoluteDeviation,
+      robustSigma: baseline.robustSigma,
+      historicalComparisonMethod: !baseline.available
+        ? "unavailable"
+        : baseline.robustSigma > 0 ? "robust-mad" : "absolute-epsilon",
+      baselineAvailabilityReason: baseline.availabilityReason,
+      baselineAvailabilityReasonCode: baseline.availabilityReasonCode,
       amountAboveBaseline: currentObservedAverageDrift - baseline.mean,
       baselineAbsoluteEpsilon: thresholds.baselineAbsoluteEpsilon,
       historicalDeviation,
+      changeType: classifyChange(decomposed),
       detectionReasons,
     }
   }

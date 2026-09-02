@@ -96,6 +96,7 @@ function defaultThresholds() { return { driftRateThreshold: DETECTOR_DEFAULTS.DR
   minQueriesInCategory: DETECTOR_DEFAULTS.MIN_QUERIES_IN_CATEGORY, correlationWindowMs: DETECTOR_DEFAULTS.CORRELATION_WINDOW_MS,
   historicalWindowDays: DETECTOR_DEFAULTS.HISTORICAL_WINDOW_DAYS, minBaselineSamples: DETECTOR_DEFAULTS.MIN_BASELINE_SAMPLES,
   minBaselineQueries: DETECTOR_DEFAULTS.MIN_BASELINE_QUERIES, baselineDeviationThreshold: DETECTOR_DEFAULTS.BASELINE_DEVIATION_THRESHOLD,
+  minBaselineWindows: DETECTOR_DEFAULTS.MIN_BASELINE_WINDOWS, minBaselineWindowQueries: DETECTOR_DEFAULTS.MIN_BASELINE_WINDOW_QUERIES,
   baselineAbsoluteEpsilon: DETECTOR_DEFAULTS.BASELINE_ABSOLUTE_EPSILON } }
 
 export function documentToEvent(document: Record<string, unknown>): AlgorithmUpdateEvent {
@@ -105,7 +106,7 @@ export function documentToEvent(document: Record<string, unknown>): AlgorithmUpd
   const legacyMetrics: DetectionMetrics = { totalQueriesInCategory: numberOr(document.affectedCount, 0), affectedQueryCount: numberOr(document.affectedCount, 0),
     driftRate: numberOr(document.driftRate, 0), avgDriftScore: legacyAverage, affectedAverageDrift: legacyAverage,
     currentObservedAverageDrift: legacyAverage, historicalAvgDrift: 0, historicalStdDev: 0, historicalSampleCount: 0,
-    historicalObservationCount: 0, historicalQueryCount: 0, historicalBaselineAvailable: false, historicalDeviation: null,
+    historicalObservationCount: 0, historicalQueryCount: 0, historicalWindowCount: 0, historicalBaselineAvailable: false, historicalDeviation: null,
     windowStartMs: detectedAt.getTime() - DETECTOR_DEFAULTS.CORRELATION_WINDOW_MS, windowEndMs: detectedAt.getTime() }
   const schemaVersion = numberOr(document.schemaVersion, 1) === 2 ? 2 : 1
   const storedEvidence = schemaVersion === 2
@@ -120,15 +121,18 @@ export function documentToEvent(document: Record<string, unknown>): AlgorithmUpd
     currentObservedAverageDrift: numberOr(document.currentObservedAverageDrift, legacyAverage),
     historicalAvgDrift: numberOr(storedEvidence.baselineMean, 0),
     historicalStdDev: numberOr(storedEvidence.baselineStandardDeviation, 0),
-    historicalSampleCount: numberOr(document.historicalQueryCount, 0),
+    historicalSampleCount: numberOr(storedEvidence.baselineSampleCount, numberOr(document.historicalQueryCount, 0)),
     historicalObservationCount: numberOr(document.historicalObservationCount, 0),
     historicalQueryCount: numberOr(document.historicalQueryCount, 0),
+    historicalWindowCount: numberOr(storedEvidence.historicalWindowCount, 0),
     historicalBaselineAvailable: document.historicalBaselineAvailable === true,
     historicalDeviation: optionalNumber(document.historicalDeviation),
     windowStartMs: new Date(String(document.windowStart)).getTime(),
     windowEndMs: new Date(String(document.windowEnd)).getTime(),
   } : legacyMetrics
-  const thresholds = schemaVersion === 2 ? parseJson(document.thresholdsJson, defaultThresholds()) : defaultThresholds()
+  const thresholds = schemaVersion === 2
+    ? { ...defaultThresholds(), ...parseJson<Partial<ReturnType<typeof defaultThresholds>>>(document.thresholdsJson, {}) }
+    : defaultThresholds()
   const signals: ConfidenceSignals = { driftRate: metrics.driftRate, avgDriftScore: metrics.currentObservedAverageDrift,
     affectedQueryCount: metrics.affectedQueryCount, observedQueryCount: metrics.totalQueriesInCategory,
     historicalDeviation: metrics.historicalDeviation, historicalSignal: null, baselineSampleCount: metrics.historicalSampleCount, temporalConcentration: 0 }
@@ -138,7 +142,13 @@ export function documentToEvent(document: Record<string, unknown>): AlgorithmUpd
     ? calculatedConfidence.value
     : Math.max(0, Math.min(1, legacyStoredConfidence > 1 ? legacyStoredConfidence / 100 : legacyStoredConfidence))
   const confidence = schemaVersion === 2
-    ? parseJson(document.confidenceJson, calculatedConfidence)
+    ? {
+        ...calculatedConfidence,
+        confidenceCapped: false,
+        confidenceCap: null,
+        confidenceCapReason: null,
+        ...parseJson<Partial<typeof calculatedConfidence>>(document.confidenceJson, {}),
+      }
     : { ...calculatedConfidence, value: normalizedLegacyConfidence, percentage: Math.round(normalizedLegacyConfidence * 100),
         score: Math.round(normalizedLegacyConfidence * 100), severity: document.severity as AlgorithmUpdateSeverity }
   const legacyEvidence: AlgorithmUpdateEvent["evidence"] = { affectedQueryCount: metrics.affectedQueryCount, observedQueryCount: metrics.totalQueriesInCategory,
@@ -149,8 +159,13 @@ export function documentToEvent(document: Record<string, unknown>): AlgorithmUpd
     averageContentDrift: null, averageCompetitorDrift: null, averageRerankDrift: null, domainsGained: [], domainsLost: [], rankingWinners: [], rankingLosers: [],
     historicalBaselineUsed: false, baselineMean: 0, baselineStandardDeviation: 0, baselineSampleCount: 0,
     historicalObservationCount: 0, historicalQueryCount: 0, amountAboveBaseline: 0, baselineAbsoluteEpsilon: thresholds.baselineAbsoluteEpsilon,
-    historicalDeviation: null, detectionReasons: [{ code: "baseline_fallback", passed: true, message: "Structured Detector v2 evidence was not stored for this legacy event." }] }
-  const evidence = schemaVersion === 2 ? parseJson<AlgorithmUpdateEvent["evidence"]>(document.evidenceJson, legacyEvidence) : legacyEvidence
+    historicalWindowCount: 0, baselineMedian: 0, baselineMedianAbsoluteDeviation: 0, robustSigma: 0,
+    historicalComparisonMethod: "unavailable", baselineAvailabilityReason: "Structured Detector v2.1 baseline evidence was not stored.",
+    baselineAvailabilityReasonCode: "provider_disabled",
+    historicalDeviation: null, changeType: "unknown", detectionReasons: [{ code: "baseline_fallback", passed: true, message: "Structured Detector v2 evidence was not stored for this legacy event." }] }
+  const evidence = schemaVersion === 2
+    ? { ...legacyEvidence, ...parseJson<Partial<AlgorithmUpdateEvent["evidence"]>>(document.evidenceJson, {}) }
+    : legacyEvidence
   return { id: String(document.eventId), detectedAt, category: String(document.category), severity: document.severity as AlgorithmUpdateSeverity,
     affectedQueries, metrics, confidence, detectorVersion: schemaVersion === 2 ? String(document.detectorVersion) : "legacy", schemaVersion,
     createdAt: new Date(schemaVersion === 2 ? String(document.createdAt) : detectedAt), detectionMode: schemaVersion === 2 && document.detectionMode === "baseline-aware" ? "baseline-aware" : "fixed-threshold",

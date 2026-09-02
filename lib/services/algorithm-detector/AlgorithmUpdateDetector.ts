@@ -19,6 +19,7 @@ import type {
   DetectionMetrics,
   DetectorInput,
   DriftPoint,
+  HistoricalBaseline,
   HistoricalBaselineProvider,
   IDetectorLogger,
   QueryMeta,
@@ -46,6 +47,8 @@ export class AlgorithmUpdateDetector {
       historicalWindowDays: configOverride.historicalWindowDays ?? DETECTOR_DEFAULTS.HISTORICAL_WINDOW_DAYS,
       minBaselineSamples: configOverride.minBaselineSamples ?? DETECTOR_DEFAULTS.MIN_BASELINE_SAMPLES,
       minBaselineQueries: configOverride.minBaselineQueries ?? DETECTOR_DEFAULTS.MIN_BASELINE_QUERIES,
+      minBaselineWindows: configOverride.minBaselineWindows ?? DETECTOR_DEFAULTS.MIN_BASELINE_WINDOWS,
+      minBaselineWindowQueries: configOverride.minBaselineWindowQueries ?? DETECTOR_DEFAULTS.MIN_BASELINE_WINDOW_QUERIES,
       baselineDeviationThreshold: configOverride.baselineDeviationThreshold ?? DETECTOR_DEFAULTS.BASELINE_DEVIATION_THRESHOLD,
       baselineAbsoluteEpsilon: configOverride.baselineAbsoluteEpsilon ?? DETECTOR_DEFAULTS.BASELINE_ABSOLUTE_EPSILON,
     }
@@ -69,12 +72,31 @@ export class AlgorithmUpdateDetector {
     for (const result of results) {
       const category = categoryByQueryId.get(result.queryId) ?? "unknown"
       const config = this.configFor(category)
-      const lastPoint = result.driftTimeline?.at(-1)
+      const currentWindowStartMs = windowEndMs - config.correlationWindowMs
+      const validTimeline = (result.driftTimeline ?? [])
+        .filter(point => Number.isFinite(new Date(point.timestamp).getTime()) && Number.isFinite(point.driftScore))
+        .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime())
+      const lastPoint = [...validTimeline].reverse().find(point => {
+        const timestamp = new Date(point.timestamp).getTime()
+        return timestamp >= currentWindowStartMs && timestamp <= windowEndMs
+      })
       if (!lastPoint) continue
-      const timestamp = new Date(lastPoint.timestamp).getTime()
-      if (!Number.isFinite(timestamp) || timestamp < windowEndMs - config.correlationWindowMs || timestamp > windowEndMs) continue
       const categoryResults = byCategory.get(category) ?? []
-      categoryResults.push(result)
+      const normalizedResult = {
+        ...result,
+        latestDrift: lastPoint.driftScore,
+        driftTimeline: [
+          ...validTimeline.filter(point => new Date(point.timestamp).getTime() < currentWindowStartMs),
+          lastPoint,
+        ],
+      }
+      const existingIndex = categoryResults.findIndex(item => item.queryId === result.queryId)
+      if (existingIndex < 0) {
+        categoryResults.push(normalizedResult)
+      } else {
+        const existingTimestamp = new Date(categoryResults[existingIndex].driftTimeline.at(-1)?.timestamp ?? 0).getTime()
+        if (new Date(lastPoint.timestamp).getTime() > existingTimestamp) categoryResults[existingIndex] = normalizedResult
+      }
       byCategory.set(category, categoryResults)
     }
 
@@ -90,13 +112,20 @@ export class AlgorithmUpdateDetector {
       const affectedAverageDrift = drifted.reduce((sum, result) => sum + result.latestDrift, 0) / drifted.length
       const currentObservedAverageDrift = categoryResults.reduce((sum, result) => sum + result.latestDrift, 0) / categoryResults.length
       const windowStartMs = windowEndMs - config.correlationWindowMs
-      let baseline = {
+      let baseline: HistoricalBaseline = {
         mean: 0,
         standardDeviation: 0,
         sampleCount: 0,
         historicalObservationCount: 0,
         historicalQueryCount: 0,
+        windowCount: 0,
+        median: 0,
+        medianAbsoluteDeviation: 0,
+        robustSigma: 0,
+        windowAverages: [],
         available: false,
+        availabilityReason: "Historical baseline was not evaluated.",
+        availabilityReasonCode: "provider_failure",
       }
       try {
         baseline = await this.baselineProvider.getBaseline(
@@ -105,21 +134,29 @@ export class AlgorithmUpdateDetector {
           windowEndMs,
           config.historicalWindowDays,
           config.minBaselineSamples,
-          config.minBaselineQueries
+          config.minBaselineQueries,
+          config.minBaselineWindows,
+          config.minBaselineWindowQueries,
+          config.correlationWindowMs,
         )
       } catch (error) {
+        baseline = {
+          ...baseline,
+          availabilityReason: "Historical baseline calculation failed; fixed thresholds were used.",
+          availabilityReasonCode: "provider_failure",
+        }
         this.logger.warn(category, "Historical baseline unavailable", {
           error: error instanceof Error ? error.message : String(error),
         })
       }
-      const historicalDeviation = baseline.available && baseline.standardDeviation > 0
-        ? (currentObservedAverageDrift - baseline.mean) / baseline.standardDeviation
+      const historicalDeviation = baseline.available && baseline.robustSigma > 0
+        ? (currentObservedAverageDrift - baseline.median) / baseline.robustSigma
         : null
-      // Zero variance cannot produce a z-score, so require a configurable
-      // absolute movement beyond the stable mean instead.
+      // Zero MAD cannot produce a robust deviation, so use the configured
+      // absolute engineering noise floor around the historical median.
       const baselinePassed = !baseline.available
-        || (baseline.standardDeviation === 0
-          ? currentObservedAverageDrift >= baseline.mean + config.baselineAbsoluteEpsilon
+        || (baseline.robustSigma === 0
+          ? currentObservedAverageDrift >= baseline.median + config.baselineAbsoluteEpsilon
           : (historicalDeviation ?? Number.NEGATIVE_INFINITY) >= config.baselineDeviationThreshold)
       if (!baselinePassed) continue
 
@@ -136,7 +173,7 @@ export class AlgorithmUpdateDetector {
         windowEndMs,
       })
       const historicalSignal = baseline.available
-        ? (baseline.standardDeviation === 0
+        ? (baseline.robustSigma === 0
           ? (baselinePassed ? 1 : 0)
           : Math.max(0, Math.min(1, (historicalDeviation ?? 0) / HISTORICAL_DEVIATION_FULL_CONFIDENCE)))
         : null
@@ -162,6 +199,7 @@ export class AlgorithmUpdateDetector {
         historicalSampleCount: baseline.sampleCount,
         historicalObservationCount: baseline.historicalObservationCount,
         historicalQueryCount: baseline.historicalQueryCount,
+        historicalWindowCount: baseline.windowCount,
         historicalBaselineAvailable: baseline.available,
         historicalDeviation,
         windowStartMs,

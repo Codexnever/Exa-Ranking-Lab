@@ -1,4 +1,4 @@
-export const DETECTOR_VERSION = "2.0"
+export const DETECTOR_VERSION = "2.1"
 
 export const DETECTOR_DEFAULTS = {
   DRIFT_RATE_THRESHOLD: 0.6,
@@ -8,10 +8,22 @@ export const DETECTOR_DEFAULTS = {
   HISTORICAL_WINDOW_DAYS: 14,
   MIN_BASELINE_SAMPLES: 10,
   MIN_BASELINE_QUERIES: 3,
+  MIN_BASELINE_WINDOWS: 3,
+  MIN_BASELINE_WINDOW_QUERIES: 3,
   BASELINE_DEVIATION_THRESHOLD: 2,
   // Engineering guardrail on the 0-100 drift scale; calibrate with production data.
   BASELINE_ABSOLUTE_EPSILON: 5,
   EVENT_FETCH_LIMIT: 50,
+} as const
+
+// Cold-start confidence is deliberately kept below the moderate-severity
+// boundary. This is a project engineering default that requires calibration.
+export const MAX_FALLBACK_CONFIDENCE = 49
+
+// Explanatory classification defaults. They are not detection gates.
+export const CHANGE_TYPE_DEFAULTS = {
+  MIN_DECOMPOSED_POINTS: 1,
+  DOMINANCE_RATIO: 1.5,
 } as const
 
 export const SEVERITY_BANDS = [

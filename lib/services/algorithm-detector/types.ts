@@ -23,6 +23,8 @@ export interface DetectionConfig {
   historicalWindowDays: number
   minBaselineSamples: number
   minBaselineQueries: number
+  minBaselineWindows: number
+  minBaselineWindowQueries: number
   baselineDeviationThreshold: number
   baselineAbsoluteEpsilon: number
 }
@@ -51,6 +53,9 @@ export interface ConfidenceResult {
   signals: ConfidenceSignals
   normalizedSignals: Record<string, number>
   weightsUsed: Record<string, number>
+  confidenceCapped?: boolean
+  confidenceCap?: number | null
+  confidenceCapReason?: string | null
 }
 
 export interface DetectionMetrics {
@@ -65,6 +70,7 @@ export interface DetectionMetrics {
   historicalSampleCount: number
   historicalObservationCount: number
   historicalQueryCount: number
+  historicalWindowCount: number
   historicalBaselineAvailable: boolean
   historicalDeviation: number | null
   windowStartMs: number
@@ -79,6 +85,8 @@ export interface ResolvedDetectionThresholds {
   historicalWindowDays: number
   minBaselineSamples: number
   minBaselineQueries: number
+  minBaselineWindows: number
+  minBaselineWindowQueries: number
   baselineDeviationThreshold: number
   baselineAbsoluteEpsilon: number
 }
@@ -94,7 +102,7 @@ export interface RankingMovementEvidence {
 }
 
 export interface DetectionReason {
-  code: "coordination" | "drift_magnitude" | "correlation_window" | "historical_baseline" | "baseline_fallback"
+  code: "observation_coverage" | "coordination" | "drift_magnitude" | "correlation_window" | "historical_baseline" | "baseline_fallback"
   passed: boolean
   message: string
 }
@@ -128,9 +136,17 @@ export interface RankingChangeEvidence {
   baselineSampleCount: number
   historicalObservationCount: number
   historicalQueryCount: number
+  historicalWindowCount: number
+  baselineMedian: number
+  baselineMedianAbsoluteDeviation: number
+  robustSigma: number
+  historicalComparisonMethod: "robust-mad" | "absolute-epsilon" | "unavailable"
+  baselineAvailabilityReason: string
+  baselineAvailabilityReasonCode: HistoricalBaselineAvailabilityReasonCode
   amountAboveBaseline: number
   baselineAbsoluteEpsilon: number
   historicalDeviation: number | null
+  changeType: "ranking" | "content_or_index" | "mixed" | "unknown"
   detectionReasons: DetectionReason[]
 }
 
@@ -203,8 +219,24 @@ export interface HistoricalBaseline {
   sampleCount: number
   historicalObservationCount: number
   historicalQueryCount: number
+  windowCount: number
+  median: number
+  medianAbsoluteDeviation: number
+  robustSigma: number
+  windowAverages: number[]
   available: boolean
+  availabilityReason: string
+  availabilityReasonCode: HistoricalBaselineAvailabilityReasonCode
 }
+
+export type HistoricalBaselineAvailabilityReasonCode =
+  | "available"
+  | "insufficient_observations"
+  | "insufficient_queries"
+  | "insufficient_valid_windows"
+  | "insufficient_window_coverage"
+  | "provider_disabled"
+  | "provider_failure"
 
 export interface HistoricalBaselineProvider {
   getBaseline(
@@ -213,7 +245,10 @@ export interface HistoricalBaselineProvider {
     windowEndMs: number,
     historicalWindowDays: number,
     minSamples: number,
-    minQueries: number
+    minQueries: number,
+    minWindows: number,
+    minQueriesPerWindow: number,
+    correlationWindowMs: number
   ): Promise<HistoricalBaseline>
 }
 
