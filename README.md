@@ -135,6 +135,86 @@ npm run seed:evaluation-demo -- --write /tmp/exa-ranking-lab-demo.json
 
 Open `/evaluation/<frozen-dataset-id>/strategies`. Register provider-neutral strategy configurations, import immutable execution outputs through the API, and compare the same query cohort under Metric Policy v1. Tables keep ranking quality, compatible latency, hard negatives, and optional stage evidence separate. “Highest nDCG@10” is not a universal-best claim.
 
+## Algorithm Update Detector v2.1
+
+Detector v2.1 identifies coordinated ranking-change candidates whose movement is unusual compared with the category's historical volatility. It observes external ranking behaviour; it cannot prove that Exa or another provider deployed an internal algorithm update. High drift alone is insufficient: enough related queries must move together, and a mature historical baseline must show that the category-wide movement is unusual.
+
+```mermaid
+flowchart TD
+  A[Scheduled queries] --> B[Snapshots]
+  B --> C[Drift analysis]
+  C --> D[Current query coordination]
+  D --> E[Historical category baseline]
+  E --> F[Event or suppression]
+  F --> G[Persistence]
+  G --> H[Analytics UI]
+```
+
+Detection has four gates:
+
+1. **Current observation coverage:** enough queries in the category must have valid observations in the current correlation window.
+2. **Per-query movement:** a query is affected only when its drift meets that category's configured threshold.
+3. **Coordination:** the affected-query rate must meet the configured threshold. One query with drift `90` does not create a category-wide event when the other queries remain stable.
+4. **Historical abnormality:** when a baseline is available, the average across all currently observed queries must be unusually high relative to historical category-window averages.
+
+Temporal means *across time*; volatility means *how much rankings normally change*. For example:
+
+```text
+News historical category drift: 45, 65, 35, 70, 50, 60, 40
+Current average: 58
+Interpretation: high raw drift, but normal for this historically volatile category.
+No baseline-supported event.
+
+Research historical category drift: 8, 12, 10, 9, 11, 10, 12
+Current average: 42
+Interpretation: unusual coordinated movement for a normally stable category.
+Create a ranking-change candidate if coordination also passes.
+```
+
+### Detector defaults
+
+| Setting | Default |
+| --- | ---: |
+| Affected-query drift-rate threshold | `0.60` |
+| Per-query drift threshold | `30` |
+| Minimum queries in a category | `3` |
+| Correlation window | `24 hours` |
+| Historical lookback | `14 days` before the current window |
+| Minimum historical observations | `10` |
+| Minimum distinct historical queries | `3` |
+| Minimum valid historical windows | `3` |
+| Minimum distinct queries per historical window | `3` |
+| Historical robust-deviation threshold | `2` |
+| Zero-dispersion absolute epsilon | `5` drift points |
+| Fixed-threshold confidence cap | `49` |
+| Change-type dominance ratio | `1.5` |
+
+These are project engineering defaults that require production calibration, not universal search-industry standards. Category-specific overrides also apply where configured.
+
+The detector has two modes. **Baseline-aware** candidates passed the historical comparison. During cold start or insufficient history, **fixed-threshold** candidates can still be stored, but they are explicitly unverified and their confidence is capped at `49`, below moderate severity. Confidence is an evidence score, not a calibrated probability.
+
+The existing panel is under **Analytics → Weaviate data source → AI Insights → Algorithm Update Detector**. It reads stored events and displays category, severity, drift rate, average drift score, affected queries, and the stored description. Refreshing or opening the panel does not run detection. More structured evidence is available from authenticated `GET /api/analytics/algorithm-events?limit=10`; the panel does not yet render median, MAD, robust deviation, detection mode, confidence-cap metadata, or change classification.
+
+Current limitations:
+
+- Baseline-aware detection requires sufficient historical observations, queries, and covered time windows; cold-start candidates remain unverified.
+- Thresholds require calibration, and live-web categories such as news may naturally be more volatile.
+- Query schedules, filters, and `topK` should remain consistent so drift comparisons stay meaningful.
+- The detector finds correlation and abnormal movement, not confirmed causation.
+- Suppressed candidates are not persisted as event records, and the existing UI does not expose every v2.1 evidence field.
+
+Focused verification:
+
+```bash
+npm test -- --runInBand --verbose lib/services/algorithm-detector/__tests__/AlgorithmUpdateDetector.test.ts
+npm test -- --runInBand
+npx tsc --noEmit --incremental false
+npm run lint
+npm run build
+```
+
+The last verified project state had 37 passing focused detector tests, 288 passing full-suite tests, zero lint errors with existing warnings, and 47/47 static pages generated. Detection itself runs from scheduled-query processing, not from opening the Analytics UI.
+
 ## Metric semantics
 
 - `0`: accepted not relevant; `1`: accepted relevant; `2`: accepted highly relevant.

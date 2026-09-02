@@ -276,21 +276,165 @@ dominantCause   — whichever type contributes >50% of total
                   or "mixed" if no single type dominates
 ```
 
-### Algorithm update detection (AlgorithmUpdateDetector)
+### Algorithm Update Detector v2.1
 
+Detector v2.1 identifies coordinated ranking-change candidates and, when enough history exists, requires their category-wide movement to be unusual relative to the category's temporal volatility. It observes external result behaviour; it does not establish that a provider deployed an internal algorithm change.
+
+#### Production path
+
+```text
+Scheduled-query processing
+→ query execution
+→ snapshot persistence
+→ drift analysis
+→ AlgorithmUpdateDetector.detect()
+→ EventPersistence.persistEvents()
+→ algorithm_events collection
+→ GET /api/analytics/algorithm-events
+→ AlgorithmUpdatePanel
 ```
-After every cron batch:
-  group all driftResults by query.category
-  for each category with ≥3 queries:
-    driftedCount = queries where latestDrift > 30
-    driftRate = driftedCount / totalInCategory
-    if driftRate >= 0.60:
-      → coordinated drift = systemic signal, not random
-      → create AlgorithmUpdateEvent
-      → severity: minor (<70% rate), moderate (70-85%), major (>85% + score>60)
-      → persist to algorithm_events collection
-      → visible in Analytics → AI Insights tab
+
+The scheduled route performs detection after successful query processing. Refreshing Analytics only reads persisted events; it does not invoke detection.
+
+#### File responsibilities
+
+| File | Responsibility |
+| --- | --- |
+| [`AlgorithmUpdateDetector.ts`](lib/services/algorithm-detector/AlgorithmUpdateDetector.ts) | Normalizes current observations, groups by category, applies the four gates, requests the baseline, builds events, and exposes persistence/read helpers. |
+| [`HistoricalBaselineProvider.ts`](lib/services/algorithm-detector/HistoricalBaselineProvider.ts) | Builds equally weighted historical category-window averages and robust statistics. |
+| [`ConfidenceScorer.ts`](lib/services/algorithm-detector/ConfidenceScorer.ts) | Normalizes available evidence, applies fixed weights without missing-signal redistribution, caps fallback confidence, and selects severity. |
+| [`EvidenceBuilder.ts`](lib/services/algorithm-detector/EvidenceBuilder.ts) | Produces structured gate reasons, movement evidence, baseline details, and explanatory change classification. |
+| [`DescriptionBuilder.ts`](lib/services/algorithm-detector/DescriptionBuilder.ts) | Generates cautious summaries and details for newly detected candidates. |
+| [`EventPersistence.ts`](lib/services/algorithm-detector/EventPersistence.ts) | Serializes schema-v2 events, safely falls back to legacy storage, restores old records, and preserves stored descriptions. |
+| [`constants.ts`](lib/services/algorithm-detector/constants.ts) | Defines detector version, thresholds, category overrides, confidence weights, severity bands, and calibration defaults. |
+| [`types.ts`](lib/services/algorithm-detector/types.ts) | Defines detector inputs, configuration, baseline, evidence, confidence, event, and persistence contracts. |
+| [`AlgorithmUpdateDetector.test.ts`](lib/services/algorithm-detector/__tests__/AlgorithmUpdateDetector.test.ts) | Provides deterministic detector, baseline, confidence, evidence, and compatibility regression coverage. |
+
+#### Detection gates and current normalization
+
+The detector uses four gates: minimum current observation coverage, per-query drift magnitude, coordinated affected-query rate, and historical abnormality. Category-specific overrides remain active. An isolated high-drift query cannot pass the coordination gate by itself.
+
+Current observations are normalized before any gate or evidence calculation:
+
+- Invalid timestamps and non-finite drift scores are ignored.
+- Future points are excluded.
+- Results are deduplicated by `queryId`.
+- The latest valid observation inside the current correlation window is selected.
+- Equal timestamps retain the first valid result row deterministically because replacement requires a strictly newer timestamp.
+- The normalized timeline contains historical points plus the selected current point, preventing evidence from reading a later invalid, future, or unselected current point.
+
+Current metrics are:
+
+```text
+driftRate = affectedQueryCount / observedQueryCount
+
+affectedAverageDrift =
+  sum(drift of affected queries) / affectedQueryCount
+
+currentObservedAverageDrift =
+  sum(drift of all valid currently observed queries) / observedQueryCount
 ```
+
+`affectedAverageDrift` describes the magnitude among affected queries and retains the legacy `avgDriftScore` meaning. Historical comparison deliberately uses `currentObservedAverageDrift` so the current statistic matches the all-query category-window baseline.
+
+#### Historical category windows
+
+Historical buckets have the same duration as `correlationWindowMs` and are anchored immediately before the current window. Their interval semantics are `[start, end)`: the start is included, the end is excluded, and the current window never enters history. The historical lookback starts `historicalWindowDays` before the current window's start, rather than spending one lookback bucket on current data.
+
+Each query contributes at most once to a bucket. If it has multiple valid observations, the latest observation in that bucket wins. A bucket is accepted only when it meets `minBaselineWindowQueries`; accepted windows receive equal weight regardless of raw row count.
+
+```text
+windowAverage =
+  sum(latest valid drift per covered distinct query)
+  / covered distinct-query count
+```
+
+This measures category volatility over time. It replaces the misleading legacy calculation that measured variation across per-query historical means.
+
+#### Robust historical gate
+
+For the accepted historical category-window averages:
+
+```text
+median = median(historical category-window averages)
+
+MAD = median(abs(windowAverage - median))
+
+robustSigma = 1.4826 × MAD
+
+robustDeviation =
+  (currentObservedAverageDrift - median) / robustSigma
+```
+
+When MAD is positive, the gate is inclusive:
+
+```text
+robustDeviation >= baselineDeviationThreshold
+```
+
+When MAD is zero, division is avoided and the inclusive engineering noise floor is used:
+
+```text
+currentObservedAverageDrift >= median + baselineAbsoluteEpsilon
+```
+
+Mean and population standard deviation are retained for display and backward compatibility. They are not silently substituted for robust gating.
+
+#### Baseline availability
+
+The baseline requires enough raw observations, distinct historical queries, historical buckets, covered category windows, and per-window distinct-query coverage. Evidence exposes a safe machine-readable reason:
+
+| Code | Meaning |
+| --- | --- |
+| `available` | All history and coverage requirements passed. |
+| `insufficient_observations` | Valid historical row count is below `minBaselineSamples`. |
+| `insufficient_queries` | Distinct historical query count is below `minBaselineQueries`. |
+| `insufficient_valid_windows` | Too few historical buckets contain any valid observations. |
+| `insufficient_window_coverage` | Too few buckets meet `minBaselineWindowQueries`. |
+| `provider_failure` | Baseline calculation threw; the detector safely used fallback mode. |
+| `provider_disabled` | The configured provider intentionally supplies no historical baseline. |
+
+Provider exception details are logged internally. User-facing evidence receives only a bounded fallback explanation.
+
+#### Confidence and detection modes
+
+Confidence uses separate raw and normalized signals for affected-query rate, current observed drift magnitude, observation strength, and historical abnormality. Effective weights are stored. Temporal concentration remains diagnostic-only because scheduler batching is not independent causal evidence.
+
+Missing historical weight is not redistributed to the remaining signals. When history is unavailable, the detector uses an explicitly unverified `fixed-threshold` fallback and caps confidence at `49` before severity selection. The evidence stores whether the score was capped, the cap, and its reason. Baseline-supported candidates use `baseline-aware` mode and the normal confidence calculation. Confidence is an evidence score, not a statistically calibrated probability.
+
+#### Explanatory change type
+
+Decomposed drift can classify a candidate as `ranking`, `content_or_index`, `mixed`, or `unknown`. Rerank drift represents ranking movement; the larger of content and competitor drift represents content/index movement. A side must dominate by the project-specific ratio `1.5` to receive a directional label. Missing or zero decomposed evidence produces `unknown`. This classification explains evidence; it is not a detection gate and does not prove causation.
+
+#### Persistence and backward compatibility
+
+- `schemaVersion` remains `2`; materially changed detector behaviour is identified by `detectorVersion: "2.1"`.
+- Structured thresholds, evidence, and confidence remain additive JSON payloads, so no destructive Appwrite migration is required.
+- Existing flat fields remain readable, and `avgDriftScore` retains its affected-query-average compatibility meaning.
+- Older schema-v2 events receive safe defaults for absent v2.1 baseline, change-type, and confidence-cap fields.
+- Historical sample counts restore from baseline-window evidence, with a legacy fallback when that evidence is absent.
+- Stored descriptions remain authoritative; old events are not re-described from incomplete evidence.
+- Persistence attempts the structured schema and safely falls back where a deployment still has the legacy collection shape. Do not assume every deployment has dedicated structured v2 attributes.
+
+#### Testing and troubleshooting
+
+The focused suite covers isolated noisy queries, coordinated abnormal movement in stable categories, normal movement in volatile categories, temporal volatility hidden by equal per-query means, inclusive deviation and epsilon boundaries, cold-start fallback and its confidence cap, query deduplication, invalid/future observations, bucket coverage and boundaries, provider failure, change classification, and persistence compatibility.
+
+```bash
+npm test -- --runInBand --verbose lib/services/algorithm-detector/__tests__/AlgorithmUpdateDetector.test.ts
+```
+
+##### No event appears
+
+Check whether the per-query and coordination thresholds passed, whether movement was normal for the historical category, whether enough current and historical query coverage exists, and whether scheduled processing has executed. Suppressed candidates are not persisted. A user may also legitimately have no stored algorithm events.
+
+##### Panel appears empty
+
+`AlgorithmUpdatePanel` reads stored events; it does not run the detector. An empty state can therefore be correct even when the page and API are working.
+
+##### Old event lacks v2.1 evidence
+
+An older event is restored with compatibility defaults and its authoritative stored description. Missing additive v2.1 evidence is not treated as storage corruption.
 
 ### Anomaly detection (WeaviateService.detectContentAnomalies)
 
@@ -459,14 +603,14 @@ const decomposed = DriftDecomposer.decompose({
 Returns: `contentDrift`, `competitorDrift`, `rerankDrift`, `dominantCause`,
 full `breakdown` with URL lists. Shown in `DecomposedDriftChart`.
 
-### AlgorithmUpdateDetector (`lib/services/AlgorithmUpdateDetector.ts`)
+### AlgorithmUpdateDetector (`lib/services/algorithm-detector/AlgorithmUpdateDetector.ts`)
 
-Called in `process-scheduled/route.ts` after alerts:
+Called in `process-scheduled/route.ts` after drift alerts:
 ```typescript
-const events = algorithmUpdateDetector.analyze(driftResults, queryMeta)
+const events = await algorithmUpdateDetector.detect(driftResults, queryMeta, userId)
 await algorithmUpdateDetector.persistEvents(userId, events)
 ```
-Minimum 3 queries per category, 60% drift rate threshold.
+The detector applies current coverage, per-query drift, coordination, and historical-abnormality gates. See [Algorithm Update Detector v2.1](#algorithm-update-detector-v21) for the complete contract.
 
 ### CoverageAndVersioning (`lib/utils/coverage-and-versioning.ts`)
 
