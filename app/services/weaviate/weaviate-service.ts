@@ -15,6 +15,7 @@
 
 import weaviate, { WeaviateClient, ApiKey } from "weaviate-ts-client"
 import type { RankingSnapshot, QueryConfig } from "@/types/type"
+import { getDocumentIdentity } from "@/utils/canonicalize-document-url"
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -49,6 +50,77 @@ type ExaCategory =
   | "linkedin profile" | "financial report"
 
 type RecordType = "search_result" | "query_intent" | "drift_pattern"
+
+export interface SemanticSearchScope {
+  sourceQueryId: string
+  snapshotIds: string[]
+}
+
+interface SearchWhereOperand {
+  path?: string[]
+  operator: "Equal" | "Or"
+  valueText?: string
+  operands?: SearchWhereOperand[]
+}
+
+const SEARCH_CANDIDATE_MULTIPLIER = 10
+const MIN_SEARCH_CANDIDATES = 40
+const MAX_SEARCH_CANDIDATES = 1000
+
+export function buildSearchResultWhere(
+  userId: string,
+  category?: ExaCategory,
+  scope?: SemanticSearchScope,
+) {
+  if (
+    scope &&
+    (!scope.sourceQueryId.trim() ||
+      !scope.snapshotIds.length ||
+      scope.snapshotIds.some(snapshotId => !snapshotId.trim()))
+  ) {
+    throw new TypeError("Semantic search scope requires a source query and snapshot IDs")
+  }
+  const operands: SearchWhereOperand[] = [
+    { path: ["recordType"], operator: "Equal", valueText: "search_result" },
+    { path: ["userId"], operator: "Equal", valueText: userId },
+  ]
+  if (category) operands.push({ path: ["category"], operator: "Equal", valueText: category })
+  if (scope) {
+    operands.push({ path: ["queryId"], operator: "Equal", valueText: scope.sourceQueryId })
+    operands.push(scope.snapshotIds.length === 1
+      ? { path: ["snapshotId"], operator: "Equal", valueText: scope.snapshotIds[0] }
+      : {
+          operator: "Or",
+          operands: scope.snapshotIds.map(snapshotId => ({
+            path: ["snapshotId"],
+            operator: "Equal",
+            valueText: snapshotId,
+          })),
+        })
+  }
+  return { operator: "And" as const, operands }
+}
+
+export function takeUniqueCanonicalSearchHits<T extends { url: string }>(
+  ranked: T[],
+  limit: number,
+): T[] {
+  const seen = new Set<string>()
+  const unique: T[] = []
+  for (const hit of ranked) {
+    let key: string
+    try {
+      key = getDocumentIdentity(hit.url).documentKey
+    } catch {
+      key = `raw:${hit.url.trim()}`
+    }
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(hit)
+    if (unique.length === limit) break
+  }
+  return unique
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -972,21 +1044,21 @@ export class WeaviateService {
     userId:    string,
     limit      = 20,
     certainty  = 0.7,
-    category?: ExaCategory
+    category?: ExaCategory,
+    scope?: SemanticSearchScope,
   ): Promise<SearchHit[]> {
     if (!this.isConnected) await this.initialize()
 
     const qVec = await this.getEmbedding(query)
     const qBQ  = this.quant.quantizeBQ(qVec)
 
-    // ✅ Always filter recordType="search_result" — unified collection
-    const operands: any[] = [
-      { path: ["recordType"], operator: "Equal", valueText: "search_result" },
-      { path: ["userId"],     operator: "Equal", valueText: userId },
-    ]
-    if (category) operands.push({ path: ["category"], operator: "Equal", valueText: category })
-
-    const where = { operator: "And" as const, operands }
+    // Historical storage remains broad. Benchmark callers add an explicit
+    // source-query + frozen snapshot scope without changing analytics queries.
+    const where = buildSearchResultWhere(userId, category, scope)
+    const candidateLimit = Math.min(
+      MAX_SEARCH_CANDIDATES,
+      Math.max(MIN_SEARCH_CANDIDATES, limit * SEARCH_CANDIDATE_MULTIPLIER),
+    )
 
     const result = await this.withRetry(
       () => this._client.graphql
@@ -995,7 +1067,7 @@ export class WeaviateService {
         .withFields(`url title snippet domain position score queryId timestamp contentHash category binaryCode pqCode _additional { certainty distance }`)
         .withNearVector({ vector: qVec, certainty })
         .withWhere(where)
-        .withLimit(limit * 2)
+        .withLimit(candidateLimit)
         .do(),
       "semantic search"
     )
@@ -1015,7 +1087,7 @@ export class WeaviateService {
     })
 
     ranked.sort((a, b) => b.bqSim - a.bqSim)
-    ranked = ranked.slice(0, Math.max(limit * 2, 40))
+    ranked = ranked.slice(0, candidateLimit)
 
     if (this.quant.isPQReady()) {
       const withAdc = ranked.map(({ it, bqSim }) => {
@@ -1042,7 +1114,7 @@ export class WeaviateService {
       }
     }
 
-    return ranked.slice(0, limit).map(({ it }) => ({
+    const hits = ranked.map(({ it }) => ({
       id:               `${it.queryId}_${it.position}`,
       url:              it.url,
       title:            it.title,
@@ -1055,6 +1127,10 @@ export class WeaviateService {
       similarity:       it._additional?.certainty ?? 0,
       semanticDistance: it._additional?.distance  ?? 0,
     }))
+
+    // Deduplicate after all project-specific BQ/PQ ranking, but before the
+    // requested limit, so lower-ranked unique documents fill duplicate slots.
+    return takeUniqueCanonicalSearchHits(hits, limit)
   }
 
   async findSimilarQueries(queryId: string, limit = 5): Promise<SimilarQuery[]> {

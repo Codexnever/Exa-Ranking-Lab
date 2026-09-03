@@ -20,7 +20,7 @@ async function getAnalyticsService(): Promise<WeaviateAnalyticsService> {
 }
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
-// ⚠️  In-process Map — does not persist across serverless instances.
+//   In-process Map — does not persist across serverless instances.
 //    For production cross-instance rate limiting use Redis/Upstash.
 
 const MAX_REQUESTS   = 100
@@ -35,7 +35,7 @@ function checkRateLimit(key: string): boolean {
   const now  = Date.now()
   const slot = rateLimitMap.get(key)
 
-  // ✅ Prune expired entry inline — prevents unbounded memory growth
+  //  Prune expired entry inline — prevents unbounded memory growth
   if (!slot || now > slot.resetTime) {
     rateLimitMap.set(key, { count: 1, resetTime: now + WINDOW_MS })
     return true
@@ -46,7 +46,7 @@ function checkRateLimit(key: string): boolean {
 }
 
 // ─── CORS origin ──────────────────────────────────────────────────────────────
-// ✅ Restrict to your actual origin — not wildcard
+//  Restrict to your actual origin — not wildcard
 const ALLOWED_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
 
 // ─── POST /api/weaviate ───────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now()   // ✅ Capture before any async work
 
   try {
-    // ✅ Auth check — userId must come from the session, not the request body
+    //  Auth check — userId must come from the session, not the request body
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
 
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ✅ Proper JSON parse error handling
+    //  Proper JSON parse error handling
     let body: unknown
     try {
       body = await request.json()
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
 
     const b = body as Record<string, unknown>
 
-    // ✅ timeRangeMs validated — type check, min, and max
+    //  timeRangeMs validated — type check, min, and max
     let timeRangeMs = MAX_TIME_RANGE   // default: 1 year
     if (b.timeRangeMs !== undefined) {
       if (typeof b.timeRangeMs !== "number" || !isFinite(b.timeRangeMs)) {
@@ -96,26 +96,26 @@ export async function POST(request: NextRequest) {
       timeRangeMs = b.timeRangeMs
     }
 
-    // ✅ queries validated as array — not cast blindly
+    //  queries validated as array — not cast blindly
     const queries: QueryConfig[] = Array.isArray(b.queries) ? b.queries as QueryConfig[] : []
 
     console.log(`[Weaviate] Analytics for user: ${user.$id}, timeRange: ${timeRangeMs}ms`)
 
-    // ✅ Singleton — no new instance per request
+    //  Singleton — no new instance per request
     const analyticsService = await getAnalyticsService()
 
-    // ✅ userId always from auth session — never from request body
+    //  userId always from auth session — never from request body
     const analytics = await analyticsService.getAnalytics(user.$id, timeRangeMs, queries)
 
     return NextResponse.json({
       success:          true,
       data:             analytics,
       timestamp:        new Date().toISOString(),
-      processingTimeMs: Date.now() - startTime,   // ✅ correct calculation
+      processingTimeMs: Date.now() - startTime,   //  correct calculation
     })
   } catch (err) {
     console.error("[Weaviate] POST failed:", err)
-    // ✅ No stack trace or internal message exposed to client
+    // ✅No stack trace or internal message exposed to client
     return NextResponse.json(
       { success: false, error: "Failed to retrieve analytics" },
       { status: 500 }
@@ -153,7 +153,7 @@ export async function GET(request: NextRequest) {
 // ─── OPTIONS (preflight) ──────────────────────────────────────────────────────
 
 export async function OPTIONS() {
-  // ✅ Restricted to known origin — not wildcard (*)
+  //  Restricted to known origin — not wildcard (*)
   return new NextResponse(null, {
     status: 204,
     headers: {

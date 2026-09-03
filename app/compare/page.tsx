@@ -14,27 +14,27 @@ import { RefreshCw } from "lucide-react"
 
 export default function CompareRankings() {
   const { user } = useAuth()
-  
+
   // Use direct store selectors for better performance
   const queries = useQueriesStore(state => state.queries)
   const fetchQueries = useQueriesStore(state => state.fetchQueries)
   const queriesLoading = useQueriesStore(state => state.isLoading)
-  
-  // ✅ Enhanced store selectors with validation
+
+  //  Enhanced store selectors with validation
   const allSnapshots = useSnapshotsStore(state => state.allSnapshots)
   const fetchAllSnapshots = useSnapshotsStore(state => state.fetchAllSnapshots)
   const forceRefresh = useSnapshotsStore(state => state.forceRefresh)
   const checkAndRefreshIfEmpty = useSnapshotsStore(state => state.checkAndRefreshIfEmpty)
   const isLoadingAnalytics = useSnapshotsStore(state => state.isLoadingAnalytics)
   const isHydrated = useSnapshotsStore(state => state.isHydrated)
-  
+
   const [selectedQuery, setSelectedQuery] = useState("")
   const [snapshot1, setSnapshot1] = useState("")
   const [snapshot2, setSnapshot2] = useState("")
   const [isInitialized, setIsInitialized] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
 
-  // ✅ Enhanced data initialization with validation
+  //  Enhanced data initialization with validation
   useEffect(() => {
     if (user?.$id && !isInitialized && isHydrated) {
       const initializeData = async () => {
@@ -43,22 +43,22 @@ export default function CompareRankings() {
             currentSnapshots: allSnapshots.length,
             isHydrated
           })
-          
-          // ✅ Check if data is empty and refresh if needed
+
+          //  Check if data is empty and refresh if needed
           await checkAndRefreshIfEmpty(user.$id)
-          
+
           // Fetch both queries and complete snapshots for comparison
           await Promise.all([
             fetchQueries(user.$id),
             allSnapshots.length === 0 ? fetchAllSnapshots(user.$id) : Promise.resolve()
           ])
-          
+
           setIsInitialized(true)
           console.log('[Compare] Data initialized successfully')
         } catch (error) {
           console.error('[Compare] Failed to initialize data:', error)
-          
-          // ✅ Retry logic with exponential backoff
+
+          //  Retry logic with exponential backoff
           if (retryCount < 3) {
             const delay = Math.pow(2, retryCount) * 1000 // 1s, 2s, 4s
             setTimeout(() => {
@@ -73,10 +73,10 @@ export default function CompareRankings() {
     }
   }, [user?.$id, isInitialized, isHydrated, fetchQueries, fetchAllSnapshots, checkAndRefreshIfEmpty, allSnapshots.length, retryCount])
 
-  // ✅ Manual refresh function
+  //  Manual refresh function
   const handleManualRefresh = async () => {
     if (!user?.$id) return
-    
+
     try {
       setIsInitialized(false)
       await forceRefresh(user.$id)
@@ -87,24 +87,24 @@ export default function CompareRankings() {
     }
   }
 
-  // ✅ Use complete dataset for comparisons (more accurate)
+  //  Use complete dataset for comparisons (more accurate)
   const { filteredSnapshots, comparison } = useCompareLogic(
     allSnapshots,
-    selectedQuery, 
-    snapshot1, 
+    selectedQuery,
+    snapshot1,
     snapshot2
   )
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
-      day: "numeric", 
+      day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     })
   }
 
-  // ✅ Enhanced loading state
+  //  Enhanced loading state
   const isLoading = queriesLoading || isLoadingAnalytics || !isInitialized || !isHydrated
 
   if (isLoading) {
@@ -116,7 +116,7 @@ export default function CompareRankings() {
             <p className="text-gray-600 mt-1">Analyze ranking changes between different snapshots</p>
           </div>
         </div>
-        
+
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -135,7 +135,7 @@ export default function CompareRankings() {
     )
   }
 
-  // ✅ Authentication guard
+  //  Authentication guard
   if (!user) {
     return (
       <div className="space-y-6">
@@ -145,7 +145,7 @@ export default function CompareRankings() {
             <p className="text-gray-600 mt-1">Analyze ranking changes between different snapshots</p>
           </div>
         </div>
-        
+
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <h3 className="text-lg font-medium text-gray-900 mb-2">Authentication Required</h3>
@@ -156,7 +156,7 @@ export default function CompareRankings() {
     )
   }
 
-  // ✅ Empty state with refresh option
+  //  Empty state with refresh option
   if (allSnapshots.length === 0 && isInitialized) {
     return (
       <div className="space-y-6">
@@ -170,7 +170,7 @@ export default function CompareRankings() {
             Refresh Data
           </Button>
         </div>
-        
+
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <h3 className="text-lg font-medium text-gray-900 mb-2">No Snapshots Available</h3>
@@ -200,7 +200,7 @@ export default function CompareRankings() {
           Refresh
         </Button>
       </div>
-      
+
       <CompareSetup
         queries={queries}
         selectedQuery={selectedQuery}
@@ -212,14 +212,14 @@ export default function CompareRankings() {
         filteredSnapshots={filteredSnapshots}
         formatDate={formatDate}
       />
-      
+
       {comparison.length > 0 && (
         <>
           <CompareSummary comparison={comparison} />
           <CompareTable comparison={comparison} />
         </>
       )}
-      
+
       {comparison.length === 0 && snapshot1 && snapshot2 && (
         <div className="text-center py-12">
           <div className="text-center">
@@ -236,7 +236,7 @@ export default function CompareRankings() {
           </div>
         </div>
       )}
-      
+
       {!snapshot1 || !snapshot2 ? (
         <div className="text-center py-12">
           <div className="text-center">
@@ -255,11 +255,11 @@ export default function CompareRankings() {
           </div>
         </div>
       ) : null}
-      
-      {/* ✅ Enhanced debug info */}
+
+      {/*  Enhanced debug info */}
       {process.env.NODE_ENV === 'development' && (
         <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded">
-          Debug: {allSnapshots.length} total snapshots, {filteredSnapshots.length} filtered snapshots, 
+          Debug: {allSnapshots.length} total snapshots, {filteredSnapshots.length} filtered snapshots,
           Hydrated: {isHydrated ? 'Yes' : 'No'}, Retries: {retryCount}
         </div>
       )}

@@ -1,8 +1,5 @@
 // app/api/weaviate/validate-prediction/route.ts
 //
-// NOTE: Route folder was "validate-predication" — renamed to "validate-prediction".
-//       Update the folder name on disk to match.
-//
 // Computes real prediction validation metrics by comparing analyticsLogic's
 // linear-regression predictedPosition against actual observed positions
 // from the most recent snapshot per query.
@@ -80,13 +77,13 @@ function calculatePrecisionRecall(
 
 export async function POST(request: NextRequest) {
   try {
-    // ✅ Auth required — userId must come from session
+    //  Auth required — userId must come from session
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    // ✅ No userId from body — always use authenticated user's ID
+    //  No userId from body — always use authenticated user's ID
     //    Body is optional; we accept timeRangeMs as a configurable window
     let timeRangeMs = 90 * 24 * 60 * 60 * 1000  // default 90 days
 
@@ -207,7 +204,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (err) {
     console.error("[ValidatePrediction] Failed:", err)
-    // ✅ No internal error details exposed to client
+    //  No internal error details exposed to client
     return NextResponse.json(
       { success: false, error: "Failed to validate predictions" },
       { status: 500 }

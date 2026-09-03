@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[SyncQueries] Starting sync for user: ${user.$id}, max: ${maxQueries}`)
 
-    // ✅ Use QueryService (with proper field mapping + category reverse-map)
+    //  Use QueryService (with proper field mapping + category reverse-map)
     //    instead of databases.listDocuments with raw Appwrite field names
     const allQueries = await databaseService.queryService.getQueries(user.$id)
     const queries    = allQueries.slice(0, maxQueries)
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[SyncQueries] Syncing ${queries.length} queries`)
 
-    // ✅ Initialise Weaviate once before the batch loop
+    //  Initialise Weaviate once before the batch loop
     const weaviate = await getWeaviateService()
     await weaviate.initialize()
 
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
 
       const results = await Promise.allSettled(
         batch.map(async query => {
-          // ✅ Map QueryConfig → SimilarQuery (correct field names)
+          //  Map QueryConfig → SimilarQuery (correct field names)
           const weaviateQuery: SimilarQuery = {
             id:        query.id,
             name:      query.name,
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
             similarity: 0,
           }
 
-          // ✅ Actual sync — not a TODO no-op
+          //  Actual sync — not a TODO no-op
           await weaviate.syncQuery(weaviateQuery)
           console.log(`[SyncQueries] Synced: ${query.id} (${query.name})`)
         })
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
         } else {
           errorCount++
           errorIds.push(batch[idx].id)
-          // ✅ Log full error server-side, never send to client
+          //  Log full error server-side, never send to client
           console.error(`[SyncQueries] Failed ${batch[idx].id}:`, r.reason)
         }
       })
@@ -123,13 +123,13 @@ export async function POST(request: NextRequest) {
       skipped:      0,
       errors:       errorCount,
       totalQueries: queries.length,
-      // ✅ No error messages in response — just IDs so client can retry
+      //  No error messages in response — just IDs so client can retry
       failedIds:    errorIds.length > 0 ? errorIds : undefined,
       timestamp:    new Date().toISOString(),
     })
   } catch (err) {
     console.error("[SyncQueries] Unexpected error:", err)
-    // ✅ No internal error details exposed to client
+    //  No internal error details exposed to client
     return NextResponse.json(
       { success: false, error: "Sync operation failed" },
       { status: 500 }
@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
 // ─── OPTIONS ──────────────────────────────────────────────────────────────────
 
 export async function OPTIONS() {
-  // ✅ Restricted origin — not wildcard
+  //  Restricted origin — not wildcard
   return new NextResponse(null, {
     status: 204,
     headers: {

@@ -238,7 +238,6 @@ const QUERY_FREQUENCIES = [
             </FormItem>
           )}
         />
-console.log("Schedule enabled:", form.watch("schedule.enabled"))
         {form.watch("schedule.enabled") && (
           <FormField
             control={form.control}

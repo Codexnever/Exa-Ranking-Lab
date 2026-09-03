@@ -206,9 +206,9 @@ export class EmbeddingService {
 
   private async getFromAppwriteCache(contentHash: string): Promise<number[] | null> {
     try {
-      const { databases, Query } = await import("@/app/server/appwrite/appwrite")
+      const { databases, DATABASE_ID, Query } = await import("@/app/server/appwrite/appwrite-server")
       const result = await databases.listDocuments(
-        process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!,
+        DATABASE_ID,
         EMBED_CACHE_COLLECTION,
         [Query.equal("contentHash", contentHash), Query.limit(1)]
       )
@@ -226,9 +226,9 @@ export class EmbeddingService {
     vector:      number[]
   ): Promise<void> {
     try {
-      const { databases } = await import("@/app/server/appwrite/appwrite")
+      const { databases, DATABASE_ID } = await import("@/app/server/appwrite/appwrite-server")
       await databases.createDocument(
-        process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!,
+        DATABASE_ID,
         EMBED_CACHE_COLLECTION,
         this.createCacheDocumentId(),
         {
@@ -246,7 +246,6 @@ export class EmbeddingService {
   }
 
   private createCacheDocumentId(): string {
-    // Keep this browser-facing service independent of SDK ID helper exports.
     // Appwrite accepts IDs up to 36 characters; a UUID without separators is
     // 32 lowercase hexadecimal characters and remains cryptographically unique.
     return globalThis.crypto.randomUUID().replaceAll("-", "")

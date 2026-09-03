@@ -24,7 +24,7 @@ const MAX_LIMIT     = 20
 
 export async function GET(request: NextRequest) {
   try {
-    // ✅ Auth required
+    //  Auth required
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
@@ -35,20 +35,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "'queryId' is required" }, { status: 400 })
     }
 
-    // ✅ Validate and clamp limit — NaN-safe
+    //  Validate and clamp limit — NaN-safe
     const rawLimit = Number(searchParams.get("limit"))
     const limit    = isNaN(rawLimit) || rawLimit < 1
       ? DEFAULT_LIMIT
       : Math.min(rawLimit, MAX_LIMIT)
 
-    // ✅ Verify ownership — user can only find similar queries for their own queries
+    //  Verify ownership — user can only find similar queries for their own queries
     const query = await databaseService.queryService.getQuery(queryId)
     if (!query || query.userId !== user.$id) {
       // 404 — don't reveal whether the query exists at all
       return NextResponse.json({ error: "Query not found" }, { status: 404 })
     }
 
-    // ✅ Singleton — no re-init on every request
+    //  Singleton — no re-init on every request
     const weaviate = await getWeaviateService()
     await weaviate.initialize()
 
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
     })
   } catch (err) {
     console.error("[SimilarQueries] Failed:", err)
-    // ✅ No internal error details exposed to client
+    //  No internal error details exposed to client
     return NextResponse.json(
       { success: false, error: "Failed to fetch similar queries" },
       { status: 500 }

@@ -3,10 +3,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { DriftAnalysisResult } from "@/types/type";
 
-// ✅ Enhanced interface to support new drift analyzer metrics
+//  Enhanced interface to support new drift analyzer metrics
 interface EnhancedDriftAnalysisResult extends DriftAnalysisResult {
   totalContentChanges: number;
-  averageCacheHitRate: number;  
+  averageCacheHitRate: number;
   totalProcessingTime: number;
 }
 
@@ -16,7 +16,7 @@ interface DriftStoreState {
   isLoading: boolean;
   error: string | null;
   cacheExpiry: number;
-  // ✅ New performance metrics
+  //  New performance metrics
   performanceMetrics: {
     totalProcessingTime: number;
     averageCacheHitRate: number;
@@ -30,7 +30,7 @@ interface DriftStoreActions {
   clearDriftResults: () => void;
   fetchDriftResults: (userId?: string, forceRefresh?: boolean) => Promise<void>;
   isCacheValid: () => boolean;
-  // ✅ New performance tracking
+  //  New performance tracking
   updatePerformanceMetrics: (results: EnhancedDriftAnalysisResult[]) => void;
   getPerformanceMetrics: () => any;
 }
@@ -55,23 +55,23 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
   persist(
     (set, get) => ({
       ...initialState,
-      
+
       setDriftResults: (results) => {
         const safeResults = Array.isArray(results) ? results : [];
-        
+
         // ✅ Update performance metrics when setting results
         get().updatePerformanceMetrics(safeResults);
-        
-        set({ 
-          driftResults: safeResults, 
+
+        set({
+          driftResults: safeResults,
           lastUpdated: Date.now(),
-          error: null 
+          error: null
         });
       },
-      
-      clearDriftResults: () => 
-        set({ 
-          driftResults: [], 
+
+      clearDriftResults: () =>
+        set({
+          driftResults: [],
           lastUpdated: null,
           error: null,
           performanceMetrics: {
@@ -81,14 +81,14 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
             lastCalculated: null,
           }
         }),
-      
+
       isCacheValid: () => {
         const { lastUpdated, cacheExpiry } = get();
         if (!lastUpdated) return false;
         return Date.now() - lastUpdated < cacheExpiry;
       },
 
-      // ✅ Enhanced performance metrics calculation
+      //  Enhanced performance metrics calculation
       updatePerformanceMetrics: (results) => {
         if (!results.length) return;
 
@@ -109,31 +109,31 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
       getPerformanceMetrics: () => {
         return get().performanceMetrics;
       },
-      
+
       fetchDriftResults: async (userId?: string, forceRefresh = false) => {
         const { isCacheValid, driftResults } = get();
-        
+
         if (!forceRefresh && isCacheValid() && driftResults.length > 0) {
           console.log('Using cached drift results');
           return;
         }
-        
+
         set({ isLoading: true, error: null });
-        
+
         try {
           const url = userId ? `/api/drift?userId=${userId}` : "/api/drift";
           const response = await fetch(url, {
             credentials: 'include',
           });
-          
+
           if (!response.ok) {
             throw new Error(`Failed to fetch drift results: ${response.statusText}`);
           }
-          
+
           const data = await response.json();
-          
+
           let driftResults: EnhancedDriftAnalysisResult[];
-          
+
           if (Array.isArray(data)) {
             driftResults = data;
           } else if (data && Array.isArray(data.results)) {
@@ -143,26 +143,26 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
           } else {
             driftResults = [];
           }
-          
-          set({ 
-            driftResults: driftResults, 
-            lastUpdated: Date.now(), 
+
+          set({
+            driftResults: driftResults,
+            lastUpdated: Date.now(),
             isLoading: false,
             error: null
           });
-          
+
           // ✅ Update performance metrics
           get().updatePerformanceMetrics(driftResults);
-          
+
           console.log(`Fetched fresh drift results: ${driftResults.length} items`);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to fetch drift";
           console.error('Drift fetch error:', error);
-          
-          set({ 
-            driftResults: [], 
-            error: message, 
-            isLoading: false 
+
+          set({
+            driftResults: [],
+            error: message,
+            isLoading: false
           });
         }
       },
@@ -175,7 +175,7 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
         cacheExpiry: state.cacheExpiry,
         performanceMetrics: state.performanceMetrics, // ✅ Persist performance metrics
       }),
-      
+
       migrate: (persistedState: any, version: number) => {
         if (persistedState && !Array.isArray(persistedState.driftResults)) {
           persistedState.driftResults = [];
@@ -191,7 +191,7 @@ export const useDriftStore = create<DriftStoreState & DriftStoreActions>()(
         }
         return persistedState;
       },
-      
+
       version: 2, // ✅ Updated version for new fields
     }
   )

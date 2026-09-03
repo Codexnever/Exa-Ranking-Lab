@@ -10,7 +10,7 @@ async function getDriftHandler(request: NextRequest, context: SecurityContext) {
     const searchParams = request.nextUrl.searchParams;
     const queryid = searchParams.get("queryid") || undefined;
     const forceRefresh = searchParams.get("refresh") === "true";
-    const userId = context.user.$id; 
+    const userId = context.user.$id;
 
     console.log(`[Drift API] Starting analysis for user: ${userId}, forceRefresh: ${forceRefresh}`);
     const startTime = performance.now();
@@ -36,7 +36,7 @@ async function getDriftHandler(request: NextRequest, context: SecurityContext) {
       });
     }
 
-    // ✅ Enhanced drift analysis with performance metrics
+    //  Enhanced drift analysis with performance metrics
     const driftResults = await analyzeDriftForQueries(
       queries.map((q) => ({ id: q.id, name: q.name })),
       snapshots,
@@ -62,18 +62,18 @@ async function getDriftHandler(request: NextRequest, context: SecurityContext) {
   } catch (error) {
     console.error("[Drift API] Failed to analyze drift:", error);
     return NextResponse.json(
-      { 
+      {
         error: "Failed to analyze drift",
-        details: process.env.NODE_ENV === 'development' ? 
-          (error instanceof Error ? error.message : "Unknown error") : 
+        details: process.env.NODE_ENV === 'development' ?
+          (error instanceof Error ? error.message : "Unknown error") :
           undefined
-      }, 
+      },
       { status: 500 }
     );
   }
 }
 
-// ✅ Apply security middleware with appropriate rate limiting
+//  Apply security middleware with appropriate rate limiting
 export const GET = withEnhancedSecurity(getDriftHandler, {
   rateLimit: {
     windowMs: 60 * 1000, // 1 minute window

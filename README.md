@@ -135,6 +135,38 @@ npm run seed:evaluation-demo -- --write /tmp/exa-ranking-lab-demo.json
 
 Open `/evaluation/<frozen-dataset-id>/strategies`. Register provider-neutral strategy configurations, import immutable execution outputs through the API, and compare the same query cohort under Metric Policy v1. Tables keep ranking quality, compatible latency, hard negatives, and optional stage evidence separate. “Highest nDCG@10” is not a universal-best claim.
 
+## Weaviate storage and benchmark retrieval
+
+The optional Weaviate integration uses one unified `ExaRankingData` collection because the configured service tier supports one collection. A `recordType` discriminator separates `search_result`, `query_intent`, and `drift_pattern` objects. Search-result objects are intentionally historical: every synchronized ranking snapshot remains available, and long result text may produce multiple chunk records for the same source document.
+
+Historical analytics and benchmark retrieval use that storage differently:
+
+- **Historical analytics** filters `search_result` records by authenticated owner and time range, groups them into snapshots, and retains multiple snapshots for semantic stability, ranking volatility, anomaly detection, semantic clustering, content evolution, discovery trends, and snapshot export. Historical objects are not globally deduplicated or deleted.
+- **Strategy Benchmark retrieval** uses `GET /api/evaluation/datasets/<datasetVersionId>/queries/<evaluationQueryId>/weaviate-search?limit=10`. The authenticated server requires a frozen, owned dataset; resolves the evaluation query's immutable `sourceQueryId`; and derives the controlled corpus from the union of `sourceSnapshotIds` preserved by its accepted judgments. A frozen query currently has no single snapshot pointer, so missing snapshot provenance is rejected instead of falling back to the owner's full history.
+
+The benchmark retrieval flow is:
+
+```text
+Frozen dataset and evaluation query
+→ server-derived source query and frozen source-snapshot corpus
+→ Gemini query embedding
+→ Weaviate nearVector candidates
+→ Binary Quantization similarity ranking
+→ optional Product Quantization ADC reranking
+→ canonical document deduplication
+→ top K unique URLs
+→ explicit Strategy Execution import
+→ server-side Metric Policy evaluation
+```
+
+Candidate retrieval is bounded but intentionally fetches more than `K` before deduplication. When historical snapshots, repeated synchronization, or content chunks represent the same canonical document, only its highest-ranked occurrence is returned and later unique candidates fill the duplicate slots. The underlying historical records remain unchanged. Canonical identity uses evaluation canonicalization policy v1, including HTTPS/host normalization, fragment and tracking-parameter removal, and trailing-slash normalization.
+
+The optional PQ pass uses the project-specific score `0.35 × BQ similarity + 0.65 × normalized ADC score`. This is an Exa Ranking Lab strategy implementation detail, not Weaviate's default dense-ranking formula. Deduplication happens after this ranking and before the final limit.
+
+Stored source `position` is historical metadata from the original ranking. It is not Strategy Execution rank. When retrieved URLs are explicitly imported, the Strategy Execution service derives contiguous rank from returned array order and independently derives canonical URL and document key. Retrieval does not silently create an execution.
+
+This corpus is reproducible relative to the immutable source snapshots that supplied frozen accepted judgment evidence. It is not an exhaustive web corpus, and Benchmark Recall remains relative to known accepted relevant benchmark documents.
+
 ## Algorithm Update Detector v2.1
 
 Detector v2.1 identifies coordinated ranking-change candidates whose movement is unusual compared with the category's historical volatility. It observes external ranking behaviour; it cannot prove that Exa or another provider deployed an internal algorithm update. High drift alone is insufficient: enough related queries must move together, and a mature historical baseline must show that the category-wide movement is unusual.

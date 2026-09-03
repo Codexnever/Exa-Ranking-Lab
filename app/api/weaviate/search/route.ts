@@ -26,7 +26,7 @@ const MAX_THRESHOLD     = 1.0
 
 export async function GET(request: NextRequest) {
   try {
-    // ✅ Auth required — userId always from session, never query string
+    //  Auth required — userId always from session, never query string
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
@@ -40,13 +40,13 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // ✅ limit — NaN-safe, clamped
+    //  limit — NaN-safe, clamped
     const rawLimit = Number(searchParams.get("limit"))
     const limit    = isNaN(rawLimit) || rawLimit < 1
       ? DEFAULT_LIMIT
       : Math.min(rawLimit, MAX_LIMIT)
 
-    // ✅ threshold — NaN-safe, clamped to [0, 1]
+    //  threshold — NaN-safe, clamped to [0, 1]
     const rawThreshold = Number(searchParams.get("threshold"))
     const threshold    = isNaN(rawThreshold)
       ? DEFAULT_THRESHOLD
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
       `[WeaviateSearch] user=${user.$id}, q="${query}", limit=${limit}, threshold=${threshold}`
     )
 
-    // ✅ Singleton — userId always from auth session
+    //  Singleton — userId always from auth session
     const weaviate = await getWeaviateService()
     await weaviate.initialize()
 
@@ -68,11 +68,11 @@ export async function GET(request: NextRequest) {
       query,
       count:     results.length,
       timestamp: new Date().toISOString(),
-      // ✅ userId not echoed back — no need to expose it in the response
+      //  userId not echoed back — no need to expose it in the response
     })
   } catch (err) {
     console.error("[WeaviateSearch] Failed:", err)
-    // ✅ No internal error details exposed to client
+    //  No internal error details exposed to client
     return NextResponse.json(
       { success: false, error: "Failed to perform semantic search" },
       { status: 500 }

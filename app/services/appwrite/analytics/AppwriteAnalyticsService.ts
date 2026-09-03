@@ -1,6 +1,7 @@
 // app/services/AppwriteAnalyticsService.ts
+
 import { AnalyticsService } from "../../../logic/analytics-service"
-import { getTimeRangeString } from "@/utils/timeRangeString"  // ✅ single source of truth
+
 import type {
   AnalyticsData,
   QueryConfig,
@@ -9,28 +10,48 @@ import type {
   HourlyStats,
 } from "@/types/type"
 
-// ─── Module-level normalizers ─────────────────────────────────────────────────
-
-function fixHourlyStats(arr: any[]): HourlyStats[] {
-  return (arr ?? []).map((h: any) => ({
-    ...h,
-    // ✅ FIXED: was h.confidenceInterval (whole array) instead of h.confidenceInterval[1]
+/**
+ * Normalizes hourly analytics data so confidence intervals always use
+ * a consistent two-number tuple.
+ */
+function fixHourlyStats(
+  values: any[],
+): HourlyStats[] {
+  return (values ?? []).map((item: any) => ({
+    ...item,
     confidenceInterval:
-      Array.isArray(h.confidenceInterval) && h.confidenceInterval.length === 2
-        ? ([Number(h.confidenceInterval[0]), Number(h.confidenceInterval[1])] as [number, number])
+      Array.isArray(item.confidenceInterval) &&
+      item.confidenceInterval.length === 2
+        ? ([
+            Number(item.confidenceInterval[0]),
+            Number(item.confidenceInterval[1]),
+          ] as [number, number])
         : ([0, 0] as [number, number]),
   }))
 }
 
-function fixTopPerformingQueries(arr: any[]): any[] {
-  const valid = new Set(["up", "down", "stable"])
-  return (arr ?? []).map(item => ({
+/**
+ * Normalizes query trend values before exposing them to analytics consumers.
+ *
+ * Unknown trend values fall back to "stable" so downstream components can
+ * rely on a predictable set of states.
+ */
+function fixTopPerformingQueries(
+  values: any[],
+): any[] {
+  const validTrends = new Set([
+    "up",
+    "down",
+    "stable",
+  ])
+
+  return (values ?? []).map((item) => ({
     ...item,
-    trend: valid.has(item.trend) ? item.trend : "stable",
+    trend: validTrends.has(item.trend)
+      ? item.trend
+      : "stable",
   }))
 }
-
-// ─── Service ──────────────────────────────────────────────────────────────────
 
 export class AppwriteAnalyticsService extends AnalyticsService {
   constructor(isLocal = false) {
@@ -38,29 +59,42 @@ export class AppwriteAnalyticsService extends AnalyticsService {
   }
 
   /**
-   * Fetch + calculate analytics for a user.
+   * Fetches and calculates analytics for an Appwrite-backed user.
    *
-   * Flow:
-   *   1. super.getAnalytics() fetches snapshots from Appwrite and runs
-   *      calculateEnhancedAnalyticsFromSnapshots once internally.
-   *   2. We take the result directly — no second analyticsCalculations() call.
-   *   3. We layer on Appwrite-specific metadata (response times, freshness, etc.)
-   *      that the base class calculation already computed but we want to
-   *      surface explicitly.
+   * The base service performs snapshot retrieval and the full analytics
+   * calculation. This layer only normalizes response shapes and applies
+   * Appwrite-specific metadata.
    */
   async getAnalytics(
-    userId?:     string,
+    userId?: string,
     timeRangeMs?: number,
-    queries:     QueryConfig[] = []
+    queries: QueryConfig[] = [],
   ): Promise<EnhancedAnalyticsData> {
     try {
-      // ✅ Single calculation — base class runs analyticsCalculations() internally
-      const result = await super.getAnalytics(userId, timeRangeMs, queries)
+      const result = await super.getAnalytics(
+        userId,
+        timeRangeMs,
+        queries,
+      )
 
-      // Normalise tuple types (base already does this, but belt-and-suspenders)
-      const successRateByHour    = fixHourlyStats(result.successRateByHour)
-      const performanceData      = fixHourlyStats(result.performanceData)
-      const topPerformingQueries = fixTopPerformingQueries(result.topPerformingQueries)
+      /*
+       * Normalize response fields again at the Appwrite boundary so callers
+       * receive stable tuple and trend types even if upstream data changes.
+       */
+      const successRateByHour =
+        fixHourlyStats(
+          result.successRateByHour,
+        )
+
+      const performanceData =
+        fixHourlyStats(
+          result.performanceData,
+        )
+
+      const topPerformingQueries =
+        fixTopPerformingQueries(
+          result.topPerformingQueries,
+        )
 
       return {
         ...result,
@@ -68,41 +102,43 @@ export class AppwriteAnalyticsService extends AnalyticsService {
         performanceData,
         topPerformingQueries,
         isAppwriteSource: true,
-        dataSourceType:   "appwrite",
-        calculatedAt:     new Date().toISOString(),
+        dataSourceType: "appwrite",
+        calculatedAt: new Date().toISOString(),
       }
-    } catch (err) {
-      console.error("[AppwriteAnalyticsService] getAnalytics failed:", err)
+    } catch (error) {
+      console.error(
+        "[AppwriteAnalyticsService] getAnalytics failed:",
+        error,
+      )
+
       return this.getDefaultEnhancedAnalytics()
     }
   }
 
   /**
-   * Calculate analytics directly from a snapshot array (no Appwrite fetch).
-   * Used by the Zustand store's calculateAnalyticsFromSnapshots action.
+   * Calculates analytics directly from an existing snapshot collection.
+   *
+   * This path avoids Appwrite retrieval and delegates the calculation to
+   * the shared analytics implementation in the base service.
    */
   calculateAnalyticsFromSnapshots(
     snapshots: RankingSnapshot[],
-    queries:   QueryConfig[] = []
+    _queries: QueryConfig[] = [],
   ): AnalyticsData {
-    // Delegate to base — it already does the full calculation
-    return super.calculateAnalyticsFromSnapshots(snapshots)
+    return super.calculateAnalyticsFromSnapshots(
+      snapshots,
+    )
   }
 
-  // ── Default ────────────────────────────────────────────────────────────────
-
+  /**
+   * Returns the default analytics payload with Appwrite source metadata.
+   */
   protected override getDefaultEnhancedAnalytics(): EnhancedAnalyticsData {
     return {
       ...super.getDefaultEnhancedAnalytics(),
       isAppwriteSource: true,
-      dataSourceType:   "appwrite",
-      calculatedAt:     new Date().toISOString(),
+      dataSourceType: "appwrite",
+      calculatedAt: new Date().toISOString(),
     }
   }
-
-  // ── NOTE ───────────────────────────────────────────────────────────────────
-  // calculateExecutionFrequency, calculateDataFreshness, calculateStatistics,
-  // determineExecutionPattern, calculateComplexityMetrics are all inherited
-  // from AnalyticsService as protected methods. No need to redefine them here.
-  // getTimeRangeString is imported from lib/timeRangeString — not duplicated.
 }

@@ -8,6 +8,11 @@ import { toast } from "sonner"
 import type { QueryConfig } from "@/types/type"
 import { useSecureApi } from "@/lib/api/use-secureApi"
 
+interface QueryRunResponse {
+  success: boolean
+  snapshotId: string
+}
+
 // ─── Pure helpers (stable references — defined outside the hook) ──────────────
 
 export const formatDate = (date: Date | string): string => {
@@ -34,14 +39,12 @@ export function useSnapshotsLogic() {
     fetchPaginatedSnapshots,
     fetchAllSnapshots,
     fetchSnapshotsComplete,
-    addSnapshot,
     setPage,
     setItemsPerPage,
   } = useSnapshotsStore()
 
   const queries                       = useQueriesStore(state => state.queries)
-  const { analytics,
-          calculateAnalyticsFromSnapshots } = useAnalyticsStore()
+  const { analytics } = useAnalyticsStore()
   const { user }                      = useAuth()
 
   const [filters, setFilters] = useState({
@@ -101,54 +104,27 @@ export function useSnapshotsLogic() {
 
     setCreating(true)
     try {
-      const runResponse = await call("POST", `/queries/${selectedQueryId}/run`)
-      if (!runResponse?.ok) throw new Error("Failed to run query")
-
-      const queryResults = await runResponse.json()
-
-      const snapshotData = {
-        queryId:   selectedQueryId,
-        timestamp: new Date().toISOString(),
-        results:   queryResults.results ?? [],
-        metadata:  {
-          responseTime:  queryResults.responseTime  ?? 0,
-          totalResults:  queryResults.totalResults  ?? 0,
-          executedAt:    new Date().toISOString(),
-          source:        "manual_creation",
-        },
-      }
-
-      const createResponse = await call("POST", "/snapshots", snapshotData)
-      if (!createResponse?.ok) throw new Error("Failed to create snapshot")
-
-      const created = await createResponse.json()
+      // `call` returns parsed JSON. The run route already persists the
+      // snapshot, so the UI must refresh it rather than create a duplicate.
+      const runResult = await call<QueryRunResponse>("POST", `/queries/${selectedQueryId}/run`)
+      if (!runResult.success || !runResult.snapshotId) throw new Error("Failed to run query")
 
       //  Use store action instead of direct setState — respects persist middleware
-      addSnapshot(created)
-
-      //  Recalculate analytics with a capped snapshot count to avoid
-      //    blocking the main thread with thousands of items
-      const ANALYTICS_CAP = 500
-      calculateAnalyticsFromSnapshots(
-        [created, ...allSnapshots].slice(0, ANALYTICS_CAP)
+      await fetchSnapshotsComplete(
+        pagination.currentPage,
+        pagination.itemsPerPage,
+        user.$id,
       )
 
-      // Background refresh to sync with server state
-      if (user.$id) {
-        fetchPaginatedSnapshots(pagination.currentPage, pagination.itemsPerPage, user.$id)
-        fetchAllSnapshots(user.$id)
-      }
-
       toast.success("Snapshot created successfully!")
-    } catch (err: any) {
-      toast.error(err?.message ?? "Snapshot creation failed")
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Snapshot creation failed")
     } finally {
       setCreating(false)
     }
   }, [
     creating, user, selectedQueryId, queries, call,
-    allSnapshots, pagination, addSnapshot,
-    calculateAnalyticsFromSnapshots, fetchPaginatedSnapshots, fetchAllSnapshots,
+    pagination, fetchSnapshotsComplete,
   ])
 
   // ── Pagination handlers (pass userId through) ─────────────────────────────

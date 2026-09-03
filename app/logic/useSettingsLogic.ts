@@ -401,7 +401,7 @@ const exportData: ExportData = {
       
       if (!serverResponse.ok) {
         const errorData = await serverResponse.json().catch(() => ({}))
-        throw new Error(errorData.message || "Failed to clear data on server")
+        throw new Error(errorData.error || errorData.message || "Failed to clear data on server")
       }
       
       // Clear client stores with error handling

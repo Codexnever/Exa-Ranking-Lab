@@ -14,7 +14,7 @@ const MAX_QUERY_IDS    = 50   // cap on explicit queryIds to prevent abuse
 const RATE_LIMIT_MS    = 5 * 60 * 1000  // 5 minutes between full refreshes per user
 
 // ─── Per-user rate limiting (in-process best-effort) ─────────────────────────
-// ⚠️  In-process Map — does not deduplicate across serverless instances.
+//   In-process Map — does not deduplicate across serverless instances.
 //    For production cross-instance limiting use Redis/Upstash.
 const lastRefresh = new Map<string, number>()
 
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       }
     } catch { /* no body or bad JSON — all fields optional */ }
 
-    // ✅ Validate queryIds — must be array of strings, capped at MAX_QUERY_IDS
+    //  Validate queryIds — must be array of strings, capped at MAX_QUERY_IDS
     const rawIds       = body.queryIds
     const includeInactive = body.includeInactive === true  // ✅ strict boolean, not truthy
 
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     // ── Resolve queries to run ──────────────────────────────────────────────
     let queries
     if (explicitIds?.length) {
-      // ✅ Cap already applied; fetch in parallel with ownership check
+      //  Cap already applied; fetch in parallel with ownership check
       const fetched = await Promise.all(
         explicitIds.map(id => databaseService.queryService.getQuery(id))
       )
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       )
     } else {
       const all = await databaseService.queryService.getQueries(user.$id)
-      // ✅ Removed dead isActive check — QueryConfig has no isActive field
+      //  Removed dead isActive check — QueryConfig has no isActive field
       queries = includeInactive ? all : all
     }
 
@@ -203,7 +203,7 @@ export async function POST(request: NextRequest) {
         if (r.status === "fulfilled") {
           results.push(r.value)
         } else {
-          // ✅ Log full error server-side; return sanitized message to client
+          //  Log full error server-side; return sanitized message to client
           console.error(`[AnalyticsRefresh] Query ${q.id} failed:`, r.reason)
           errors.push({
             queryId:   q.id,
@@ -231,7 +231,7 @@ export async function POST(request: NextRequest) {
 
   } catch (err) {
     console.error("[AnalyticsRefresh] Unexpected error:", err)
-    // ✅ No internal error details exposed to client
+    //  No internal error details exposed to client
     return NextResponse.json(
       { success: false, error: "Failed to refresh analytics" },
       { status: 500 }

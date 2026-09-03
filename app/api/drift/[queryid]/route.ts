@@ -10,7 +10,7 @@ async function getSingleDriftHandler(
   context: SecurityContext,
   routeParams: { params: Promise<{ queryid: string }> }
 ) {
-  // ✅ Captured outside try/catch so the catch block can log the real
+  //  Captured outside try/catch so the catch block can log the real
   //    queryid instead of an unresolved Promise (was: console.error(...,
   //    routeParams.params) — logged "[object Promise]" on any error,
   //    since the destructure previously only happened inside the try).
@@ -27,7 +27,7 @@ async function getSingleDriftHandler(
 
     console.log(`[Drift API] Single query analysis for: ${queryid}, user: ${userId}`);
 
-    // ✅ Renamed from `startTime` to `routeStartTime` to make the distinction
+    //  Renamed from `startTime` to `routeStartTime` to make the distinction
     //    explicit: this measures the ENTIRE request (auth + DB fetch +
     //    analysis), not just the drift computation itself.
     const routeStartTime = performance.now();
@@ -62,8 +62,8 @@ async function getSingleDriftHandler(
         driftTrend: 'stable' as const,
         totalContentChanges: 0,
         averageCacheHitRate: 0,
-        totalResultsCompared: 0,      // ✅ new field, consistent default
-        contentStabilityRate: 0,      // ✅ new field, consistent default
+        totalResultsCompared: 0,
+        contentStabilityRate: 0,
         totalProcessingTime: 0,
         metadata: {
           snapshotsAnalyzed: snapshots.length,
@@ -78,7 +78,7 @@ async function getSingleDriftHandler(
     // time (embedding calls + comparison math), excluding auth/DB latency.
     const driftResult = await analyzeDrift(queryid, query.name, snapshots);
 
-    // ✅ Route-level wall-clock time — includes auth, DB fetch, everything.
+    //  Route-level wall-clock time — includes auth, DB fetch, everything.
     //    Kept SEPARATE from driftResult.totalProcessingTime instead of
     //    overwriting it. Previously: `totalProcessingTime: processingTime`
     //    silently replaced analyzeDrift's own (more precise, narrower)
@@ -97,7 +97,7 @@ async function getSingleDriftHandler(
 
     return NextResponse.json({
       ...driftResult,
-      // ✅ driftResult.totalProcessingTime is preserved as-is (drift
+      //  driftResult.totalProcessingTime is preserved as-is (drift
       //    computation only). routeProcessingTime is added under its own
       //    field name so the client can show either figure, or both.
       routeProcessingTime,
@@ -111,7 +111,7 @@ async function getSingleDriftHandler(
     });
 
   } catch (error) {
-    // ✅ Logs the actual queryid string, not an unresolved Promise object.
+    //  Logs the actual queryid string, not an unresolved Promise object.
     console.error(`[Drift API] Failed to analyze drift for query ${queryid}:`, error);
     return NextResponse.json(
       {

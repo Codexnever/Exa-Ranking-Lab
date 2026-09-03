@@ -73,7 +73,7 @@ export function calculateComparison(
         title:           r2.title,
         currentPosition: r2.position,
         change:          "new",
-        // ✅ Debut position, not 0 — shows where it first appeared
+        //  Debut position, not 0 — shows where it first appeared
         changeValue:     r2.position,
       })
     } else if (r1) {
@@ -83,15 +83,15 @@ export function calculateComparison(
         title:            r1.title,
         previousPosition: r1.position,
         change:           "dropped",
-        // ✅ Last known position, not 0 — shows where it was before dropping
+        //  Last known position, not 0 — shows where it was before dropping
         changeValue:      r1.position,
       })
     }
   }
 
   // Sort by most relevant position: current first, then previous, then Infinity
-  // ✅ Use Infinity instead of magic 999 — sorts dropped/new after positioned results
-  // ✅ Use nullish coalescing (not ||) — position 0 is falsy but valid
+  //  Use Infinity instead of magic 999 — sorts dropped/new after positioned results
+  //  Use nullish coalescing (not ||) — position 0 is falsy but valid
   changes.sort((a, b) => {
     const posA = a.currentPosition ?? a.previousPosition ?? Infinity
     const posB = b.currentPosition ?? b.previousPosition ?? Infinity

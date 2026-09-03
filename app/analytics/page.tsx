@@ -258,10 +258,15 @@ export default function Analytics() {
     semanticInsights, enhancedMetrics, timeRangeMs, vectorsAvailable,
   ]);
 
-  const filteredSnapshotsLength = useMemo(
+  const analyzedSnapshotGroupCount = useMemo(
     () => Array.isArray(analyticsData.filteredSnapshots) ? analyticsData.filteredSnapshots.length : 0,
     [analyticsData.filteredSnapshots]
   );
+
+  const storedSnapshotCount = stableSnapshots.length;
+  const filteredSnapshotsLength = isAIPowered
+    ? storedSnapshotCount
+    : analyzedSnapshotGroupCount;
 
   const isLoading = useMemo(
     () => queriesLoading || isLoadingSnapshots || analyticsLoading ||
@@ -711,7 +716,7 @@ export default function Analytics() {
                 <div className="w-2 h-2 bg-blue-500 rounded-full" />{stableQueries.length} queries
               </span>
               <span className="flex items-center gap-1">
-                <div className="w-2 h-2 bg-green-500 rounded-full" />{filteredSnapshotsLength} active snapshots
+                <div className="w-2 h-2 bg-green-500 rounded-full" />{storedSnapshotCount} stored snapshots
               </span>
               {!isAIPowered && deduplicationStrategy !== "none" && (
                 <span className="text-gray-500">({deduplicationStrategy} strategy)</span>
@@ -816,12 +821,14 @@ export default function Analytics() {
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+            <CardTitle className="text-sm font-medium">{isAIPowered ? "Semantic Stability" : "Success Rate"}</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{performanceSummary.avgSuccessRate}%</div>
-            <p className="text-xs text-muted-foreground">Average across all queries</p>
+            <p className="text-xs text-muted-foreground">
+              {isAIPowered ? "Weaviate semantic-cluster consistency" : "Successful snapshot executions"}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -846,12 +853,16 @@ export default function Analytics() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Snapshots</CardTitle>
+            <CardTitle className="text-sm font-medium">Stored Snapshots</CardTitle>
             <Settings2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{filteredSnapshotsLength}</div>
-            <p className="text-xs text-muted-foreground">Using {strategyInfo.label.toLowerCase()}</p>
+            <p className="text-xs text-muted-foreground">
+              {isAIPowered
+                ? `${analyzedSnapshotGroupCount} Weaviate historical group${analyzedSnapshotGroupCount === 1 ? "" : "s"} analyzed`
+                : `Using ${strategyInfo.label.toLowerCase()}`}
+            </p>
           </CardContent>
         </Card>
       </div>

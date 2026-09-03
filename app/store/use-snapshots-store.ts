@@ -46,7 +46,7 @@ interface SnapshotsState {
   allSnapshots:       RankingSnapshot[]
   isLoadingPaginated: boolean
   isLoadingAnalytics: boolean
-  isLoadingCompare:   boolean   // ✅ dedicated flag for compareSnapshots
+  isLoadingCompare:   boolean   //  dedicated flag for compareSnapshots
   error:              string | null
   lastFetch:          number | null
   isHydrated:         boolean
@@ -187,7 +187,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to fetch analytics snapshots"
           console.error("[SnapshotsStore] Analytics fetch error:", err)
-          // ✅ Restore previous data on error — don't leave the store empty
+          //  Restore previous data on error — don't leave the store empty
           set({ error: message, isLoadingAnalytics: false, allSnapshots: previous })
           toast.error(message)
         }
@@ -211,7 +211,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
 
       // ── Pagination controls ────────────────────────────────────────────────
 
-      // ✅ userId passed as parameter — no more localStorage.getItem('currentUserId')
+      //  userId passed as parameter — no more localStorage.getItem('currentUserId')
       setPage: (page: number, userId?: string) => {
         const { pagination } = get()
         if (page !== pagination.currentPage && page >= 1 && page <= pagination.totalPages) {
@@ -249,7 +249,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
         return paginatedSnapshots.find(s => s.id === id) ?? allSnapshots.find(s => s.id === id)
       },
 
-      // ✅ Uses dedicated isLoadingCompare flag
+      //  Uses dedicated isLoadingCompare flag
       compareSnapshots: async (snapshotIds: string[]) => {
         set({ isLoadingCompare: true, error: null })
         try {
@@ -286,7 +286,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
       name:    "snapshots-storage",
       storage: safeStorage,
 
-      // ✅ Persist ONLY lightweight metadata — not the full snapshot array
+      //  Persist ONLY lightweight metadata — not the full snapshot array
       // Full data is always fetched fresh; we only need to know who last used the store
       partialize: (state) => ({
         pagination: {
@@ -306,7 +306,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
           snapshots: state?.allSnapshots?.length ?? 0,
           lastUserId: state?.lastUserId,
         })
-        // ✅ Guard — setHydrated may not exist on malformed persisted state
+        //  Guard — setHydrated may not exist on malformed persisted state
         if (state && typeof state.setHydrated === "function") {
           state.setHydrated()
         }

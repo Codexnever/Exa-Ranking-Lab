@@ -1,236 +1,614 @@
-// app/services/database/query-service.ts
-import { databases, DATABASE_ID, COLLECTIONS } from "@/app/server/appwrite/appwrite-server"
-// ✅ FIX 1: was `import { ID, Query } from "appwrite"` (browser SDK)
-// This is a server-side service called from API routes — must use node-appwrite.
-// Using the browser SDK on the server causes subtle issues with ID.unique()
-// and Query class behaviour between SDK versions.
-import { ID, Query } from "node-appwrite"
-import type { QueryConfig } from "@/types/type"
-import { CATEGORY_MAP } from "@/constants/category-map"
-import { loadFromStorage, saveToStorage, transformQueryDocument } from "../../../utils/db-utils"
+import {
+  databases,
+  DATABASE_ID,
+  COLLECTIONS,
+} from "@/app/server/appwrite/appwrite-server"
 
+import {
+  ID,
+  Query,
+} from "node-appwrite"
+
+import type { QueryConfig } from "@/types/type"
+
+import { CATEGORY_MAP } from "@/constants/category-map"
+
+import {
+  loadFromStorage,
+  saveToStorage,
+  transformQueryDocument,
+} from "../../../utils/db-utils"
+
+/**
+ * Provides local and Appwrite-backed CRUD operations for ranking queries.
+ */
 export class QueryService {
   private isLocal: boolean
 
-  constructor(isLocal: boolean) {
+  constructor(
+    isLocal: boolean,
+  ) {
     this.isLocal = isLocal
   }
 
-  async createQuery(query: Omit<QueryConfig, "id" | "createdAt">): Promise<QueryConfig> {
-    if (!query.category || !(query.category in CATEGORY_MAP)) {
-      throw new Error(`Invalid category: "${query.category}"`)
+  /**
+   * Creates a new query after validating its category.
+   *
+   * Remote persistence stores the raw category key so create, update, and read
+   * operations use the same canonical representation.
+   */
+  async createQuery(
+    query: Omit<
+      QueryConfig,
+      "id" | "createdAt"
+    >,
+  ): Promise<QueryConfig> {
+    if (
+      !query.category ||
+      !(query.category in CATEGORY_MAP)
+    ) {
+      throw new Error(
+        `Invalid category: "${query.category}"`,
+      )
     }
 
+    /*
+     * This service runs server-side, so ID generation must come from
+     * node-appwrite rather than the browser Appwrite SDK.
+     */
     const id = ID.unique()
 
     if (this.isLocal) {
-      const newQuery: QueryConfig = { ...query, id, createdAt: new Date() }
-      const queries = loadFromStorage<QueryConfig>("queries")
+      const newQuery:
+        QueryConfig = {
+        ...query,
+        id,
+        createdAt:
+          new Date(),
+      }
+
+      const queries =
+        loadFromStorage<QueryConfig>(
+          "queries",
+        )
+
       queries.push(newQuery)
-      saveToStorage("queries", queries)
+
+      saveToStorage(
+        "queries",
+        queries,
+      )
+
       return newQuery
     }
 
     try {
-      const document = await databases.createDocument(
-        DATABASE_ID,
-        COLLECTIONS.QUERIES,
-        id,
-        {
-          name:      query.name,
-          query:     query.query,
-          // ✅ Stores raw category key ("news") — consistent with how
-          // getQuery reads it back and how createQuery validates it
-          category:  query.category,
-          userId:    query.userId,
-          status:    (query as any).status ?? "active",
-          filters:   JSON.stringify(query.filters  ?? {}),
-          schedule:  JSON.stringify(query.schedule ?? {}),
-          tags:      JSON.stringify(query.tags     ?? []),
-          createdAt: new Date().toISOString(),
-        }
+      const document =
+        await databases.createDocument(
+          DATABASE_ID,
+          COLLECTIONS.QUERIES,
+          id,
+          {
+            name:
+              query.name,
+            query:
+              query.query,
+
+            /*
+             * Persist the raw category key, such as "news", rather than the
+             * display label from CATEGORY_MAP.
+             */
+            category:
+              query.category,
+
+            userId:
+              query.userId,
+
+            status:
+              (query as any)
+                .status ??
+              "active",
+
+            filters:
+              JSON.stringify(
+                query.filters ?? {},
+              ),
+
+            schedule:
+              JSON.stringify(
+                query.schedule ?? {},
+              ),
+
+            tags:
+              JSON.stringify(
+                query.tags ?? [],
+              ),
+
+            createdAt:
+              new Date().toISOString(),
+          },
+        )
+
+      return transformQueryDocument(
+        document,
+        false,
       )
-      return transformQueryDocument(document, false)
-    } catch (err: any) {
-      const message = err?.message ?? "Failed to create query"
-      console.error("[QueryService] createQuery failed:", err)
+    } catch (error: any) {
+      const message =
+        error?.message ??
+        "Failed to create query"
+
+      console.error(
+        "[QueryService] createQuery failed:",
+        error,
+      )
+
       throw new Error(message)
     }
   }
 
-  async getQueries(userId?: string): Promise<QueryConfig[]> {
+  /**
+   * Returns queries owned by a user.
+   *
+   * Remote reads require a user ID so records are never fetched globally by
+   * this method.
+   */
+  async getQueries(
+    userId?: string,
+  ): Promise<QueryConfig[]> {
     if (this.isLocal) {
-      const queries = loadFromStorage<QueryConfig>("queries")
-      return queries.filter(q => !userId || q.userId === userId)
+      const queries =
+        loadFromStorage<QueryConfig>(
+          "queries",
+        )
+
+      return queries.filter(
+        (query) =>
+          !userId ||
+          query.userId === userId,
+      )
     }
 
     if (!userId) {
-      console.error("[QueryService] getQueries: userId required for remote fetch")
+      console.error(
+        "[QueryService] getQueries: userId required for remote fetch",
+      )
+
       return []
     }
 
-    const response = await databases.listDocuments(
-      DATABASE_ID,
-      COLLECTIONS.QUERIES,
-      [Query.equal("userId", userId)]
+    const response =
+      await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.QUERIES,
+        [
+          Query.equal(
+            "userId",
+            userId,
+          ),
+        ],
+      )
+
+    return response.documents.map(
+      (document) =>
+        transformQueryDocument(
+          document,
+          false,
+        ),
     )
-    return response.documents.map(doc => transformQueryDocument(doc, false))
   }
 
   /**
-   * Fetch ALL queries with schedule.enabled=true, across ALL users.
-   * Used by the cron scheduler — cursor-paginated to handle large collections.
+   * Fetches scheduled queries across all users for the cron scheduler.
+   *
+   * Appwrite records are cursor-paginated and scanned up to maxScan. Scheduling
+   * is currently filtered in application code because schedule.enabled is not
+   * represented by a dedicated indexed database attribute.
    */
-  async getAllScheduledQueries(maxScan = 2000): Promise<QueryConfig[]> {
+  async getAllScheduledQueries(
+    maxScan = 2000,
+  ): Promise<QueryConfig[]> {
     if (this.isLocal) {
-      const queries = loadFromStorage<QueryConfig>("queries")
-      return queries.filter(q => q.schedule?.enabled)
+      const queries =
+        loadFromStorage<QueryConfig>(
+          "queries",
+        )
+
+      return queries.filter(
+        (query) =>
+          query.schedule?.enabled,
+      )
     }
 
     const PAGE_SIZE = 100
-    const results: QueryConfig[] = []
-    let cursor: string | undefined
+
+    const results:
+      QueryConfig[] = []
+
+    let cursor:
+      | string
+      | undefined
+
     let scanned = 0
 
-    while (scanned < maxScan) {
-      const queryFilters = [Query.limit(PAGE_SIZE), Query.orderAsc("$id")]
-      if (cursor) queryFilters.push(Query.cursorAfter(cursor))
+    while (
+      scanned < maxScan
+    ) {
+      const queryFilters = [
+        Query.limit(PAGE_SIZE),
+        Query.orderAsc("$id"),
+      ]
 
-      const response = await databases.listDocuments(DATABASE_ID, COLLECTIONS.QUERIES, queryFilters)
-      if (response.documents.length === 0) break
-
-      for (const doc of response.documents) {
-        const query = transformQueryDocument(doc, false)
-        if (query.schedule?.enabled) results.push(query)
+      if (cursor) {
+        queryFilters.push(
+          Query.cursorAfter(
+            cursor,
+          ),
+        )
       }
 
-      scanned += response.documents.length
-      cursor   = response.documents[response.documents.length - 1].$id
+      const response =
+        await databases.listDocuments(
+          DATABASE_ID,
+          COLLECTIONS.QUERIES,
+          queryFilters,
+        )
 
-      if (response.documents.length < PAGE_SIZE) break
+      if (
+        response.documents.length ===
+        0
+      ) {
+        break
+      }
+
+      for (
+        const document of response.documents
+      ) {
+        const query =
+          transformQueryDocument(
+            document,
+            false,
+          )
+
+        if (
+          query.schedule?.enabled
+        ) {
+          results.push(query)
+        }
+      }
+
+      scanned +=
+        response.documents.length
+
+      cursor =
+        response.documents[
+          response.documents.length - 1
+        ].$id
+
+      if (
+        response.documents.length <
+        PAGE_SIZE
+      ) {
+        break
+      }
     }
 
-    if (scanned >= maxScan) {
+    if (
+      scanned >= maxScan
+    ) {
       console.warn(
         `[QueryService] getAllScheduledQueries: hit scan cap of ${maxScan} documents. ` +
-        `Consider adding an indexed 'scheduleEnabled' boolean attribute for DB-level filtering.`
+          "Consider adding an indexed 'scheduleEnabled' boolean attribute for DB-level filtering.",
       )
     }
 
     return results
   }
 
-  async getQuery(id: string): Promise<QueryConfig | null> {
+  /**
+   * Loads one query by ID.
+   *
+   * Missing or unreadable queries return null rather than throwing.
+   */
+  async getQuery(
+    id: string,
+  ): Promise<QueryConfig | null> {
     if (!id) {
-      console.error("[QueryService] getQuery: id required")
+      console.error(
+        "[QueryService] getQuery: id required",
+      )
+
       return null
     }
 
     try {
       if (this.isLocal) {
-        const queries = loadFromStorage<QueryConfig>("queries")
-        return queries.find(q => q.id === id) ?? null
+        const queries =
+          loadFromStorage<QueryConfig>(
+            "queries",
+          )
+
+        return (
+          queries.find(
+            (query) =>
+              query.id === id,
+          ) ?? null
+        )
       }
-      const doc = await databases.getDocument(DATABASE_ID, COLLECTIONS.QUERIES, id)
-      return transformQueryDocument(doc, false)
-    } catch (err) {
-      console.error("[QueryService] getQuery failed:", err)
+
+      const document =
+        await databases.getDocument(
+          DATABASE_ID,
+          COLLECTIONS.QUERIES,
+          id,
+        )
+
+      return transformQueryDocument(
+        document,
+        false,
+      )
+    } catch (error) {
+      console.error(
+        "[QueryService] getQuery failed:",
+        error,
+      )
+
       return null
     }
   }
 
-  async updateQuery(id: string, updates: Partial<QueryConfig>): Promise<QueryConfig> {
+  /**
+   * Applies partial updates to an existing query.
+   *
+   * Category updates persist the raw category key to remain compatible with
+   * createQuery and transformQueryDocument.
+   */
+  async updateQuery(
+    id: string,
+    updates: Partial<QueryConfig>,
+  ): Promise<QueryConfig> {
     if (this.isLocal) {
-      const queries = loadFromStorage<QueryConfig>("queries")
-      const idx = queries.findIndex(q => q.id === id)
-      if (idx === -1) throw new Error(`Query ${id} not found`)
-      queries[idx] = { ...queries[idx], ...updates }
-      saveToStorage("queries", queries)
-      return queries[idx]
+      const queries =
+        loadFromStorage<QueryConfig>(
+          "queries",
+        )
+
+      const index =
+        queries.findIndex(
+          (query) =>
+            query.id === id,
+        )
+
+      if (index === -1) {
+        throw new Error(
+          `Query ${id} not found`,
+        )
+      }
+
+      queries[index] = {
+        ...queries[index],
+        ...updates,
+      }
+
+      saveToStorage(
+        "queries",
+        queries,
+      )
+
+      return queries[index]
     }
 
     try {
-      const data: Record<string, any> = {}
-      if (updates.name)     data.name     = updates.name
-      if (updates.query)    data.query    = updates.query
-      if (updates.category) {
-        // ✅ FIX 2: was `CATEGORY_MAP[updates.category] ?? updates.category`
-        // which mapped "news" → "News" (the display label), inconsistent with
-        // createQuery which stores the raw key "news" directly.
-        // This caused: create stores "news", update stores "News", then
-        // getQuery returns "News", which fails the `in CATEGORY_MAP` check
-        // on the next operation because "News" is the VALUE not the KEY.
-        // Fix: store the raw category key, same as createQuery does.
-        if (!(updates.category in CATEGORY_MAP)) {
-          throw new Error(`Invalid category: "${updates.category}"`)
-        }
-        data.category = updates.category
-      }
-      if (updates.filters)  data.filters  = JSON.stringify(updates.filters)
-      if (updates.schedule) data.schedule = JSON.stringify(updates.schedule)
-      if (updates.tags)     data.tags     = JSON.stringify(updates.tags)
-      if (updates.lastRun)  data.lastRun  = new Date(updates.lastRun).toISOString()
-      if (updates.userId)   data.userId   = updates.userId
+      const data:
+        Record<string, any> = {}
 
-      const doc = await databases.updateDocument(DATABASE_ID, COLLECTIONS.QUERIES, id, data)
-      return transformQueryDocument(doc, false)
-    } catch (err: any) {
-      const message = err?.message ?? "Failed to update query"
-      console.error("[QueryService] updateQuery failed:", err)
+      if (updates.name) {
+        data.name =
+          updates.name
+      }
+
+      if (updates.query) {
+        data.query =
+          updates.query
+      }
+
+      if (updates.category) {
+        /*
+         * CATEGORY_MAP values are display labels. Persistence must continue to
+         * use the canonical raw key, such as "news", to match createQuery.
+         */
+        if (
+          !(
+            updates.category in
+            CATEGORY_MAP
+          )
+        ) {
+          throw new Error(
+            `Invalid category: "${updates.category}"`,
+          )
+        }
+
+        data.category =
+          updates.category
+      }
+
+      if (updates.filters) {
+        data.filters =
+          JSON.stringify(
+            updates.filters,
+          )
+      }
+
+      if (updates.schedule) {
+        data.schedule =
+          JSON.stringify(
+            updates.schedule,
+          )
+      }
+
+      if (updates.tags) {
+        data.tags =
+          JSON.stringify(
+            updates.tags,
+          )
+      }
+
+      if (updates.lastRun) {
+        data.lastRun =
+          new Date(
+            updates.lastRun,
+          ).toISOString()
+      }
+
+      if (updates.userId) {
+        data.userId =
+          updates.userId
+      }
+
+      const document =
+        await databases.updateDocument(
+          DATABASE_ID,
+          COLLECTIONS.QUERIES,
+          id,
+          data,
+        )
+
+      return transformQueryDocument(
+        document,
+        false,
+      )
+    } catch (error: any) {
+      const message =
+        error?.message ??
+        "Failed to update query"
+
+      console.error(
+        "[QueryService] updateQuery failed:",
+        error,
+      )
+
       throw new Error(message)
     }
   }
 
+  /**
+   * Deletes a query and all snapshots belonging to it.
+   *
+   * Remote deletion repeatedly fetches and deletes up to 500 snapshots at a
+   * time before deleting the query itself. This prevents snapshots beyond the
+   * first page from becoming orphaned.
+   */
   async deleteQuery(
-    id:    string,
-    opts?: { userId?: string; ipAddress?: string; userAgent?: any }
+    id: string,
+    opts?: {
+      userId?: string
+      ipAddress?: string
+      userAgent?: any
+    },
   ): Promise<boolean> {
     try {
       if (this.isLocal) {
-        const queries   = loadFromStorage<QueryConfig>("queries")
-        const snapshots = loadFromStorage<any>("snapshots")
-        saveToStorage("queries",   queries.filter(q => q.id !== id))
-        saveToStorage("snapshots", snapshots.filter((s: any) => s.queryId !== id))
+        const queries =
+          loadFromStorage<QueryConfig>(
+            "queries",
+          )
+
+        const snapshots =
+          loadFromStorage<any>(
+            "snapshots",
+          )
+
+        saveToStorage(
+          "queries",
+          queries.filter(
+            (query) =>
+              query.id !== id,
+          ),
+        )
+
+        saveToStorage(
+          "snapshots",
+          snapshots.filter(
+            (snapshot: any) =>
+              snapshot.queryId !==
+              id,
+          ),
+        )
+
         return true
       }
 
-      // ✅ FIX 3: loop until ALL snapshots are deleted before removing
-      // the query document. Previous version deleted the query even when
-      // >500 snapshots remained, orphaning them permanently in Appwrite
-      // since the query document no longer exists for a "next attempt".
+      /*
+       * Do not delete the query header until every associated snapshot has
+       * been removed. No offset is required because each deletion shrinks the
+       * remaining result set for the same queryId filter.
+       */
       let totalDeleted = 0
-      while (true) {
-        const snapshotList = await databases.listDocuments(
-          DATABASE_ID,
-          COLLECTIONS.SNAPSHOTS,
-          [
-            Query.equal("queryId", id),
-            Query.limit(500),
-          ]
-        )
 
-        if (snapshotList.documents.length === 0) break
+      while (true) {
+        const snapshotList =
+          await databases.listDocuments(
+            DATABASE_ID,
+            COLLECTIONS.SNAPSHOTS,
+            [
+              Query.equal(
+                "queryId",
+                id,
+              ),
+              Query.limit(500),
+            ],
+          )
+
+        if (
+          snapshotList.documents
+            .length === 0
+        ) {
+          break
+        }
 
         await Promise.all(
-          snapshotList.documents.map(snap =>
-            databases.deleteDocument(DATABASE_ID, COLLECTIONS.SNAPSHOTS, snap.$id)
-          )
+          snapshotList.documents.map(
+            (snapshot) =>
+              databases.deleteDocument(
+                DATABASE_ID,
+                COLLECTIONS.SNAPSHOTS,
+                snapshot.$id,
+              ),
+          ),
         )
 
-        totalDeleted += snapshotList.documents.length
+        totalDeleted +=
+          snapshotList.documents.length
 
-        // If fewer than 500 returned, we've reached the last page
-        if (snapshotList.documents.length < 500) break
+        if (
+          snapshotList.documents
+            .length < 500
+        ) {
+          break
+        }
       }
 
-      if (totalDeleted > 0) {
-        console.log(`[QueryService] deleteQuery: removed ${totalDeleted} snapshots for query ${id}`)
+      if (
+        totalDeleted > 0
+      ) {
+        console.log(
+          `[QueryService] deleteQuery: removed ${totalDeleted} snapshots for query ${id}`,
+        )
       }
 
-      await databases.deleteDocument(DATABASE_ID, COLLECTIONS.QUERIES, id)
+      await databases.deleteDocument(
+        DATABASE_ID,
+        COLLECTIONS.QUERIES,
+        id,
+      )
+
       return true
-    } catch (err) {
-      console.error("[QueryService] deleteQuery failed:", err)
+    } catch (error) {
+      console.error(
+        "[QueryService] deleteQuery failed:",
+        error,
+      )
+
       return false
     }
   }

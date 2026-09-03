@@ -34,6 +34,12 @@ interface RevolutionaryStatsCardProps {
   };
 }
 
+function normalizePercentage(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const percentage = value >= 0 && value <= 1 ? value * 100 : value;
+  return Math.min(100, Math.max(0, percentage));
+}
+
 export function RevolutionaryStatsCard({
   analytics,
   snapshots,
@@ -51,20 +57,22 @@ export function RevolutionaryStatsCard({
     const avgResponseTime = analytics?.avgResponseTime ?? 0;
     
     // AI semantic metrics with fallbacks
-    const semanticStability = 
-      enhancedMetrics?.semanticStability ?? 
-      semanticAnalytics?.enhancedMetrics?.semanticStability ?? 
-      null;
-      
-    const contentCoherence = 
-      enhancedMetrics?.contentCoherence ?? 
-      semanticAnalytics?.enhancedMetrics?.contentCoherence ?? 
-      null;
-      console.log("[CONTENT COHERANCE]:",contentCoherence)
-    const diversityIndex = 
-      enhancedMetrics?.diversityIndex ?? 
-      semanticAnalytics?.enhancedMetrics?.diversityIndex ?? 
-      null;
+    const semanticStability = normalizePercentage(
+      enhancedMetrics?.semanticStability ??
+      semanticAnalytics?.enhancedMetrics?.semanticStability ??
+      null
+    );
+
+    const contentCoherence = normalizePercentage(
+      enhancedMetrics?.contentCoherence ??
+      semanticAnalytics?.enhancedMetrics?.contentCoherence ??
+      null
+    );
+    const diversityIndex = normalizePercentage(
+      enhancedMetrics?.diversityIndex ??
+      semanticAnalytics?.enhancedMetrics?.diversityIndex ??
+      null
+    );
       
     const anomalyCount = 
       enhancedMetrics?.anomalyCount ?? 
@@ -275,7 +283,7 @@ export function RevolutionaryStatsCard({
             <div className="space-y-2">
               <div className="text-2xl font-bold text-indigo-600">
                 {statsData.contentCoherence !== null
-                  ? `${Math.round(statsData.contentCoherence * 100)}%`
+                  ? `${Math.round(statsData.contentCoherence)}%`
                   : "N/A"}
               </div>
               <p className="text-xs text-gray-500">Content Coherence</p>
@@ -283,7 +291,7 @@ export function RevolutionaryStatsCard({
                 <div className="flex items-center gap-1">
                   <Sparkles className="h-3 w-3 text-indigo-400" />
                   <span className="text-xs text-indigo-600">
-                    Diversity: {(statsData.diversityIndex * 100).toFixed(0)}%
+                    Diversity: {statsData.diversityIndex.toFixed(0)}%
                   </span>
                 </div>
               )}

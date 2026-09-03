@@ -36,32 +36,32 @@ function stripRawData(data: Record<string, unknown>): Record<string, unknown> {
 
 export async function GET(request: NextRequest) {
   try {
-    // ✅ Auth required — userId always from session
+    //  Auth required — userId always from session
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const { searchParams } = new URL(request.url)
 
-    // ✅ timeRange validated against known values
+    //  timeRange validated against known values
     const rawRange   = searchParams.get("timeRange") ?? "30d"
     const timeRangeMs = VALID_TIME_RANGES[rawRange] ?? VALID_TIME_RANGES["30d"]
 
-    // ✅ cursor and limit removed — EnhancedAnalyticsService.getSemanticAnalytics
+    //  cursor and limit removed — EnhancedAnalyticsService.getSemanticAnalytics
     //    doesn't accept either param. Remove dead variables rather than pass
     //    unused values that imply pagination support that isn't implemented.
 
     console.log(`[SemanticAnalytics] user=${user.$id}, timeRange=${rawRange}`)
 
-    // ✅ Singleton — no re-init on every request
+    //  Singleton — no re-init on every request
     const analyticsService = await getEnhancedService()
 
-    // ✅ userId always from auth session — not from query string
+    //  userId always from auth session — not from query string
     const analyticsData = await analyticsService.getSemanticAnalytics(
       user.$id,
       timeRangeMs
     )
 
-    // ✅ Strip filteredSnapshots — large raw array the client never needs
+    //  Strip filteredSnapshots — large raw array the client never needs
     const response = stripRawData(analyticsData as unknown as Record<string, unknown>)
 
     return NextResponse.json({
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
     })
   } catch (err) {
     console.error("[SemanticAnalytics] Failed:", err)
-    // ✅ No internal error details exposed to client
+    //  No internal error details exposed to client
     return NextResponse.json(
       { success: false, error: "Failed to fetch semantic analytics" },
       { status: 500 }

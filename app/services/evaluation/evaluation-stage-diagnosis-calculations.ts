@@ -1,9 +1,11 @@
-import type { RelevanceGrade } from "@/types/evaluation";
+import type { RelevanceGrade } from "@/types/evaluation"
+
 import type {
   EvaluationExecutionTrace,
   EvaluationStageDocument,
   EvaluationStageTrace,
-} from "@/types/evaluation-stage-trace";
+} from "@/types/evaluation-stage-trace"
+
 import type {
   CandidateToFinalRetention,
   RankTransitionStatistics,
@@ -13,138 +15,405 @@ import type {
   StageMetricResult,
   StageTransitionDiagnosis,
   TopKRelevantRetention,
-} from "@/types/evaluation-stage-diagnosis";
-import { EVALUATION_STAGE_DIAGNOSIS_VERSION } from "@/types/evaluation-stage-diagnosis";
+} from "@/types/evaluation-stage-diagnosis"
+
+import { EVALUATION_STAGE_DIAGNOSIS_VERSION } from "@/types/evaluation-stage-diagnosis"
+
 import {
   benchmarkRecallAtK,
   hitAtK,
   judgedPrecisionAtK,
   judgmentCoverageAtK,
   ndcgAtK,
-} from "./metrics/calculations";
-import type { MetricValue, RankedEvaluationItem } from "./metrics/types";
-import { EVALUATION_STAGE_DIAGNOSIS_POLICY as POLICY } from "./stage-diagnosis-policy";
+} from "./metrics/calculations"
 
-const unavailable = (reason: string): MetricValue => ({ value: null, eligible: false, reason });
-const available = (value: number): MetricValue => ({ value, eligible: true });
+import type {
+  MetricValue,
+  RankedEvaluationItem,
+} from "./metrics/types"
 
-const gradeMap = (truth: Map<string, RelevanceGrade>, document: EvaluationStageDocument) =>
-  truth.get(document.documentKey) ?? null;
+import { EVALUATION_STAGE_DIAGNOSIS_POLICY as POLICY } from "./stage-diagnosis-policy"
 
-const ranked = (stage: EvaluationStageTrace) =>
-  stage.documents.length > 0 && stage.documents.every((document) => document.rank !== null);
+/**
+ * Creates an unavailable metric result with an explanatory reason.
+ */
+const unavailable = (
+  reason: string,
+): MetricValue => ({
+  value: null,
+  eligible: false,
+  reason,
+})
 
+/**
+ * Creates an available metric result.
+ */
+const available = (
+  value: number,
+): MetricValue => ({
+  value,
+  eligible: true,
+})
+
+/**
+ * Returns the accepted relevance grade for a stage document when available.
+ */
+const gradeMap = (
+  truth: Map<string, RelevanceGrade>,
+  document: EvaluationStageDocument,
+) =>
+  truth.get(
+    document.documentKey,
+  ) ?? null
+
+/**
+ * Returns whether every recorded document in a stage has a rank.
+ */
+const ranked = (
+  stage: EvaluationStageTrace,
+) =>
+  stage.documents.length > 0 &&
+  stage.documents.every(
+    (document) =>
+      document.rank !== null,
+  )
+
+/**
+ * Converts ranked stage documents into the common evaluation metric shape.
+ */
 const items = (
   stage: EvaluationStageTrace,
   truth: Map<string, RelevanceGrade>,
 ): RankedEvaluationItem[] =>
   stage.documents
-    .filter((document) => document.rank !== null)
+    .filter(
+      (document) =>
+        document.rank !== null,
+    )
     .map((document) => ({
-      documentKey: document.documentKey,
-      canonicalUrl: document.canonicalUrl,
-      rawUrl: document.rawUrl,
-      rank: document.rank!,
-      grade: gradeMap(truth, document),
-    }));
+      documentKey:
+        document.documentKey,
+      canonicalUrl:
+        document.canonicalUrl,
+      rawUrl:
+        document.rawUrl,
+      rank:
+        document.rank!,
+      grade:
+        gradeMap(
+          truth,
+          document,
+        ),
+    }))
 
+/**
+ * Calculates set-based quality metrics that do not depend on ranking order.
+ */
 function setMetric(
   stage: EvaluationStageTrace,
   truth: Map<string, RelevanceGrade>,
   knownRelevant: Set<string>,
 ) {
-  const present = new Set(stage.documents.map((document) => document.documentKey));
-  const relevant = [...knownRelevant].filter((key) => present.has(key)).length;
-  const judged = stage.documents.filter((document) => truth.has(document.documentKey));
-  const judgedRelevant = judged.filter(
-    (document) => (truth.get(document.documentKey) ?? 0) >= 1,
-  ).length;
+  const present = new Set(
+    stage.documents.map(
+      (document) =>
+        document.documentKey,
+    ),
+  )
+
+  const relevant =
+    [...knownRelevant].filter(
+      (key) =>
+        present.has(key),
+    ).length
+
+  const judged =
+    stage.documents.filter(
+      (document) =>
+        truth.has(
+          document.documentKey,
+        ),
+    )
+
+  const judgedRelevant =
+    judged.filter(
+      (document) =>
+        (
+          truth.get(
+            document.documentKey,
+          ) ?? 0
+        ) >= 1,
+    ).length
 
   return {
-    recall: knownRelevant.size
-      ? available(relevant / knownRelevant.size)
-      : unavailable("No accepted relevant benchmark documents exist"),
-    hit: relevant ? 1 : 0,
-    precision: judged.length
-      ? available(judgedRelevant / judged.length)
-      : unavailable("No accepted judgments occur in the recorded stage"),
-    coverage: stage.documents.length
-      ? available(judged.length / stage.documents.length)
-      : unavailable("The recorded stage has no documents"),
-  };
+    recall:
+      knownRelevant.size
+        ? available(
+            relevant /
+              knownRelevant.size,
+          )
+        : unavailable(
+            "No accepted relevant benchmark documents exist",
+          ),
+
+    hit:
+      relevant
+        ? 1
+        : 0,
+
+    precision:
+      judged.length
+        ? available(
+            judgedRelevant /
+              judged.length,
+          )
+        : unavailable(
+            "No accepted judgments occur in the recorded stage",
+          ),
+
+    coverage:
+      stage.documents.length
+        ? available(
+            judged.length /
+              stage.documents.length,
+          )
+        : unavailable(
+            "The recorded stage has no documents",
+          ),
+  }
 }
 
+/**
+ * Calculates relevance metrics for one recorded execution stage.
+ *
+ * Set-based metrics are available for unordered stages, while rank-sensitive
+ * cutoff metrics are only calculated when every recorded result has a rank.
+ */
 export function calculateStageMetrics(
   stage: EvaluationStageTrace,
   truth: Map<string, RelevanceGrade>,
-  cutoffs: number[] = POLICY.cutoffs as unknown as number[],
+  cutoffs: number[] =
+    POLICY.cutoffs as unknown as number[],
 ): StageMetricResult {
-  const knownRelevant = new Set([...truth].filter(([, grade]) => grade >= 1).map(([key]) => key));
-  const isRanked = ranked(stage);
-  const rankedItems = items(stage, truth);
-  const set = setMetric(stage, truth, knownRelevant);
-  const judged = stage.documents.filter((document) => truth.has(document.documentKey));
-  const relevant = judged.filter((document) => (truth.get(document.documentKey) ?? 0) >= 1);
-  const coverage = set.coverage.value;
-  const warnings = [...stage.warnings];
+  const knownRelevant = new Set(
+    [...truth]
+      .filter(
+        ([, grade]) =>
+          grade >= 1,
+      )
+      .map(([key]) => key),
+  )
 
-  if (coverage !== null && coverage < POLICY.coverageWarningThreshold) {
-    warnings.push("Low judgment coverage; stage-quality interpretation may be incomplete.");
+  const isRanked =
+    ranked(stage)
+
+  const rankedItems =
+    items(
+      stage,
+      truth,
+    )
+
+  const set = setMetric(
+    stage,
+    truth,
+    knownRelevant,
+  )
+
+  const judged =
+    stage.documents.filter(
+      (document) =>
+        truth.has(
+          document.documentKey,
+        ),
+    )
+
+  const relevant =
+    judged.filter(
+      (document) =>
+        (
+          truth.get(
+            document.documentKey,
+          ) ?? 0
+        ) >= 1,
+    )
+
+  const coverage =
+    set.coverage.value
+
+  const warnings = [
+    ...stage.warnings,
+  ]
+
+  if (
+    coverage !== null &&
+    coverage <
+      POLICY.coverageWarningThreshold
+  ) {
+    warnings.push(
+      "Low judgment coverage; stage-quality interpretation may be incomplete.",
+    )
   }
 
   return {
-    stageId: stage.id,
-    stageType: stage.type,
-    stageName: stage.name,
-    ranked: isRanked,
-    recordedResultCount: stage.documents.length,
-    acceptedJudgedCount: judged.length,
-    judgedRelevantCount: relevant.length,
-    judgedIrrelevantCount: judged.length - relevant.length,
-    unjudgedCount: stage.documents.length - judged.length,
-    knownRelevantBenchmarkCount: knownRelevant.size,
-    grade2PresentCount: stage.documents.filter((document) => truth.get(document.documentKey) === 2)
-      .length,
-    stageBenchmarkRecall: set.recall,
-    stageHit: set.hit,
-    stageJudgedPrecision: set.precision,
-    stageJudgmentCoverage: set.coverage,
-    cutoffs: isRanked
-      ? cutoffs
-          .filter((cutoff) =>
-            stage.documents.some((document) => document.rank !== null && document.rank <= cutoff),
-          )
-          .map((cutoff) => ({
-            cutoff,
-            evaluatedResults: rankedItems.filter((item) => item.rank <= cutoff).length,
-            benchmarkRecall: benchmarkRecallAtK(rankedItems, knownRelevant, cutoff),
-            hit: hitAtK(rankedItems, cutoff),
-            judgedPrecision: judgedPrecisionAtK(rankedItems, cutoff),
-            judgmentCoverage: judgmentCoverageAtK(rankedItems, cutoff),
-            ndcg: ndcgAtK(
-              rankedItems,
-              [...truth.values()].filter((grade) => grade >= 1),
+    stageId:
+      stage.id,
+    stageType:
+      stage.type,
+    stageName:
+      stage.name,
+    ranked:
+      isRanked,
+    recordedResultCount:
+      stage.documents.length,
+    acceptedJudgedCount:
+      judged.length,
+    judgedRelevantCount:
+      relevant.length,
+    judgedIrrelevantCount:
+      judged.length -
+      relevant.length,
+    unjudgedCount:
+      stage.documents.length -
+      judged.length,
+    knownRelevantBenchmarkCount:
+      knownRelevant.size,
+
+    grade2PresentCount:
+      stage.documents.filter(
+        (document) =>
+          truth.get(
+            document.documentKey,
+          ) === 2,
+      ).length,
+
+    stageBenchmarkRecall:
+      set.recall,
+    stageHit:
+      set.hit,
+    stageJudgedPrecision:
+      set.precision,
+    stageJudgmentCoverage:
+      set.coverage,
+
+    cutoffs:
+      isRanked
+        ? cutoffs
+            .filter((cutoff) =>
+              stage.documents.some(
+                (document) =>
+                  document.rank !==
+                    null &&
+                  document.rank <=
+                    cutoff,
+              ),
+            )
+            .map((cutoff) => ({
               cutoff,
-            ),
-          }))
-      : [],
-    warnings: !isRanked
-      ? [...warnings, "Rank-sensitive metrics are unavailable for this unordered stage."]
-      : warnings,
-  };
+
+              evaluatedResults:
+                rankedItems.filter(
+                  (item) =>
+                    item.rank <=
+                    cutoff,
+                ).length,
+
+              benchmarkRecall:
+                benchmarkRecallAtK(
+                  rankedItems,
+                  knownRelevant,
+                  cutoff,
+                ),
+
+              hit:
+                hitAtK(
+                  rankedItems,
+                  cutoff,
+                ),
+
+              judgedPrecision:
+                judgedPrecisionAtK(
+                  rankedItems,
+                  cutoff,
+                ),
+
+              judgmentCoverage:
+                judgmentCoverageAtK(
+                  rankedItems,
+                  cutoff,
+                ),
+
+              ndcg:
+                ndcgAtK(
+                  rankedItems,
+                  [...truth.values()].filter(
+                    (grade) =>
+                      grade >= 1,
+                  ),
+                  cutoff,
+                ),
+            }))
+        : [],
+
+    warnings:
+      !isRanked
+        ? [
+            ...warnings,
+            "Rank-sensitive metrics are unavailable for this unordered stage.",
+          ]
+        : warnings,
+  }
 }
 
-const median = (values: number[]) => {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-};
+/**
+ * Calculates the median of a non-empty numeric collection.
+ */
+const median = (
+  values: number[],
+) => {
+  const sorted = [
+    ...values,
+  ].sort(
+    (a, b) => a - b,
+  )
 
-function rankStats(outcomes: StageDocumentOutcome[], grade2 = false): RankTransitionStatistics {
-  const selected = outcomes.filter(
-    (item) => (!grade2 || item.grade === 2) && item.previousRank !== null && item.nextRank !== null,
-  );
-  const values = selected.map((item) => item.rankDelta!);
+  const middle = Math.floor(
+    sorted.length / 2,
+  )
+
+  return sorted.length % 2
+    ? sorted[middle]
+    : (
+        sorted[middle - 1] +
+        sorted[middle]
+      ) / 2
+}
+
+/**
+ * Summarizes rank changes for retained relevant documents.
+ *
+ * When grade2 is true, only highly relevant documents contribute.
+ */
+function rankStats(
+  outcomes: StageDocumentOutcome[],
+  grade2 = false,
+): RankTransitionStatistics {
+  const selected =
+    outcomes.filter(
+      (item) =>
+        (
+          !grade2 ||
+          item.grade === 2
+        ) &&
+        item.previousRank !==
+          null &&
+        item.nextRank !== null,
+    )
+
+  const values =
+    selected.map(
+      (item) =>
+        item.rankDelta!,
+    )
 
   if (!values.length) {
     return {
@@ -154,26 +423,55 @@ function rankStats(outcomes: StageDocumentOutcome[], grade2 = false): RankTransi
       promotedCount: 0,
       demotedCount: 0,
       unchangedCount: 0,
-    };
+    }
   }
 
   return {
     available: true,
-    meanRankDelta: values.reduce((sum, value) => sum + value, 0) / values.length,
-    medianRankDelta: median(values),
-    promotedCount: values.filter((value) => value > 0).length,
-    demotedCount: values.filter((value) => value < 0).length,
-    unchangedCount: values.filter((value) => value === 0).length,
-  };
+
+    meanRankDelta:
+      values.reduce(
+        (sum, value) =>
+          sum + value,
+        0,
+      ) / values.length,
+
+    medianRankDelta:
+      median(values),
+
+    promotedCount:
+      values.filter(
+        (value) =>
+          value > 0,
+      ).length,
+
+    demotedCount:
+      values.filter(
+        (value) =>
+          value < 0,
+      ).length,
+
+    unchangedCount:
+      values.filter(
+        (value) =>
+          value === 0,
+      ).length,
+  }
 }
 
+/**
+ * Measures relevant-document retention across a top-k boundary.
+ */
 function topK(
   previous: EvaluationStageTrace,
   next: EvaluationStageTrace,
   truth: Map<string, RelevanceGrade>,
   cutoff: number,
 ): TopKRelevantRetention {
-  if (!ranked(previous) || !ranked(next)) {
+  if (
+    !ranked(previous) ||
+    !ranked(next)
+  ) {
     return {
       cutoff,
       eligible: false,
@@ -182,64 +480,175 @@ function topK(
       leftTopK: 0,
       enteredTopK: 0,
       rate: null,
-    };
+    }
   }
 
   const before = new Set(
     previous.documents
-      .filter((d) => d.rank! <= cutoff && (truth.get(d.documentKey) ?? 0) >= 1)
-      .map((d) => d.documentKey),
-  );
+      .filter(
+        (document) =>
+          document.rank! <=
+            cutoff &&
+          (
+            truth.get(
+              document.documentKey,
+            ) ?? 0
+          ) >= 1,
+      )
+      .map(
+        (document) =>
+          document.documentKey,
+      ),
+  )
+
   const after = new Set(
     next.documents
-      .filter((d) => d.rank! <= cutoff && (truth.get(d.documentKey) ?? 0) >= 1)
-      .map((d) => d.documentKey),
-  );
-  const retained = [...before].filter((key) => after.has(key)).length;
+      .filter(
+        (document) =>
+          document.rank! <=
+            cutoff &&
+          (
+            truth.get(
+              document.documentKey,
+            ) ?? 0
+          ) >= 1,
+      )
+      .map(
+        (document) =>
+          document.documentKey,
+      ),
+  )
+
+  const retained =
+    [...before].filter(
+      (key) =>
+        after.has(key),
+    ).length
 
   return {
     cutoff,
-    eligible: before.size > 0,
-    previousTopKRelevant: before.size,
-    retainedTopK: retained,
-    leftTopK: before.size - retained,
-    enteredTopK: [...after].filter((key) => !before.has(key)).length,
-    rate: before.size ? retained / before.size : null,
-  };
+    eligible:
+      before.size > 0,
+    previousTopKRelevant:
+      before.size,
+    retainedTopK:
+      retained,
+    leftTopK:
+      before.size -
+      retained,
+    enteredTopK:
+      [...after].filter(
+        (key) =>
+          !before.has(key),
+      ).length,
+    rate:
+      before.size
+        ? retained /
+          before.size
+        : null,
+  }
 }
 
+/**
+ * Diagnoses relevant-document movement between two consecutive stages.
+ *
+ * The transition captures document survival, entry and loss, rank changes,
+ * highly relevant retention, and top-k boundary retention.
+ */
 export function calculateTransition(
   previous: EvaluationStageTrace,
   next: EvaluationStageTrace,
   truth: Map<string, RelevanceGrade>,
-  cutoffs: number[] = POLICY.transitionCutoffs as unknown as number[],
+  cutoffs: number[] =
+    POLICY.transitionCutoffs as unknown as number[],
 ): StageTransitionDiagnosis {
-  const before = new Map(previous.documents.map((document) => [document.documentKey, document]));
-  const after = new Map(next.documents.map((document) => [document.documentKey, document]));
-  const relevantKeys = [...truth].filter(([, grade]) => grade >= 1).map(([key]) => key);
-  const outcomes: StageDocumentOutcome[] = [];
+  const before = new Map(
+    previous.documents.map(
+      (document) => [
+        document.documentKey,
+        document,
+      ]),
+  )
 
-  for (const key of relevantKeys) {
-    const a = before.get(key);
-    const b = after.get(key);
-    if (!a && !b) continue;
+  const after = new Map(
+    next.documents.map(
+      (document) => [
+        document.documentKey,
+        document,
+      ]),
+  )
 
-    const grade = truth.get(key)!;
+  const relevantKeys =
+    [...truth]
+      .filter(
+        ([, grade]) =>
+          grade >= 1,
+      )
+      .map(([key]) => key)
+
+  const outcomes:
+    StageDocumentOutcome[] = []
+
+  for (
+    const key of relevantKeys
+  ) {
+    const previousDocument =
+      before.get(key)
+
+    const nextDocument =
+      after.get(key)
+
+    if (
+      !previousDocument &&
+      !nextDocument
+    ) {
+      continue
+    }
+
+    const grade =
+      truth.get(key)!
+
     const rankDelta =
-      a?.rank !== null && a?.rank !== undefined && b?.rank !== null && b?.rank !== undefined
-        ? a.rank - b.rank
-        : null;
+      previousDocument?.rank !==
+        null &&
+      previousDocument?.rank !==
+        undefined &&
+      nextDocument?.rank !==
+        null &&
+      nextDocument?.rank !==
+        undefined
+        ? previousDocument.rank -
+          nextDocument.rank
+        : null
 
     outcomes.push({
-      documentKey: key,
-      canonicalUrl: b?.canonicalUrl ?? a!.canonicalUrl,
-      title: b?.title ?? a?.title ?? null,
+      documentKey:
+        key,
+
+      canonicalUrl:
+        nextDocument?.canonicalUrl ??
+        previousDocument!.canonicalUrl,
+
+      title:
+        nextDocument?.title ??
+        previousDocument?.title ??
+        null,
+
       grade,
-      previousRank: a?.rank ?? null,
-      nextRank: b?.rank ?? null,
+
+      previousRank:
+        previousDocument?.rank ??
+        null,
+
+      nextRank:
+        nextDocument?.rank ??
+        null,
+
       rankDelta,
+
       outcome:
-        a && b
+        previousDocument &&
+        nextDocument
           ? rankDelta === null
             ? "retained"
             : rankDelta > 0
@@ -247,207 +656,510 @@ export function calculateTransition(
               : rankDelta < 0
                 ? "demoted"
                 : "unchanged"
-          : a
+          : previousDocument
             ? "lost"
             : "entered",
-    });
+    })
   }
 
-  const previousRelevant = relevantKeys.filter((key) => before.has(key));
-  const retained = previousRelevant.filter((key) => after.has(key));
-  const lost = previousRelevant.filter((key) => !after.has(key));
-  const entries = relevantKeys.filter((key) => !before.has(key) && after.has(key));
-  const previousGrade2 = previousRelevant.filter((key) => truth.get(key) === 2);
-  const retainedGrade2 = previousGrade2.filter((key) => after.has(key));
+  const previousRelevant =
+    relevantKeys.filter(
+      (key) =>
+        before.has(key),
+    )
+
+  const retained =
+    previousRelevant.filter(
+      (key) =>
+        after.has(key),
+    )
+
+  const lost =
+    previousRelevant.filter(
+      (key) =>
+        !after.has(key),
+    )
+
+  const entries =
+    relevantKeys.filter(
+      (key) =>
+        !before.has(key) &&
+        after.has(key),
+    )
+
+  const previousGrade2 =
+    previousRelevant.filter(
+      (key) =>
+        truth.get(key) === 2,
+    )
+
+  const retainedGrade2 =
+    previousGrade2.filter(
+      (key) =>
+        after.has(key),
+    )
 
   return {
-    fromStageId: previous.id,
-    fromStageType: previous.type,
-    toStageId: next.id,
-    toStageType: next.type,
-    relevantPreviousCount: previousRelevant.length,
-    relevantRetainedCount: retained.length,
-    relevantLostCount: lost.length,
-    relevantEntryCount: entries.length,
-    relevantSurvivalRate: previousRelevant.length
-      ? retained.length / previousRelevant.length
-      : null,
-    relevantLossRate: previousRelevant.length ? lost.length / previousRelevant.length : null,
-    grade2PreviousCount: previousGrade2.length,
-    grade2RetainedCount: retainedGrade2.length,
-    grade2LostCount: previousGrade2.length - retainedGrade2.length,
-    grade2SurvivalRate: previousGrade2.length
-      ? retainedGrade2.length / previousGrade2.length
-      : null,
-    relevantRankChange: ranked(previous) && ranked(next) ? rankStats(outcomes) : rankStats([]),
-    grade2RankChange: ranked(previous) && ranked(next) ? rankStats(outcomes, true) : rankStats([]),
-    topKRetention: cutoffs.map((cutoff) => topK(previous, next, truth, cutoff)),
-    documentOutcomes: outcomes,
-  };
+    fromStageId:
+      previous.id,
+    fromStageType:
+      previous.type,
+    toStageId:
+      next.id,
+    toStageType:
+      next.type,
+
+    relevantPreviousCount:
+      previousRelevant.length,
+    relevantRetainedCount:
+      retained.length,
+    relevantLostCount:
+      lost.length,
+    relevantEntryCount:
+      entries.length,
+
+    relevantSurvivalRate:
+      previousRelevant.length
+        ? retained.length /
+          previousRelevant.length
+        : null,
+
+    relevantLossRate:
+      previousRelevant.length
+        ? lost.length /
+          previousRelevant.length
+        : null,
+
+    grade2PreviousCount:
+      previousGrade2.length,
+    grade2RetainedCount:
+      retainedGrade2.length,
+    grade2LostCount:
+      previousGrade2.length -
+      retainedGrade2.length,
+
+    grade2SurvivalRate:
+      previousGrade2.length
+        ? retainedGrade2.length /
+          previousGrade2.length
+        : null,
+
+    relevantRankChange:
+      ranked(previous) &&
+      ranked(next)
+        ? rankStats(outcomes)
+        : rankStats([]),
+
+    grade2RankChange:
+      ranked(previous) &&
+      ranked(next)
+        ? rankStats(
+            outcomes,
+            true,
+          )
+        : rankStats([]),
+
+    topKRetention:
+      cutoffs.map(
+        (cutoff) =>
+          topK(
+            previous,
+            next,
+            truth,
+            cutoff,
+          ),
+      ),
+
+    documentOutcomes:
+      outcomes,
+  }
 }
 
+/**
+ * Measures how many relevant documents from the earliest candidate or
+ * retrieval stage survive into the authoritative final stage.
+ */
 function candidateRetention(
   stages: EvaluationStageTrace[],
   truth: Map<string, RelevanceGrade>,
   finalAligned: boolean,
 ): CandidateToFinalRetention {
-  const candidate = stages.find(
-    (stage) => stage.type === "candidate" || stage.type === "retrieval",
-  );
-  const final = stages.find((stage) => stage.type === "final");
+  const candidate =
+    stages.find(
+      (stage) =>
+        stage.type ===
+          "candidate" ||
+        stage.type ===
+          "retrieval",
+    )
 
-  if (!candidate || !final || !finalAligned) {
+  const final =
+    stages.find(
+      (stage) =>
+        stage.type === "final",
+    )
+
+  if (
+    !candidate ||
+    !final ||
+    !finalAligned
+  ) {
     return {
       available: false,
-      candidateStageId: candidate?.id ?? null,
-      finalStageId: final?.id ?? null,
+      candidateStageId:
+        candidate?.id ?? null,
+      finalStageId:
+        final?.id ?? null,
       candidateRelevantCount: 0,
       finalRetainedRelevantCount: 0,
       candidateRelevantLostCount: 0,
       retentionRate: null,
-      warning: !candidate
-        ? "No recorded candidate or retrieval stage is available."
-        : !final
-          ? "No recorded final stage is available."
-          : "Recorded final stage is not aligned to an authoritative snapshot.",
-    };
+
+      warning:
+        !candidate
+          ? "No recorded candidate or retrieval stage is available."
+          : !final
+            ? "No recorded final stage is available."
+            : "Recorded final stage is not aligned to an authoritative snapshot.",
+    }
   }
 
-  const candidateRelevant = candidate.documents.filter(
-    (document) => (truth.get(document.documentKey) ?? 0) >= 1,
-  );
-  const finalKeys = new Set(final.documents.map((document) => document.documentKey));
-  const retained = candidateRelevant.filter((document) => finalKeys.has(document.documentKey));
+  const candidateRelevant =
+    candidate.documents.filter(
+      (document) =>
+        (
+          truth.get(
+            document.documentKey,
+          ) ?? 0
+        ) >= 1,
+    )
+
+  const finalKeys =
+    new Set(
+      final.documents.map(
+        (document) =>
+          document.documentKey,
+      ),
+    )
+
+  const retained =
+    candidateRelevant.filter(
+      (document) =>
+        finalKeys.has(
+          document.documentKey,
+        ),
+    )
 
   return {
-    available: candidateRelevant.length > 0,
-    candidateStageId: candidate.id,
-    finalStageId: final.id,
-    candidateRelevantCount: candidateRelevant.length,
-    finalRetainedRelevantCount: retained.length,
-    candidateRelevantLostCount: candidateRelevant.length - retained.length,
-    retentionRate: candidateRelevant.length ? retained.length / candidateRelevant.length : null,
-    warning: candidateRelevant.length
-      ? null
-      : "Candidate stage contains no accepted relevant documents.",
-  };
+    available:
+      candidateRelevant.length >
+      0,
+    candidateStageId:
+      candidate.id,
+    finalStageId:
+      final.id,
+    candidateRelevantCount:
+      candidateRelevant.length,
+    finalRetainedRelevantCount:
+      retained.length,
+    candidateRelevantLostCount:
+      candidateRelevant.length -
+      retained.length,
+    retentionRate:
+      candidateRelevant.length
+        ? retained.length /
+          candidateRelevant.length
+        : null,
+
+    warning:
+      candidateRelevant.length
+        ? null
+        : "Candidate stage contains no accepted relevant documents.",
+  }
 }
 
+/**
+ * Produces a relevance-focused diagnosis for a complete execution trace.
+ *
+ * The diagnosis combines per-stage metrics, adjacent-stage transitions,
+ * candidate-to-final retention, and policy-based diagnostic patterns.
+ * Patterns describe observed behavior and do not establish causal attribution.
+ */
 export function diagnoseTrace(
   trace: EvaluationExecutionTrace,
   truth: Map<string, RelevanceGrade>,
 ): StageDiagnosisResult {
-  const stages = [...trace.stages].sort((a, b) => a.order - b.order);
-  const metrics = stages.map((stage) => calculateStageMetrics(stage, truth));
-  const transitions = stages
-    .slice(1)
-    .map((stage, index) => calculateTransition(stages[index], stage, truth));
-  const candidateToFinal = candidateRetention(
-    stages,
-    truth,
-    trace.completeness.completeFinalAlignment === true,
-  );
-  const knownRelevant = [...truth.values()].filter((grade) => grade >= 1).length;
-  const earliest = stages[0];
-  const earlySupported = earliest?.type === "candidate" || earliest?.type === "retrieval";
-  const patterns: StageDiagnosisPattern[] = [];
-  const warnings = [...trace.warnings];
+  const stages = [
+    ...trace.stages,
+  ].sort(
+    (a, b) =>
+      a.order - b.order,
+  )
 
-  if (trace.completeness.status !== "complete") {
-    warnings.push("Trace is partial; diagnosis applies only to recorded stages.");
+  const metrics =
+    stages.map(
+      (stage) =>
+        calculateStageMetrics(
+          stage,
+          truth,
+        ),
+    )
+
+  const transitions =
+    stages
+      .slice(1)
+      .map(
+        (stage, index) =>
+          calculateTransition(
+            stages[index],
+            stage,
+            truth,
+          ),
+      )
+
+  const candidateToFinal =
+    candidateRetention(
+      stages,
+      truth,
+      trace.completeness
+        .completeFinalAlignment ===
+        true,
+    )
+
+  const knownRelevant =
+    [...truth.values()].filter(
+      (grade) =>
+        grade >= 1,
+    ).length
+
+  const earliest =
+    stages[0]
+
+  const earlySupported =
+    earliest?.type ===
+      "candidate" ||
+    earliest?.type ===
+      "retrieval"
+
+  const patterns:
+    StageDiagnosisPattern[] = []
+
+  const warnings = [
+    ...trace.warnings,
+  ]
+
+  if (
+    trace.completeness.status !==
+    "complete"
+  ) {
+    warnings.push(
+      "Trace is partial; diagnosis applies only to recorded stages.",
+    )
   }
 
-  const earlyMetric = earlySupported ? metrics[0] : undefined;
+  const earlyMetric =
+    earlySupported
+      ? metrics[0]
+      : undefined
 
+  /*
+   * A low-recall earliest candidate/retrieval stage indicates that known
+   * relevant documents were already absent before downstream processing.
+   */
   if (
     earlyMetric &&
-    earlyMetric.stageBenchmarkRecall.value !== null &&
-    earlyMetric.stageBenchmarkRecall.value < POLICY.earlyRecallThreshold
+    earlyMetric.stageBenchmarkRecall
+      .value !== null &&
+    earlyMetric.stageBenchmarkRecall
+      .value <
+      POLICY.earlyRecallThreshold
   ) {
-    patterns.push("RELEVANT_ABSENT_EARLY_PATTERN");
+    patterns.push(
+      "RELEVANT_ABSENT_EARLY_PATTERN",
+    )
   }
+
   if (
     transitions.some(
       (item) =>
-        (item.relevantLossRate ?? 0) >= POLICY.downstreamLossThreshold ||
-        item.relevantRankChange.demotedCount > item.relevantRankChange.promotedCount,
+        (
+          item.relevantLossRate ??
+          0
+        ) >=
+          POLICY.downstreamLossThreshold ||
+        item.relevantRankChange
+          .demotedCount >
+          item.relevantRankChange
+            .promotedCount,
     )
   ) {
-    patterns.push("RELEVANT_DOWNSTREAM_LOSS_PATTERN");
+    patterns.push(
+      "RELEVANT_DOWNSTREAM_LOSS_PATTERN",
+    )
   }
+
   if (
     transitions.some(
       (item) =>
-        item.relevantRankChange.promotedCount > item.relevantRankChange.demotedCount &&
-        item.relevantLostCount === 0,
+        item.relevantRankChange
+          .promotedCount >
+          item.relevantRankChange
+            .demotedCount &&
+        item.relevantLostCount ===
+          0,
     )
   ) {
-    patterns.push("RELEVANT_DOWNSTREAM_PROMOTION_PATTERN");
+    patterns.push(
+      "RELEVANT_DOWNSTREAM_PROMOTION_PATTERN",
+    )
   }
-  if (transitions.some((item) => item.grade2LostCount > 0)) {
-    patterns.push("GRADE2_LOSS_PATTERN");
-  }
+
   if (
     transitions.some(
       (item) =>
-        (item.fromStageType === "rerank" || item.toStageType === "rerank") &&
-        (item.relevantLostCount > 0 ||
+        item.grade2LostCount >
+        0,
+    )
+  ) {
+    patterns.push(
+      "GRADE2_LOSS_PATTERN",
+    )
+  }
+
+  /*
+   * Rerank-related patterns remain descriptive: they identify a problematic
+   * transition involving a rerank stage without claiming the reranker caused it.
+   */
+  if (
+    transitions.some(
+      (item) =>
+        (
+          item.fromStageType ===
+            "rerank" ||
+          item.toStageType ===
+            "rerank"
+        ) &&
+        (
+          item.relevantLostCount >
+            0 ||
           item.documentOutcomes.some(
             (outcome) =>
-              outcome.outcome === "demoted" &&
-              (outcome.rankDelta ?? 0) <= -POLICY.materialRankDelta,
-          )),
+              outcome.outcome ===
+                "demoted" &&
+              (
+                outcome.rankDelta ??
+                0
+              ) <=
+                -POLICY.materialRankDelta,
+          )
+        ),
     )
   ) {
-    patterns.push("RERANK_TRANSITION_DEMOTION_PATTERN");
+    patterns.push(
+      "RERANK_TRANSITION_DEMOTION_PATTERN",
+    )
   }
 
-  const finalTransition = transitions.find((item) => item.toStageType === "final");
+  const finalTransition =
+    transitions.find(
+      (item) =>
+        item.toStageType ===
+        "final",
+    )
+
   if (
     finalTransition &&
-    finalTransition.relevantRankChange.demotedCount >
-      finalTransition.relevantRankChange.promotedCount
+    finalTransition.relevantRankChange
+      .demotedCount >
+      finalTransition.relevantRankChange
+        .promotedCount
   ) {
-    patterns.push("FINAL_ORDERING_DEGRADATION_PATTERN");
+    patterns.push(
+      "FINAL_ORDERING_DEGRADATION_PATTERN",
+    )
   }
 
-  if (knownRelevant === 0 || trace.completeness.status === "final_only" || stages.length < 2) {
-    patterns.push("STAGE_DIAGNOSIS_UNAVAILABLE");
+  if (
+    knownRelevant === 0 ||
+    trace.completeness.status ===
+      "final_only" ||
+    stages.length < 2
+  ) {
+    patterns.push(
+      "STAGE_DIAGNOSIS_UNAVAILABLE",
+    )
   } else if (!patterns.length) {
-    patterns.push("STAGE_RELEVANCE_STABLE_PATTERN");
+    patterns.push(
+      "STAGE_RELEVANCE_STABLE_PATTERN",
+    )
   }
 
-  if (!stages.some((stage) => stage.type === "final")) {
-    warnings.push("No recorded final stage; candidate-to-final diagnosis is unavailable.");
+  if (
+    !stages.some(
+      (stage) =>
+        stage.type === "final",
+    )
+  ) {
+    warnings.push(
+      "No recorded final stage; candidate-to-final diagnosis is unavailable.",
+    )
   }
 
   warnings.push(
-    ...metrics.flatMap((metric) =>
-      metric.warnings.map((warning) => `${metric.stageId}: ${warning}`),
+    ...metrics.flatMap(
+      (metric) =>
+        metric.warnings.map(
+          (warning) =>
+            `${metric.stageId}: ${warning}`,
+        ),
     ),
-  );
+  )
 
-  const direction = patterns.includes("STAGE_DIAGNOSIS_UNAVAILABLE")
-    ? "unavailable"
-    : patterns.some(
-          (p) =>
-            p.includes("LOSS") ||
-            p.includes("DEGRADATION") ||
-            p.includes("DEMOTION") ||
-            p.includes("ABSENT"),
-        ) && patterns.includes("RELEVANT_DOWNSTREAM_PROMOTION_PATTERN")
-      ? "mixed"
+  const direction =
+    patterns.includes(
+      "STAGE_DIAGNOSIS_UNAVAILABLE",
+    )
+      ? "unavailable"
       : patterns.some(
-            (p) =>
-              p.includes("LOSS") ||
-              p.includes("DEGRADATION") ||
-              p.includes("DEMOTION") ||
-              p.includes("ABSENT"),
+            (pattern) =>
+              pattern.includes(
+                "LOSS",
+              ) ||
+              pattern.includes(
+                "DEGRADATION",
+              ) ||
+              pattern.includes(
+                "DEMOTION",
+              ) ||
+              pattern.includes(
+                "ABSENT",
+              ),
+          ) &&
+          patterns.includes(
+            "RELEVANT_DOWNSTREAM_PROMOTION_PATTERN",
           )
-        ? "degraded"
-        : patterns.includes("RELEVANT_DOWNSTREAM_PROMOTION_PATTERN")
-          ? "improved"
-          : "healthy";
+        ? "mixed"
+        : patterns.some(
+              (pattern) =>
+                pattern.includes(
+                  "LOSS",
+                ) ||
+                pattern.includes(
+                  "DEGRADATION",
+                ) ||
+                pattern.includes(
+                  "DEMOTION",
+                ) ||
+                pattern.includes(
+                  "ABSENT",
+                ),
+            )
+          ? "degraded"
+          : patterns.includes(
+                "RELEVANT_DOWNSTREAM_PROMOTION_PATTERN",
+              )
+            ? "improved"
+            : "healthy"
 
   const summary =
     direction === "unavailable"
@@ -458,27 +1170,55 @@ export function diagnoseTrace(
           ? "Known relevant documents gained ranking prominence across recorded stages. This is descriptive evidence and does not identify a causal component."
           : direction === "mixed"
             ? "Recorded stages show mixed relevant-document gains and losses. This is descriptive evidence and does not identify a causal component."
-            : "Measured relevance remained broadly stable across recorded stages.";
+            : "Measured relevance remained broadly stable across recorded stages."
 
   return {
-    diagnosisVersion: EVALUATION_STAGE_DIAGNOSIS_VERSION,
-    traceId: trace.id,
-    datasetVersionId: trace.datasetVersionId!,
-    evaluationQueryId: trace.evaluationQueryId!,
-    sourceQueryId: trace.sourceQueryId,
-    traceCompleteness: trace.completeness.status,
+    diagnosisVersion:
+      EVALUATION_STAGE_DIAGNOSIS_VERSION,
+
+    traceId:
+      trace.id,
+
+    datasetVersionId:
+      trace.datasetVersionId!,
+
+    evaluationQueryId:
+      trace.evaluationQueryId!,
+
+    sourceQueryId:
+      trace.sourceQueryId,
+
+    traceCompleteness:
+      trace.completeness.status,
+
     earliestRecordedStage: {
-      id: earliest.id,
-      type: earliest.type,
-      supportsEarlyStageDiagnosis: earlySupported,
+      id:
+        earliest.id,
+      type:
+        earliest.type,
+      supportsEarlyStageDiagnosis:
+        earlySupported,
     },
-    knownRelevantBenchmarkCount: knownRelevant,
-    stages: metrics,
+
+    knownRelevantBenchmarkCount:
+      knownRelevant,
+
+    stages:
+      metrics,
+
     transitions,
+
     candidateToFinal,
-    patterns: [...new Set(patterns)],
+
+    patterns: [
+      ...new Set(patterns),
+    ],
+
     direction,
     summary,
-    warnings: [...new Set(warnings)],
-  };
+
+    warnings: [
+      ...new Set(warnings),
+    ],
+  }
 }
