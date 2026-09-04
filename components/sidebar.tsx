@@ -15,7 +15,6 @@ import { useConnectionHealth } from "@/monitoring/healthcheck/ConnectionHealthPr
 import { useWeaviateStore } from "@/app/store/weaviate-store"
 import { useAnalyticsStore } from "@/app/store/use-analytics-store"
 import { useState, useEffect } from "react"
-import { getEmbeddingService } from "@/app/services/EmbeddingService"
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -39,28 +38,12 @@ export default function Sidebar() {
   // drift result's embeddingMode, otherwise default to "gemini" (correct
   // assumption when Gemini is healthy and no drift has run yet).
   //
-  // cacheHitRate: read from EmbeddingService singleton's in-process LRU
-  // hit rate. This resets on cold start but updates in real time as
-  // embeddings are served from cache within the current invocation.
+  // Cache statistics must arrive in analytics data from the server. Importing
+  // the server-only embedding service here would bundle Node/Redis code into
+  // the browser application.
   const analytics = useAnalyticsStore(state => state.analytics)
   const embeddingMode = (analytics as any)?.embeddingMode ?? "gemini"
-
-  const [cacheHitRate, setCacheHitRate] = useState(0)
-
-  useEffect(() => {
-    // Poll EmbeddingService singleton every 10s for real cache hit rate
-    const update = () => {
-      try {
-        const stats = getEmbeddingService().cacheStats
-        setCacheHitRate(stats.lruHitRate)
-      } catch {
-        // EmbeddingService not yet initialised — leave at 0
-      }
-    }
-    update()
-    const interval = setInterval(update, 10_000)
-    return () => clearInterval(interval)
-  }, [])
+  const cacheHitRate = (analytics as any)?.averageCacheHitRate ?? 0
 
   useEffect(() => {
     setActivityStats({
@@ -260,8 +243,8 @@ export default function Sidebar() {
 
             {/* FIX: EmbeddingModeIndicator now receives real values.
                 embeddingMode — read from analytics store, defaults to "gemini"
-                cacheHitRate  — polled from EmbeddingService singleton every 10s
-                Neither is undefined anymore. */}
+                cacheHitRate  — supplied by server-side analytics data
+                Neither imports server-only embedding code into this client. */}
             <div className="mt-2">
               <EmbeddingModeIndicator
                 mode={embeddingMode as "gemini" | "openai" | "position-only"}

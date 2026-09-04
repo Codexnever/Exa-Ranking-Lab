@@ -150,9 +150,7 @@ The benchmark retrieval flow is:
 Frozen dataset and evaluation query
 → server-derived source query and frozen source-snapshot corpus
 → Gemini query embedding
-→ Weaviate nearVector candidates
-→ Binary Quantization similarity ranking
-→ optional Product Quantization ADC reranking
+→ Weaviate nearVector search and native ordering/rescoring
 → canonical document deduplication
 → top K unique URLs
 → explicit Strategy Execution import
@@ -161,11 +159,19 @@ Frozen dataset and evaluation query
 
 Candidate retrieval is bounded but intentionally fetches more than `K` before deduplication. When historical snapshots, repeated synchronization, or content chunks represent the same canonical document, only its highest-ranked occurrence is returned and later unique candidates fill the duplicate slots. The underlying historical records remain unchanged. Canonical identity uses evaluation canonicalization policy v1, including HTTPS/host normalization, fragment and tracking-parameter removal, and trailing-slash normalization.
 
-The optional PQ pass uses the project-specific score `0.35 × BQ similarity + 0.65 × normalized ADC score`. This is an Exa Ranking Lab strategy implementation detail, not Weaviate's default dense-ranking formula. Deduplication happens after this ranking and before the final limit.
+Production retrieval no longer stores or reranks with process-local BQ/PQ codes. Existing `binaryCode`, `pqCode`, and `quantizationMethod` properties remain readable for compatibility, but new objects do not populate them. Native Weaviate certainty and distance now describe the same returned ordering.
 
 Stored source `position` is historical metadata from the original ranking. It is not Strategy Execution rank. When retrieved URLs are explicitly imported, the Strategy Execution service derives contiguous rank from returned array order and independently derives canonical URL and document key. Retrieval does not silently create an execution.
 
 This corpus is reproducible relative to the immutable source snapshots that supplied frozen accepted judgment evidence. It is not an exhaustive web corpus, and Benchmark Recall remains relative to known accepted relevant benchmark documents.
+
+### Embedding cache and native quantization
+
+Embedding reuse follows `small process-local LRU → optional Upstash Redis → Gemini/OpenAI provider`. Redis shares embeddings across instances and cold starts; it does not replace Weaviate, which stores full document vectors and owns vector-index search. Cache keys are SHA-256 identities scoped by provider, model, task/preparation version, and dimensions, so Gemini and OpenAI fallback vectors cannot share an embedding space. Redis failures are cache misses and never make retrieval fail.
+
+Set server-only `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enable L2 caching. `EMBEDDING_CACHE_TTL_SECONDS` defaults to seven days. The old Appwrite `embedding_cache` collection is no longer read or written, but is deliberately not deleted.
+
+`WEAVIATE_QUANTIZATION=none` is the safe default. `rq-8` explicitly requests Weaviate-native 8-bit rotational quantization with a rescore limit of 20 on HNSW and requires Weaviate 1.32+. Roll out by inspecting the existing collection configuration and server version first, then opting in deliberately. Quantization cannot be disabled or replaced safely in place; the service refuses conflicting quantizers and never recreates the collection. Cache hit statistics and native quantization status are separate—Redis caches provider outputs, while RQ compresses Weaviate's vector index. Judgment and Strategy Lab latency are separate Appwrite batching concerns.
 
 ## Algorithm Update Detector v2.1
 

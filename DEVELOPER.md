@@ -77,7 +77,7 @@ COLLECTION_FEEDBACK=
 COLLECTION_ANALYTICS=
 COLLECTION_NOTIFICATIONS=            # new — drift alerts
 COLLECTION_ALGORITHM_EVENTS=         # new — algorithm update detector
-COLLECTION_EMBEDDING_CACHE=          # new — persistent embedding cache
+COLLECTION_EMBEDDING_CACHE=          # legacy; retained but no longer used
 COLLECTION_EVALUATION_RUNS=          # immutable evaluation-run headers
 COLLECTION_EVALUATION_RUN_QUERIES=   # per-query metric payloads for each run
 NEXT_PUBLIC_COLLECTION_SETTINGS=
@@ -87,6 +87,12 @@ COLLECTION_API_USAGE=
 # Weaviate
 WEAVIATE_URL=
 WEAVIATE_API_KEY=
+WEAVIATE_QUANTIZATION=none           # none | rq-8 (explicit, irreversible opt-in)
+
+# Optional shared embedding cache (server-only)
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+EMBEDDING_CACHE_TTL_SECONDS=604800
 
 # Gemini (primary embedding model)
 GEMINI_API_KEY=
@@ -154,7 +160,7 @@ app/services/database/               # Data access layer
 └── snapshot-service.ts
 
 app/services/weaviate/
-└── weaviate-service.ts              # BQ+PQ, sync, anomaly detection
+└── weaviate-service.ts              # native vector search/RQ, sync, anomaly detection
 
 store/
 ├── use-analytics-store.ts
@@ -201,7 +207,7 @@ GET /api/drift/[queryid]
           → check content hashes (fast path if all identical)
           → collect unique texts → EmbeddingService.embedBatch()
               → LRU cache check
-              → Appwrite persistent cache check (embedding_cache collection)
+              → process LRU / optional Upstash embedding cache
               → Gemini gemini-embedding-2-preview API
               → OpenAI text-embedding-3-small (if Gemini fails)
               → position-only mode (if both fail — simScore=0.5 neutral)
@@ -457,12 +463,14 @@ For each query's results in Weaviate:
 ```
 embed(text, contentHash?) →
 
-  1. In-process LRU cache (2000 entries, 24h TTL)
-     cache key = contentHash if available, else djb2(text)
+  1. Process-local Map LRU (256 entries, 24h TTL)
+     successful reads refresh recency
      → HIT: return immediately, sub-millisecond
 
-  2. Appwrite persistent cache (embedding_cache collection)
-     → HIT: store in LRU, return
+  2. Optional Upstash Redis shared cache (7-day default TTL)
+     → one MGET for batch misses; one pipeline for batch writes
+     → HIT: decode/validate Float32 Base64, populate LRU, return
+     → failure/timeout/malformed value: treat as a miss
      → MISS: continue
 
   3. Gemini gemini-embedding-2-preview
@@ -470,12 +478,12 @@ embed(text, contentHash?) →
      batch: :batchEmbedContents (up to 100/call)
      output: 768-dim float32
      prepareText: "task: sentence similarity | query: {text}"
-     → SUCCESS: store in LRU + Appwrite (fire-and-forget), return
+     → SUCCESS: store in LRU + Redis, return
      → FAIL: continue
 
   4. OpenAI text-embedding-3-small
      dimensions: 768 (matches Gemini output dim)
-     → SUCCESS: store in LRU + Appwrite (fire-and-forget), return
+     → SUCCESS: store in its separate OpenAI namespace, return
      → FAIL: continue
 
   5. Position-only degradation
@@ -484,15 +492,11 @@ embed(text, contentHash?) →
      UI shows "Position Only" badge in EmbeddingModeIndicator
 ```
 
-### WeaviateService embedding (separate from EmbeddingService)
+Cache keys use `embedding:v1:<sha256>` and hash a versioned identity containing provider, model, task, preparation version, dimensions, and prepared text or a trusted content identity. Original text is never stored in the Redis key. Values contain version/provider/model/dimensions plus a Float32 Base64 vector and creation timestamp; incompatible dimensions, byte length, namespace, or non-finite values are rejected.
 
-WeaviateService has its OWN internal embedding logic (5000-entry LRU) for
-SYNC operations. This is separate from EmbeddingService intentionally:
-- WeaviateService embeds for STORAGE (sync snapshots to Weaviate)
-- EmbeddingService embeds for ANALYSIS (drift similarity scoring)
-Different contexts, different lifetimes. Two caches exist — acceptable at
-this scale. Future: pass EmbeddingService into WeaviateService constructor
-to unify.
+Gemini is checked and called before the OpenAI fallback namespace is considered. Consequently, a cached OpenAI fallback can never be returned as a Gemini hit. Missing Redis configuration emits one bounded diagnostic and leaves L1/provider behavior intact. Appwrite `embedding_cache` data is retained but no longer read or written.
+
+Weaviate synchronization uses the same shared cache implementation with a distinct semantic-similarity preparation namespace. Full vectors are always sent to Weaviate.
 
 ---
 
@@ -524,9 +528,9 @@ Properties:
   score               number
   contentHash         text
   category            text
-  binaryCode          text     base64 BQ-compressed vector (96 bytes = 768 bits)
-  pqCode              text     base64 PQ-compressed codes (after 2000 vectors trained)
-  quantizationMethod  text     "BQ" or "BQ+PQ"
+  binaryCode          text     legacy compatibility; no longer written
+  pqCode              text     legacy compatibility; no longer written
+  quantizationMethod  text     legacy compatibility; no longer written
   name                text     (query_intent only)
   query               text     (query_intent only)
   lastRun             date     (query_intent only)
@@ -534,32 +538,27 @@ Properties:
   driftScore          number   (drift_pattern only)
   contentChanges      int      (drift_pattern only)
 
-EmbeddingCache (separate concern — stored in APPWRITE, not Weaviate):
-  contentHash    text   (unique index)
-  vector         text   JSON.stringify(float32[]) — 768 floats ≈ 5400 chars
-  storedAt       date
+Embedding cache (separate from vector storage):
+  L1             bounded process-local Map LRU
+  L2             optional Upstash Redis, versioned Float32 Base64 payload
+  Weaviate       authoritative full document vectors and vector index
 ```
 
-### BQ+PQ Quantization
+### Native Weaviate quantization
 
 ```
-BQ (Binary Quantization):
-  768-dim float32 → 768 bits → 96 bytes
-  rule: value > 0 → 1, value ≤ 0 → 0
-  similarity: Hamming distance → hammingToSimilarity()
-  compression: 32× vs raw float32
+WEAVIATE_QUANTIZATION=none  # default; inspect only, never mutate quantization
+WEAVIATE_QUANTIZATION=rq-8  # explicit opt-in; Weaviate 1.32+ HNSW only
 
-PQ (Product Quantization):
-  triggered after 2000 vectors collected (HybridQuantizer.maybeCollectAndTrain)
-  8 subspaces, 128 codebook (reduced from 256 to handle 768-dim efficiently)
-  15 k-means++ iterations
-  OPQ-lite: sorts dimensions by variance before subspace assignment
-
-Hybrid reranking:
-  final = 0.35 × bqSimilarity + 0.65 × adcScore
-  BQ provides coarse fast first pass
-  PQ ADC provides fine-grained second pass
+RQ-8 configuration:
+  enabled: true
+  bits: 8
+  rescoreLimit: 20
 ```
+
+At collection creation, `rq-8` is included in `vectorIndexConfig`. For an existing collection, initialization reads the complete class definition, verifies the server version and HNSW index, refuses existing conflicting BQ/PQ/SQ or non-8-bit RQ, preserves every existing field, and updates only the `rq` configuration. `none` never performs a schema update. Native quantization cannot be disabled after enablement, so production rollout must be an explicit configuration change preceded by schema backup/inspection. The service never deletes or recreates a collection.
+
+Production `nearVector` order, certainty, and distance are authoritative. Node.js no longer trains a process-local codebook or performs BQ/PQ reranking. Content anomaly detection requests `_additional { vector }`, validates full vectors, and uses cosine similarity to a per-query centroid; malformed and dimension-mismatched vectors are skipped.
 
 ### Legacy cleanup
 
@@ -729,14 +728,13 @@ Descriptions are generated from the structured event when written. Event documen
 scoped by user, category, and UTC correlation-window bucket so repeated cron
 runs update the same event rather than creating duplicates.
 
-### embedding_cache (NEW — Appwrite, not Weaviate)
+### embedding_cache (legacy, retained)
 ```
 contentHash  string   required, UNIQUE INDEX
 vector       string   JSON.stringify(float32[]) ≈ 5400 chars for 768-dim
 storedAt     datetime required
 ```
-Why Appwrite not Weaviate: free Weaviate plan = 1 collection only
-(ExaRankingData already uses it).
+This collection is preserved for backward safety but application code no longer reads or writes it. Do not delete it as part of the cache rollout; retention and cleanup require a separate data-ownership review.
 
 ---
 
@@ -804,9 +802,7 @@ Holds `isConnected`, `dataSource`, `semanticInsights`, `enhancedMetrics`,
 | Weaviate free plan = 1 collection | Must use recordType discriminator | Upgrade plan → separate collections |
 | `detectContentAnomalies` limit=1000 | Miss anomalies when >1000 results in range | Paginate the Weaviate query |
 | `syncSnapshot` no duplicate guard | Retry storms could create duplicate vectors | Add idempotency check by snapshotId |
-| WeaviateService has own embedding LRU | Vector cache not shared with EmbeddingService | Pass EmbeddingService into constructor |
 | `getAllScheduledQueries` full table scan | Slow with many queries | Add `scheduleEnabled` indexed boolean |
-| Embedding cache in Appwrite (not Redis) | Higher latency than in-memory | Add Redis/Upstash for hot path |
 | `deleteQuery` snapshot deletion synchronous | Slow for queries with many snapshots | Background job / queue |
 
 ---

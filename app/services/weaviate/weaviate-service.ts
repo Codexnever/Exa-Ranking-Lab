@@ -16,6 +16,10 @@
 import weaviate, { WeaviateClient, ApiKey } from "weaviate-ts-client"
 import type { RankingSnapshot, QueryConfig } from "@/types/type"
 import { getDocumentIdentity } from "@/utils/canonicalize-document-url"
+import {
+  type EmbeddingCacheNamespace,
+  createEmbeddingCacheFromEnvironment,
+} from "@/app/services/embedding/embedding-cache"
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -49,7 +53,56 @@ type ExaCategory =
   | "github" | "tweet" | "personal site"
   | "linkedin profile" | "financial report"
 
-type RecordType = "search_result" | "query_intent" | "drift_pattern"
+export type WeaviateQuantization = "none" | "rq-8"
+
+interface WeaviateClassDefinition {
+  class?: string
+  vectorIndexType?: string
+  vectorIndexConfig?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export function getRequestedWeaviateQuantization(value = process.env.WEAVIATE_QUANTIZATION): WeaviateQuantization {
+  const normalized = value?.trim().toLowerCase() || "none"
+  if (normalized === "none" || normalized === "rq-8") return normalized
+  throw new Error("WEAVIATE_QUANTIZATION must be either 'none' or 'rq-8'")
+}
+
+export function planNativeRqUpdate(
+  existing: WeaviateClassDefinition,
+  requested: WeaviateQuantization,
+  serverVersion: string,
+): { action: "none" | "update"; classDefinition: WeaviateClassDefinition; status: WeaviateQuantization } {
+  const config = existing.vectorIndexConfig ?? {}
+  const rq = config.rq as { enabled?: boolean; bits?: number } | undefined
+  if (rq?.enabled) {
+    if ((rq.bits ?? 8) !== 8) throw new Error("Existing Weaviate RQ uses a conflicting bit width; it will not be overwritten")
+    return { action: "none", classDefinition: existing, status: "rq-8" }
+  }
+  if (requested === "none") return { action: "none", classDefinition: existing, status: "none" }
+  const [major, minor] = serverVersion.split(".").map(Number)
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || major < 1 || (major === 1 && minor < 32)) {
+    throw new Error(`WEAVIATE_QUANTIZATION=rq-8 requires Weaviate 1.32+; detected ${serverVersion}`)
+  }
+  if ((existing.vectorIndexType ?? "hnsw") !== "hnsw") {
+    throw new Error("WEAVIATE_QUANTIZATION=rq-8 in-place enablement is limited to HNSW collections")
+  }
+  for (const name of ["bq", "pq", "sq"] as const) {
+    const quantizer = config[name] as { enabled?: boolean } | undefined
+    if (quantizer?.enabled) throw new Error(`Existing Weaviate ${name.toUpperCase()} quantization will not be overwritten`)
+  }
+  return {
+    action: "update",
+    status: "rq-8",
+    classDefinition: {
+      ...existing,
+      vectorIndexConfig: {
+        ...config,
+        rq: { enabled: true, bits: 8, rescoreLimit: 20 },
+      },
+    },
+  }
+}
 
 export interface SemanticSearchScope {
   sourceQueryId: string
@@ -124,8 +177,83 @@ export function takeUniqueCanonicalSearchHits<T extends { url: string }>(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function arrMin(arr: number[]): number { return arr.reduce((m, v) => v < m ? v : m, arr[0] ?? 0) }
-function arrMax(arr: number[]): number { return arr.reduce((m, v) => v > m ? v : m, arr[0] ?? 0) }
+export function isFiniteVector(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length > 0 && value.every(item => typeof item === "number" && Number.isFinite(item))
+}
+
+export function cosineSimilarity(a: number[], b: number[]): number | null {
+  if (!isFiniteVector(a) || !isFiniteVector(b) || a.length !== b.length) return null
+  let dot = 0, normA = 0, normB = 0
+  for (let index = 0; index < a.length; index++) {
+    dot += a[index] * b[index]
+    normA += a[index] ** 2
+    normB += b[index] ** 2
+  }
+  const denominator = Math.sqrt(normA) * Math.sqrt(normB)
+  return denominator ? Math.max(-1, Math.min(1, dot / denominator)) : null
+}
+
+interface VectorAnomalyRow {
+  queryId?: string
+  url?: string
+  title?: string
+  position?: number
+  timestamp?: string
+  _additional?: { vector?: unknown }
+}
+
+export interface ContentAnomaly {
+  type: "content_anomaly"
+  queryId: string
+  url?: string
+  title?: string
+  position?: number
+  timestamp?: string
+  anomalyScore: number
+  avgSimilarity: number
+  expectedSimilarity: number
+  detectionMethod: "full-vector cosine centroid"
+}
+
+export function calculateFullVectorAnomalies(rows: VectorAnomalyRow[]): ContentAnomaly[] {
+  const groups = new Map<string, Array<{ row: VectorAnomalyRow; vector: number[] }>>()
+  for (const row of rows) {
+    const vector = row?._additional?.vector
+    if (!row?.queryId || !isFiniteVector(vector)) continue
+    const existing = groups.get(row.queryId) ?? []
+    if (existing.length && existing[0].vector.length !== vector.length) continue
+    existing.push({ row, vector })
+    groups.set(row.queryId, existing)
+  }
+  const anomalies: ContentAnomaly[] = []
+  for (const [queryId, items] of groups) {
+    if (items.length < 3) continue
+    const dimensions = items[0].vector.length
+    const centroid = new Array<number>(dimensions).fill(0)
+    for (const { vector } of items) for (let index = 0; index < dimensions; index++) centroid[index] += vector[index]
+    for (let index = 0; index < dimensions; index++) centroid[index] /= items.length
+    const similarities = items.map(item => cosineSimilarity(item.vector, centroid)).filter((value): value is number => value !== null)
+    if (similarities.length !== items.length) continue
+    const mean = similarities.reduce((sum, value) => sum + value, 0) / similarities.length
+    const deviation = Math.sqrt(similarities.reduce((sum, value) => sum + (value - mean) ** 2, 0) / similarities.length)
+    items.forEach(({ row }, index) => {
+      if (similarities[index] >= mean - 2 * deviation) return
+      anomalies.push({
+        type: "content_anomaly",
+        queryId,
+        url: row.url,
+        title: row.title,
+        position: row.position,
+        timestamp: row.timestamp,
+        anomalyScore: deviation > 0 ? (mean - similarities[index]) / deviation : 0,
+        avgSimilarity: similarities[index],
+        expectedSimilarity: mean,
+        detectionMethod: "full-vector cosine centroid",
+      })
+    })
+  }
+  return anomalies.sort((a, b) => b.anomalyScore - a.anomalyScore)
+}
 
 /**
  * Extract a readable message from any error shape.
@@ -168,6 +296,13 @@ const GEMINI_BASE   = `https://generativelanguage.googleapis.com/v1beta/models/$
 const GEMINI_DIM    = 768
 const GEMINI_MAX_CHARS = 16_000
 const GEMINI_BATCH_LIMIT = 100
+const GEMINI_CACHE_NAMESPACE: EmbeddingCacheNamespace = {
+  provider: "gemini",
+  model: GEMINI_MODEL,
+  task: "semantic-similarity",
+  dimensions: GEMINI_DIM,
+  preparationVersion: "weaviate-semantic-similarity-v1",
+}
 
 function getGeminiApiKey(): string {
   const key = process.env.GEMINI_API_KEY
@@ -311,301 +446,8 @@ class TokenAwareChunker {
   }
 }
 
-// ─── Binary quantizer ─────────────────────────────────────────────────────────
-
-class BinaryQuantizer {
-  private readonly BPB = 8
-  constructor(private dimension: number) {}
-
-  quantize(vector: number[]): Uint8Array {
-    if (vector.length !== this.dimension)
-      throw new Error(`BQ dim mismatch: expected ${this.dimension}, got ${vector.length}`)
-    const bytes = new Uint8Array(Math.ceil(this.dimension / this.BPB))
-    for (let i = 0; i < this.dimension; i++) {
-      if (vector[i] > 0) bytes[(i / this.BPB) | 0] |= 1 << (7 - (i % this.BPB))
-    }
-    return bytes
-  }
-
-  dequantize(bytes: Uint8Array): number[] {
-    const v = new Array(this.dimension).fill(0)
-    for (let i = 0; i < this.dimension; i++) {
-      const mask = 1 << (7 - (i % this.BPB))
-      v[i] = bytes[(i / this.BPB) | 0] & mask ? 1 : -1
-    }
-    return v
-  }
-
-  hammingDistance(a: Uint8Array, b: Uint8Array): number {
-    if (a.length !== b.length) return -1
-    let d = 0
-    for (let i = 0; i < a.length; i++) d += this.popCount(a[i] ^ b[i])
-    return d
-  }
-
-  hammingToSimilarity(hd: number): number {
-    if (hd < 0) return 0
-    return 1 - hd / this.dimension
-  }
-
-  getCompressionRatio(): number {
-    return (this.dimension * 4) / Math.ceil(this.dimension / 8)
-  }
-
-  getMemorySavings() {
-    const orig = (this.dimension * 4) / (1024 * 1024)
-    const comp = Math.ceil(this.dimension / 8) / (1024 * 1024)
-    return {
-      original:   `${orig.toFixed(2)}MB`,
-      compressed: `${comp.toFixed(2)}MB`,
-      savings:    `${(((orig - comp) / orig) * 100).toFixed(1)}%`,
-    }
-  }
-
-  private popCount(x: number): number {
-    let c = 0; while (x) { c++; x &= x - 1 } return c
-  }
-}
-
-// ─── OPQ-lite ─────────────────────────────────────────────────────────────────
-
-class VarianceBalancedOPQ {
-  private perm: Uint16Array | null = null
-  private inv:  Uint16Array | null = null
-
-  train(vectors: number[][], nSub: number) {
-    if (!vectors.length) return
-    const dim  = vectors[0].length
-    const mean = new Float64Array(dim)
-    for (const v of vectors) for (let i = 0; i < dim; i++) mean[i] += v[i]
-    for (let i = 0; i < dim; i++) mean[i] /= vectors.length
-
-    const varD = new Float64Array(dim)
-    for (const v of vectors) for (let i = 0; i < dim; i++) { const d = v[i]-mean[i]; varD[i]+=d*d }
-
-    const idx     = Array.from({length:dim},(_,i)=>i).sort((a,b)=>varD[b]-varD[a])
-    const buckets: number[][] = Array.from({length:nSub},()=>[])
-    idx.forEach((d,i)=>buckets[i%nSub].push(d))
-
-    const permArr: number[] = []
-    buckets.forEach(b=>permArr.push(...b))
-    this.perm = new Uint16Array(permArr)
-    this.inv  = new Uint16Array(dim)
-    for (let i = 0; i < dim; i++) this.inv[this.perm[i]] = i
-  }
-
-  apply(v: number[]): number[] {
-    if (!this.perm) return v
-    const o = new Array(v.length)
-    for (let i = 0; i < v.length; i++) o[i] = v[this.perm[i]]
-    return o
-  }
-
-  isReady() { return !!this.perm }
-}
-
-// ─── Product quantizer ────────────────────────────────────────────────────────
-
-class ProductQuantizer {
-  private codebooks: Float32Array[][] = []
-  private subDim:    number
-  private trained    = false
-
-  constructor(
-    private vectorDim    = GEMINI_DIM,
-    private nSub         = 8,
-    // ✅ 768-dim vectors double the per-codebook compute vs the old 384-dim
-    //    MiniLM vectors. Codebook size reduced from 256→128 to keep
-    //    training (k-means++, 15 iters) fast at the 2000-sample threshold.
-    private codebookSize = 128,
-    private maxIters     = 15
-  ) {
-    if (vectorDim % nSub !== 0) throw new Error("vectorDim must be divisible by nSub")
-    this.subDim = vectorDim / nSub
-  }
-
-  isTrained() { return this.trained }
-
-  train(raw: number[][], opq?: VarianceBalancedOPQ) {
-    if (!raw.length) return
-    const vecs = opq?.isReady() ? raw.map(v => opq.apply(v)) : raw
-    const subspaces: number[][][] = Array.from({length:this.nSub},()=>[])
-    for (const v of vecs) {
-      for (let s = 0; s < this.nSub; s++) {
-        subspaces[s].push(v.slice(s*this.subDim, (s+1)*this.subDim))
-      }
-    }
-    this.codebooks = subspaces.map(d => this.kmeans(d, this.codebookSize, this.maxIters))
-    this.trained = true
-  }
-
-  encode(vector: number[], opq?: VarianceBalancedOPQ): Uint8Array {
-    if (vector.length !== this.vectorDim) throw new Error("dim mismatch")
-    const v = opq?.isReady() ? opq.apply(vector) : vector
-    const codes = new Uint8Array(this.nSub)
-    for (let s = 0; s < this.nSub; s++) {
-      codes[s] = this.argmin(this.codebooks[s], v.slice(s*this.subDim, (s+1)*this.subDim))
-    }
-    return codes
-  }
-
-  adcDistance(query: number[], codes: Uint8Array, opq?: VarianceBalancedOPQ): number {
-    const q = opq?.isReady() ? opq.apply(query) : query
-    let sum = 0
-    for (let s = 0; s < this.nSub; s++) {
-      const sub = q.slice(s*this.subDim, (s+1)*this.subDim)
-      sum += this.l2sq(sub, this.codebooks[s][codes[s]])
-    }
-    return sum
-  }
-
-  getCompressionRatio(dim: number): number {
-    return (dim * 4) / this.nSub
-  }
-
-  private argmin(centroids: Float32Array[], x: number[]): number {
-    let best = 0, bestD = Infinity
-    for (let i = 0; i < centroids.length; i++) {
-      const d = this.l2sq(x, centroids[i])
-      if (d < bestD) { bestD = d; best = i }
-    }
-    return best
-  }
-
-  private l2sq(a: number[], b: Float32Array): number {
-    let s = 0
-    for (let i = 0; i < a.length; i++) { const d = a[i]-b[i]; s+=d*d }
-    return s
-  }
-
-  private l2sqArr(a: number[], b: number[]): number {
-    let s = 0
-    for (let i = 0; i < a.length; i++) { const d = a[i]-b[i]; s+=d*d }
-    return s
-  }
-
-  private kmeans(data: number[][], k: number, maxIters: number): Float32Array[] {
-    if (data.length < k) {
-      const copies = [...data]
-      while (copies.length < k) copies.push(data[Math.floor(Math.random()*data.length)])
-      return copies.map(v => Float32Array.from(v))
-    }
-    const centroids: number[][] = [data[Math.floor(Math.random()*data.length)]]
-    while (centroids.length < k) {
-      const d2 = data.map(x => {
-        let best = Infinity
-        for (const c of centroids) { const d=this.l2sqArr(x,c); if(d<best) best=d }
-        return best
-      })
-      const total = d2.reduce((a,b)=>a+b,0)
-      let r = Math.random()*total, idx = 0
-      for (; idx<d2.length-1; idx++) { r-=d2[idx]; if(r<=0) break }
-      centroids.push(data[idx])
-    }
-    const assigns = new Uint16Array(data.length)
-    for (let iter = 0; iter < maxIters; iter++) {
-      let changed = 0
-      for (let i = 0; i < data.length; i++) {
-        let best=0, bestD=Infinity
-        for (let c=0; c<k; c++) { const d=this.l2sqArr(data[i],centroids[c]); if(d<bestD){bestD=d;best=c} }
-        if (assigns[i]!==best) { assigns[i]=best; changed++ }
-      }
-      if (!changed && iter>0) break
-      const sums: number[][] = Array.from({length:k},()=>Array(data[0].length).fill(0))
-      const counts = new Uint32Array(k)
-      for (let i=0;i<data.length;i++) {
-        const a=assigns[i]; counts[a]++
-        for (let d=0;d<data[i].length;d++) sums[a][d]+=data[i][d]
-      }
-      for (let c=0;c<k;c++) {
-        if (!counts[c]) centroids[c]=data[Math.floor(Math.random()*data.length)]
-        else            centroids[c]=sums[c].map(v=>v/counts[c])
-      }
-    }
-    return centroids.map(c=>Float32Array.from(c))
-  }
-}
-
-// ─── Hybrid quantizer ─────────────────────────────────────────────────────────
-
-class HybridQuantizer {
-  readonly bq:  BinaryQuantizer
-  readonly pq:  ProductQuantizer
-  readonly opq: VarianceBalancedOPQ
-  private trainingPool: number[][] = []
-  private trained = false
-
-  constructor(private dim: number, pqSub=8, pqK=128) {
-    this.bq  = new BinaryQuantizer(dim)
-    this.pq  = new ProductQuantizer(dim, pqSub, pqK)
-    this.opq = new VarianceBalancedOPQ()
-  }
-
-  maybeCollectAndTrain(v: number[]) {
-    if (this.trained) return
-    this.trainingPool.push(v)
-    if (this.trainingPool.length >= 2000) {
-      this.opq.train(this.trainingPool, 8)
-      this.pq.train(this.trainingPool, this.opq)
-      this.trainingPool = []
-      this.trained = true
-      console.log("[HybridQuantizer] OPQ-lite + PQ trained.")
-    }
-  }
-
-  quantizeBQ(v: number[])  { return this.bq.quantize(v) }
-  encodePQ(v: number[])    { return this.pq.isTrained() ? this.pq.encode(v, this.opq) : null }
-  adcDistance(q: number[], codes: Uint8Array) { return this.pq.adcDistance(q, codes, this.opq) }
-  isPQReady()              { return this.pq.isTrained() }
-
-  getStats() {
-    const b = this.bq.getMemorySavings()
-    return {
-      compressionRatio: this.bq.getCompressionRatio(),
-      memorySavings:    b,
-      pqReady:          this.isPQReady(),
-      pqCompression:    this.pq.getCompressionRatio(this.dim),
-    }
-  }
-}
-
-// ─── Embedding cache (vectors only — BQ/PQ codes computed on demand) ─────────
-
-interface CacheEntry { vector: number[]; timestamp: number }
-
-class LRUEmbeddingCache {
-  private map   = new Map<string, CacheEntry>()
-  private order: string[] = []
-
-  // 768-dim float64 ≈ 6KB; 5000 entries ≈ 30MB
-  constructor(private maxSize = 5000, private ttlMs = 24 * 60 * 60 * 1000) {}
-
-  get(key: string): number[] | undefined {
-    const e = this.map.get(key)
-    if (!e) return undefined
-    if (Date.now() - e.timestamp > this.ttlMs) { this.delete(key); return undefined }
-    return e.vector
-  }
-
-  set(key: string, vector: number[]) {
-    if (this.map.has(key)) {
-      this.order = this.order.filter(k => k !== key)
-    } else if (this.map.size >= this.maxSize) {
-      const oldest = this.order.shift()
-      if (oldest) this.map.delete(oldest)
-    }
-    this.map.set(key, { vector, timestamp: Date.now() })
-    this.order.push(key)
-  }
-
-  delete(key: string) {
-    this.map.delete(key)
-    this.order = this.order.filter(k => k !== key)
-  }
-
-  get size() { return this.map.size }
-}
-
+// Vector-index compression and rescoring are owned by Weaviate. Legacy
+// binaryCode/pqCode properties remain readable but are no longer produced.
 // ─── Weaviate Service ─────────────────────────────────────────────────────────
 
 //  Single unified collection — this instance allows only 1 collection.
@@ -629,12 +471,10 @@ export class WeaviateService {
   private lastInitError:     { time: number; error: unknown } | null = null
   private readonly INIT_RETRY_COOLDOWN_MS = 60_000   // 1 minute
 
-  private vectorCache:  LRUEmbeddingCache
-  private cacheHits     = 0
-  private cacheRequests = 0
+  private readonly embeddingCache = createEmbeddingCacheFromEnvironment()
 
   private chunker: TokenAwareChunker
-  private quant:   HybridQuantizer
+  private quantizationStatus: "none" | "rq-8" = "none"
 
   private readonly MAX_RETRIES        = 3
   private readonly RETRY_DELAY        = 2000
@@ -642,9 +482,7 @@ export class WeaviateService {
   private readonly BATCH_SIZE         = 20
 
   constructor() {
-    this.vectorCache = new LRUEmbeddingCache()
     this.chunker     = new TokenAwareChunker(380, 40, 120)
-    this.quant       = new HybridQuantizer(GEMINI_DIM, 8, 128)
   }
 
   get client(): WeaviateClient {
@@ -712,25 +550,35 @@ export class WeaviateService {
     const version = (meta as any)?.version ?? (meta as any)?.info?.version ?? "unknown"
     console.log("[WeaviateService] Weaviate version:", version)
 
-    await this.ensureSchema()
+    await this.ensureSchema(version)
     this.isConnected = true
-    const s = this.quant.getStats()
-    console.log("[WeaviateService] Ready. BQ ratio:", s.compressionRatio.toFixed(1), "PQ:", s.pqReady)
+    console.log(`[WeaviateService] Ready. Native quantization: ${this.quantizationStatus}`)
   }
 
   // ── Schema (unified single collection) ─────────────────────────────────────
 
-  private async ensureSchema(): Promise<void> {
+  private async ensureSchema(serverVersion: string): Promise<void> {
     const existing = await this.withRetry(
       () => this._client.schema.getter().do(),
       "Schema getter"
     )
     if (!existing) throw new Error("[WeaviateService] Schema getter returned null")
 
-    const names = new Set((existing.classes ?? []).map((c: any) => c.class))
+    const classes = (existing.classes ?? []) as WeaviateClassDefinition[]
+    const names = new Set(classes.map(collection => collection.class))
 
     if (names.has(COLLECTION_NAME)) {
       console.log(`[WeaviateService] Collection "${COLLECTION_NAME}" already exists.`)
+      const collection = classes.find(candidate => candidate.class === COLLECTION_NAME)!
+      const plan = planNativeRqUpdate(collection, getRequestedWeaviateQuantization(), serverVersion)
+      this.quantizationStatus = plan.status
+      if (plan.action === "update") {
+        await this.withRetry(
+          () => this.updateClassDefinition(plan.classDefinition),
+          `Enable native RQ-8 on ${COLLECTION_NAME}`,
+        )
+        console.warn("[WeaviateService] Enabled native RQ-8. This quantizer cannot be disabled in place.")
+      }
       return
     }
 
@@ -744,9 +592,17 @@ export class WeaviateService {
       )
     }
 
+    const requestedQuantization = getRequestedWeaviateQuantization()
+    if (requestedQuantization === "rq-8") {
+      planNativeRqUpdate({ vectorIndexType: "hnsw" }, requestedQuantization, serverVersion)
+    }
     const unifiedClass = {
       class:       COLLECTION_NAME,
       vectorizer:  "none",
+      vectorIndexType: "hnsw",
+      ...(requestedQuantization === "rq-8"
+        ? { vectorIndexConfig: { rq: { enabled: true, bits: 8, rescoreLimit: 20 } } }
+        : {}),
       description: "Unified collection for search results, query intents, and drift patterns",
       properties: [
         // ── Discriminator ──────────────────────────────────────────────────
@@ -789,6 +645,7 @@ export class WeaviateService {
         `Create collection ${COLLECTION_NAME}`
       )
       console.log(`[WeaviateService] Created collection: ${COLLECTION_NAME}`)
+      this.quantizationStatus = requestedQuantization
     } catch (err: any) {
       const msg = err?.message ?? String(err)
       if (msg.includes("USAGE_LIMIT_EXCEEDED") || msg.includes("429")) {
@@ -804,6 +661,19 @@ export class WeaviateService {
   }
 
   // ── Retry helper ───────────────────────────────────────────────────────────
+
+  private async updateClassDefinition(classDefinition: WeaviateClassDefinition): Promise<void> {
+    const configuredUrl = process.env.WEAVIATE_URL?.trim() ?? ""
+    const apiKey = process.env.WEAVIATE_API_KEY?.trim() ?? ""
+    const origin = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : `https://${configuredUrl}`
+    const response = await fetch(`${origin.replace(/\/$/, "")}/v1/schema/${encodeURIComponent(COLLECTION_NAME)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(classDefinition),
+      signal: AbortSignal.timeout(this.CONNECTION_TIMEOUT),
+    })
+    if (!response.ok) throw new Error(`Weaviate schema update failed (${response.status})`)
+  }
 
   private async withRetry<T>(fn: () => Promise<T>, ctx: string): Promise<T> {
     let last: any
@@ -828,22 +698,13 @@ export class WeaviateService {
 
   // ── Embedding (Gemini, cache-aware) ────────────────────────────────────────
 
-  private hashText(text: string): string {
-    let h = 0
-    for (let i = 0; i < text.length; i++) h = ((h << 5) - h + text.charCodeAt(i)) | 0
-    return `${h}_${text.length}`
-  }
-
   /** Single embedding — cache-first, then Gemini. */
   private async getEmbedding(text: string, contentKey?: string): Promise<number[]> {
-    this.cacheRequests++
-    const key    = contentKey ?? this.hashText(text)
-    const cached = this.vectorCache.get(key)
-    if (cached) { this.cacheHits++; return cached }
-
+    const request = { namespace: GEMINI_CACHE_NAMESPACE, identity: contentKey ?? text.slice(0, GEMINI_MAX_CHARS) }
+    const [cached] = await this.embeddingCache.getMany([request])
+    if (cached) return cached
     const vector = await fetchGeminiEmbedding(text)
-    this.quant.maybeCollectAndTrain(vector)
-    this.vectorCache.set(key, vector)
+    await this.embeddingCache.setMany([request], [vector])
     return vector
   }
 
@@ -852,33 +713,16 @@ export class WeaviateService {
    * for all cache misses. Preserves input order.
    */
   private async getBatchEmbeddings(texts: string[], keys: string[]): Promise<number[][]> {
-    const results: (number[] | null)[] = new Array(texts.length).fill(null)
-    const missTexts:   string[] = []
-    const missKeys:    string[] = []
-    const missIndices: number[] = []
-
-    for (let i = 0; i < texts.length; i++) {
-      this.cacheRequests++
-      const cached = this.vectorCache.get(keys[i])
-      if (cached) {
-        this.cacheHits++
-        results[i] = cached
-      } else {
-        missTexts.push(texts[i])
-        missKeys.push(keys[i])
-        missIndices.push(i)
-      }
-    }
-
-    if (missTexts.length === 0) return results as number[][]
-
-    const vectors = await fetchGeminiBatchEmbeddings(missTexts)
+    const requests = keys.map(identity => ({ namespace: GEMINI_CACHE_NAMESPACE, identity }))
+    const results = await this.embeddingCache.getMany(requests)
+    const missIndices = results.flatMap((value, index) => value ? [] : [index])
+    if (missIndices.length === 0) return results as number[][]
+    const vectors = await fetchGeminiBatchEmbeddings(missIndices.map(index => texts[index]))
+    await this.embeddingCache.setMany(missIndices.map(index => requests[index]), vectors)
 
     for (let j = 0; j < missIndices.length; j++) {
       const i = missIndices[j]
       results[i] = vectors[j]
-      this.quant.maybeCollectAndTrain(vectors[j])
-      this.vectorCache.set(missKeys[j], vectors[j])
     }
 
     return results as number[][]
@@ -889,16 +733,13 @@ export class WeaviateService {
   isWeaviateConnected(): boolean { return this.isConnected }
 
   getCacheStats() {
-    const hitRate = this.cacheRequests ? this.cacheHits / this.cacheRequests : 0
-    const s = this.quant.getStats()
+    const stats = this.embeddingCache.stats
     return {
-      size:             this.vectorCache.size,
-      hitRate:          Math.round(hitRate * 100) / 100,
-      maxSize:          5000,
-      compressionRatio: s.compressionRatio,
-      memorySavings:    s.memorySavings,
-      pqReady:          s.pqReady,
-      pqCompression:    s.pqCompression,
+      ...stats,
+      size: stats.l1Size,
+      hitRate: Math.round(stats.hitRate * 100) / 100,
+      maxSize: stats.l1MaxSize,
+      nativeQuantization: this.quantizationStatus,
     }
   }
 
@@ -977,21 +818,12 @@ export class WeaviateService {
       pending.map(p => p.key)
     )
 
-    // Phase 3: quantize + build Weaviate objects
+    // Phase 3: send full vectors; Weaviate owns optional index compression.
     const toInsert = pending.map((p, idx) => {
-      const vector     = vectors[idx]
-      const binaryCode = this.quant.quantizeBQ(vector)
-      const pqCode     = this.quant.isPQReady() ? this.quant.encodePQ(vector) ?? undefined : undefined
-
       return {
         class: COLLECTION_NAME,
-        properties: {
-          ...p.properties,
-          binaryCode:         Buffer.from(binaryCode).toString("base64"),
-          pqCode:             pqCode ? Buffer.from(pqCode).toString("base64") : undefined,
-          quantizationMethod: pqCode ? "BQ+PQ" : "BQ",
-        },
-        vector,
+        properties: p.properties,
+        vector: vectors[idx],
       }
     })
 
@@ -1012,9 +844,7 @@ export class WeaviateService {
   async syncQuery(query: SimilarQuery): Promise<void> {
     if (!this.isConnected) await this.initialize()
 
-    const vector     = await this.getEmbedding(`${query.name} ${query.query}`)
-    const binaryCode = this.quant.quantizeBQ(vector)
-    const pqCode     = this.quant.isPQReady() ? this.quant.encodePQ(vector) ?? undefined : undefined
+    const vector = await this.getEmbedding(`${query.name} ${query.query}`)
 
     await this.withRetry(
       () => this._client.data
@@ -1029,9 +859,6 @@ export class WeaviateService {
           userId:     query.userId,
           timestamp:  query.createdAt.toISOString(),
           lastRun:    query.lastRun?.toISOString() ?? null,
-          binaryCode: Buffer.from(binaryCode).toString("base64"),
-          pqCode:     pqCode ? Buffer.from(pqCode).toString("base64") : undefined,
-          quantizationMethod: pqCode ? "BQ+PQ" : "BQ",
         })
         .withVector(vector)
         .do(),
@@ -1050,7 +877,6 @@ export class WeaviateService {
     if (!this.isConnected) await this.initialize()
 
     const qVec = await this.getEmbedding(query)
-    const qBQ  = this.quant.quantizeBQ(qVec)
 
     // Historical storage remains broad. Benchmark callers add an explicit
     // source-query + frozen snapshot scope without changing analytics queries.
@@ -1064,7 +890,7 @@ export class WeaviateService {
       () => this._client.graphql
         .get()
         .withClassName(COLLECTION_NAME)
-        .withFields(`url title snippet domain position score queryId timestamp contentHash category binaryCode pqCode _additional { certainty distance }`)
+        .withFields(`url title snippet domain position score queryId timestamp contentHash category _additional { certainty distance }`)
         .withNearVector({ vector: qVec, certainty })
         .withWhere(where)
         .withLimit(candidateLimit)
@@ -1074,47 +900,7 @@ export class WeaviateService {
 
     const items: any[] = result.data?.Get?.[COLLECTION_NAME] ?? []
 
-    let ranked: { it: any; bqSim: number; adc?: number }[] = items.map(it => {
-      let sim = it._additional?.certainty ?? 0
-      if (it.binaryCode) {
-        try {
-          const code = new Uint8Array(Buffer.from(it.binaryCode, "base64"))
-          const hd   = this.quant.bq.hammingDistance(qBQ, code)
-          if (hd >= 0) sim = this.quant.bq.hammingToSimilarity(hd)
-        } catch { /* malformed base64 — keep certainty score */ }
-      }
-      return { it, bqSim: sim }
-    })
-
-    ranked.sort((a, b) => b.bqSim - a.bqSim)
-    ranked = ranked.slice(0, candidateLimit)
-
-    if (this.quant.isPQReady()) {
-      const withAdc = ranked.map(({ it, bqSim }) => {
-        let adc = Infinity
-        if (it.pqCode) {
-          try {
-            const codes = new Uint8Array(Buffer.from(it.pqCode, "base64"))
-            adc = this.quant.adcDistance(qVec, codes)
-          } catch { }
-        }
-        return { it, bqSim, adc }
-      })
-
-      const finite = withAdc.filter(x => isFinite(x.adc)).map(x => x.adc)
-      if (finite.length) {
-        const min = arrMin(finite), max = arrMax(finite)
-        const range = max - min || 1e-9
-        withAdc.forEach(r => {
-          const adcScore = isFinite(r.adc) ? 1 - (r.adc - min) / range : 0
-          ;(r as any).final = 0.35 * r.bqSim + 0.65 * adcScore
-        })
-        withAdc.sort((a: any, b: any) => b.final - a.final)
-        ranked = withAdc
-      }
-    }
-
-    const hits = ranked.map(({ it }) => ({
+    const hits = items.map(it => ({
       id:               `${it.queryId}_${it.position}`,
       url:              it.url,
       title:            it.title,
@@ -1128,8 +914,7 @@ export class WeaviateService {
       semanticDistance: it._additional?.distance  ?? 0,
     }))
 
-    // Deduplicate after all project-specific BQ/PQ ranking, but before the
-    // requested limit, so lower-ranked unique documents fill duplicate slots.
+    // Preserve native Weaviate order and deduplicate before the final limit.
     return takeUniqueCanonicalSearchHits(hits, limit)
   }
 
@@ -1148,7 +933,7 @@ export class WeaviateService {
       () => this._client.graphql
         .get()
         .withClassName(COLLECTION_NAME)
-        .withFields("_additional { vector } binaryCode pqCode name query category userId timestamp lastRun queryId")
+        .withFields("_additional { vector } name query category userId timestamp lastRun queryId")
         .withWhere(refWhere)
         .withLimit(1)
         .do(),
@@ -1159,9 +944,7 @@ export class WeaviateService {
     if (!refItem) return []
 
     const refVec = refItem._additional?.vector as number[] | undefined
-    const refBQ  = refItem.binaryCode
-      ? new Uint8Array(Buffer.from(refItem.binaryCode, "base64"))
-      : undefined
+    if (!isFiniteVector(refVec)) return []
 
     const similarWhere = {
       operator: "And" as const,
@@ -1175,7 +958,7 @@ export class WeaviateService {
       () => this._client.graphql
         .get()
         .withClassName(COLLECTION_NAME)
-        .withFields("queryId name query category userId timestamp lastRun binaryCode pqCode _additional { certainty }")
+        .withFields("queryId name query category userId timestamp lastRun _additional { certainty }")
         .withNearVector({ vector: refVec!, certainty: 0.6 })
         .withWhere(similarWhere)
         .withLimit(limit * 3)
@@ -1185,47 +968,7 @@ export class WeaviateService {
 
     const rows: any[] = similar.data?.Get?.[COLLECTION_NAME] ?? []
 
-    let ranked: { row: any; bqSim: number; adc?: number }[] = rows.map(row => {
-      let s = row._additional?.certainty ?? 0
-      if (refBQ && row.binaryCode) {
-        try {
-          const code = new Uint8Array(Buffer.from(row.binaryCode, "base64"))
-          const hd   = this.quant.bq.hammingDistance(refBQ, code)
-          if (hd >= 0) s = this.quant.bq.hammingToSimilarity(hd)
-        } catch { }
-      }
-      return { row, bqSim: s }
-    })
-
-    ranked.sort((a, b) => b.bqSim - a.bqSim)
-    ranked = ranked.slice(0, limit * 2)
-
-    if (this.quant.isPQReady() && refVec) {
-      const withAdc = ranked.map(({ row, bqSim }) => {
-        let adc = Infinity
-        if (row.pqCode) {
-          try {
-            const codes = new Uint8Array(Buffer.from(row.pqCode, "base64"))
-            adc = this.quant.adcDistance(refVec, codes)
-          } catch { }
-        }
-        return { row, bqSim, adc }
-      })
-
-      const finite = withAdc.filter(x => isFinite(x.adc)).map(x => x.adc)
-      if (finite.length) {
-        const min = arrMin(finite), max = arrMax(finite)
-        const range = max - min || 1e-9
-        withAdc.forEach((r: any) => {
-          const adcScore = isFinite(r.adc) ? 1 - (r.adc - min) / range : 0
-          r.final = 0.35 * r.bqSim + 0.65 * adcScore
-        })
-        withAdc.sort((a: any, b: any) => b.final - a.final)
-        ranked = withAdc
-      }
-    }
-
-    return ranked.slice(0, limit).map(({ row }) => ({
+    return rows.slice(0, limit).map(row => ({
       id:        row.queryId,
       name:      row.name,
       query:     row.query,
@@ -1255,7 +998,7 @@ export class WeaviateService {
       () => this._client.graphql
         .get()
         .withClassName(COLLECTION_NAME)
-        .withFields("url title snippet position timestamp queryId binaryCode _additional { certainty }")
+        .withFields("url title snippet position timestamp queryId _additional { vector }")
         .withWhere(where)
         .withLimit(1000)
         .do(),
@@ -1265,67 +1008,6 @@ export class WeaviateService {
     const rows: any[] = res.data?.Get?.[COLLECTION_NAME] ?? []
     if (rows.length < 10) return []
 
-    const groups = new Map<string, any[]>()
-    for (const r of rows) {
-      if (!r.queryId) continue
-      const bucket = groups.get(r.queryId) ?? []
-      bucket.push(r)
-      groups.set(r.queryId, bucket)
-    }
-
-    const anomalies: any[] = []
-
-    for (const [qid, items] of groups) {
-      const coded = items
-        .map(it => {
-          if (!it.binaryCode) return { it, code: null as Uint8Array | null }
-          try {
-            const buffer = Buffer.from(it.binaryCode, "base64")
-            return { it, code: new Uint8Array(buffer) as Uint8Array }
-          } catch {
-            return { it, code: null as Uint8Array | null }
-          }
-        })
-        .filter((x): x is { it: any; code: Uint8Array } => x.code !== null)
-
-      if (coded.length < 3) continue
-
-      const dequantized = coded.map(x => this.quant.bq.dequantize(x.code))
-      const dim         = dequantized[0].length
-
-      const centroid = new Array<number>(dim).fill(0)
-      for (const v of dequantized) for (let i = 0; i < dim; i++) centroid[i] += v[i]
-      for (let i = 0; i < dim; i++) centroid[i] /= dequantized.length
-
-      const sims = dequantized.map(v => {
-        let dot = 0, na = 0, nb = 0
-        for (let i = 0; i < dim; i++) { dot += v[i]*centroid[i]; na += v[i]*v[i]; nb += centroid[i]*centroid[i] }
-        const denom = Math.sqrt(na) * Math.sqrt(nb)
-        return denom === 0 ? 0 : Math.max(-1, Math.min(1, dot / denom))
-      })
-
-      const mean = sims.reduce((a, b) => a + b, 0) / sims.length
-      const varc = sims.reduce((a, b) => a + (b - mean) ** 2, 0) / sims.length
-      const sd   = Math.sqrt(varc)
-
-      coded.forEach(({ it }, i) => {
-        if (sims[i] < mean - 2 * sd) {
-          anomalies.push({
-            type:               "content_anomaly",
-            queryId:            qid,
-            url:                it.url,
-            title:              it.title,
-            position:           it.position,
-            timestamp:          it.timestamp,
-            anomalyScore:       sd > 0 ? (mean - sims[i]) / sd : 0,
-            avgSimilarity:      sims[i],
-            expectedSimilarity: mean,
-            detectionMethod:    "BQ centroid",
-          })
-        }
-      })
-    }
-
-    return anomalies.sort((a, b) => b.anomalyScore - a.anomalyScore)
+    return calculateFullVectorAnomalies(rows)
   }
 }
