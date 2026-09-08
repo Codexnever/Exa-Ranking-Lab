@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const queryId = searchParams.get("queryId") ?? undefined
 
-    // ✅ userId always from auth — never from query string
+    //  userId always from auth — never from query string
     const userId = user.$id
 
     console.log(`[Snapshots/Analytics] Fetching for userId=${userId}, queryId=${queryId ?? "all"}`)
@@ -21,13 +21,13 @@ export async function GET(request: NextRequest) {
       userId,
       1000  // High limit for analytics — getSnapshots warns if truncated
     )
-    // ✅ Removed redundant sort — getSnapshots already applies orderDesc("timestamp")
+    // Removed redundant sort — getSnapshots already applies orderDesc("timestamp")
 
     console.log(`[Snapshots/Analytics] Returning ${snapshots.length} snapshots`)
     return NextResponse.json(snapshots)
   } catch (err) {
     console.error("[GET /api/snapshots/analytics] Failed:", err)
-    // ✅ No internal error details exposed to client
+    //  No internal error details exposed to client
     return NextResponse.json({ error: "Failed to fetch analytics snapshots" }, { status: 500 })
   }
 }

@@ -51,12 +51,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const queryId = searchParams.get("queryId") ?? undefined
 
-    // ✅ userId ALWAYS comes from auth token — never from query string
+    //  userId ALWAYS comes from auth token — never from query string
     //    Accepting ?userId= from the client would let any user read
     //    another user's snapshots by passing their ID.
     const userId = user.$id
 
-    // ✅ Validated and clamped limit — never NaN, never negative, never huge
+    //  Validated and clamped limit — never NaN, never negative, never huge
     const limit = parseLimit(searchParams.get("limit"))
 
     console.log("[Snapshots API] GET:", { queryId, userId, limit })
@@ -66,13 +66,13 @@ export async function GET(request: NextRequest) {
       userId,
       limit
     )
-    // ✅ Removed redundant sort — getSnapshots already applies orderDesc("timestamp")
+    //  Removed redundant sort — getSnapshots already applies orderDesc("timestamp")
 
     console.log(`[Snapshots API] Returning ${snapshots.length} snapshots`)
     return NextResponse.json(snapshots)
   } catch (err) {
     console.error("[GET /api/snapshots] Failed:", err)
-    // ✅ No internal details exposed to client
+    //  No internal details exposed to client
     return NextResponse.json({ error: "Failed to fetch snapshots" }, { status: 500 })
   }
 }
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     const user = await getCurrentUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    // ✅ Separate JSON parse error (400) from server errors (500)
+    //  Separate JSON parse error (400) from server errors (500)
     let body: unknown
     try {
       body = await request.json()
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
 
     const b = body as Record<string, unknown>
 
-    // ✅ Validate queryId — required and must belong to this user
+    //  Validate queryId — required and must belong to this user
     if (typeof b.queryId !== "string" || !b.queryId.trim()) {
       return NextResponse.json({ error: "'queryId' is required" }, { status: 400 })
     }
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Query not found" }, { status: 404 })
     }
 
-    // ✅ Validate results — must be an array
+    //  Validate results — must be an array
     if (!Array.isArray(b.results)) {
       return NextResponse.json({ error: "'results' must be an array" }, { status: 400 })
     }
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
     const newSnapshot = await databaseService.snapshotService.createSnapshot({
       queryId:   b.queryId,
       results:   b.results,
-      // ✅ userId always from auth — never from body
+      //  userId always from auth — never from body
       userId:    user.$id,
       timestamp: new Date(),
       metadata: {
@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Snapshots API] Snapshot created: ${newSnapshot.id}`)
 
-    // ✅ Trimmed access log — no full snapshot object with all results
+    //  Trimmed access log — no full snapshot object with all results
     const ip            = request.headers.get("x-real-ip") ?? "unknown"
     const userAgentInfo = parseUserAgent(request.headers.get("x-user-agent"))
 
@@ -150,11 +150,11 @@ export async function POST(request: NextRequest) {
       userAgentInfo
     )
 
-    // ✅ 201 Created
+    //  201 Created
     return NextResponse.json(newSnapshot, { status: 201 })
   } catch (err) {
     console.error("[POST /api/snapshots] Failed:", err)
-    // ✅ No internal details exposed to client
+    // No internal details exposed to client
     return NextResponse.json({ error: "Failed to create snapshot" }, { status: 500 })
   }
 }
