@@ -56,7 +56,7 @@ describe("embedding cache", () => {
     expect(base).toBe(createEmbeddingCacheKey(request("same")))
     expect(new Set([
       base,
-      createEmbeddingCacheKey(request("other")),
+      createEmbeddingCacheKey(request("else")),
       createEmbeddingCacheKey(request("same", { ...ns, provider: "openai" })),
       createEmbeddingCacheKey(request("same", { ...ns, model: "model-b" })),
       createEmbeddingCacheKey(request("same", { ...ns, task: "document" })),
@@ -105,5 +105,55 @@ describe("embedding cache", () => {
     expect(shared.writes).toBe(1)
     expect(shared.ttl).toBe(123)
     expect(shared.values.size).toBe(2)
+  })
+
+  test("a second cache instance restores the same fixed content from Redis", async () => {
+    const shared = new SharedStore()
+    const first = new EmbeddingCache(new LruEmbeddingCache(10), shared)
+    const fixed = request("fixed-snapshot-content-hash")
+    expect(await first.getMany([fixed])).toEqual([null])
+    await first.setMany([fixed], [[1, 2, 3]])
+
+    const restarted = new EmbeddingCache(new LruEmbeddingCache(10), shared)
+    expect(await restarted.getMany([fixed])).toEqual([[1, 2, 3]])
+    expect(restarted.stats.redisHits).toBe(1)
+  })
+
+  test("deduplicates simultaneous provider work for one uncached identity", async () => {
+    const cache = new EmbeddingCache(new LruEmbeddingCache(10), new SharedStore())
+    let release!: (vectors: number[][]) => void
+    const loader = jest.fn(() => new Promise<number[][]>(resolve => { release = resolve }))
+    const fixed = request("same-content")
+    const first = cache.resolveMany([fixed], loader)
+    await Promise.resolve()
+    const second = cache.resolveMany([fixed], loader)
+    await Promise.resolve()
+    release([[1, 2, 3]])
+
+    await expect(first).resolves.toEqual([[1, 2, 3]])
+    await expect(second).resolves.toEqual([[1, 2, 3]])
+    expect(loader).toHaveBeenCalledTimes(1)
+    expect(cache.stats.inflightHits).toBe(1)
+  })
+
+  test("debug events expose fingerprints but not the original identity", async () => {
+    const previous = process.env.EMBEDDING_CACHE_DEBUG
+    process.env.EMBEDDING_CACHE_DEBUG = "true"
+    const info = jest.spyOn(console, "info").mockImplementation(() => undefined)
+    try {
+      const cache = new EmbeddingCache(new LruEmbeddingCache(10), new SharedStore())
+      await cache.resolveMany([request("private query text")], async () => [[1, 2, 3]])
+      const rendered = JSON.stringify(info.mock.calls)
+      expect(rendered).toContain("L1_MISS")
+      expect(rendered).toContain("REDIS_MISS")
+      expect(rendered).toContain("PROVIDER_START")
+      expect(rendered).toContain("PROVIDER_END")
+      expect(rendered).toContain("REDIS_SET")
+      expect(rendered).not.toContain("private query text")
+    } finally {
+      info.mockRestore()
+      if (previous === undefined) delete process.env.EMBEDDING_CACHE_DEBUG
+      else process.env.EMBEDDING_CACHE_DEBUG = previous
+    }
   })
 })

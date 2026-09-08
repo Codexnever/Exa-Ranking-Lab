@@ -34,10 +34,28 @@ const SEVERITY_CONFIG = {
   minor:    { color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", label: "Minor",    icon: "ℹ️" },
 } as const
 
+export function normalizeAlgorithmEvents(data: unknown): AlgorithmUpdateEvent[] {
+  if (!Array.isArray(data)) return []
+
+  return data.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return []
+    const event = candidate as AlgorithmUpdateEvent & { affectedQueries?: unknown }
+    try {
+      const affectedQueries = typeof event.affectedQueries === "string"
+        ? JSON.parse(event.affectedQueries)
+        : (event.affectedQueries ?? [])
+      if (!Array.isArray(affectedQueries)) return []
+      return [{ ...event, affectedQueries } as AlgorithmUpdateEvent]
+    } catch {
+      return []
+    }
+  })
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AlgorithmUpdatePanel() {
-  const { user }  = useAuth()
+  const { user, initializing }  = useAuth()
   const { call }  = useSecureApi({ showErrorToast: false })
 
   const [events,   setEvents]   = useState<AlgorithmUpdateEvent[]>([])
@@ -46,30 +64,24 @@ export function AlgorithmUpdatePanel() {
   const [expanded, setExpanded] = useState<string | null>(null)
 
   const fetchEvents = useCallback(async () => {
-    if (!user?.$id) return
+    if (initializing) return
+    if (!user?.$id) {
+      setEvents([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
       const data = await call<AlgorithmUpdateEvent[]>("GET", "/analytics/algorithm-events?limit=10")
-      if (Array.isArray(data)) {
-        // Parse affectedQueries if it came back as a string
-        const parsed = data.map(e => ({
-          ...e,
-          affectedQueries: typeof e.affectedQueries === "string"
-            ? JSON.parse(e.affectedQueries)
-            : (e.affectedQueries ?? []),
-        }))
-        setEvents(parsed)
-      } else {
-        setEvents([])
-      }
-    } catch (err) {
+      setEvents(normalizeAlgorithmEvents(data))
+    } catch {
       setError("Failed to load algorithm update events")
       setEvents([])
     } finally {
       setLoading(false)
     }
-  }, [user?.$id, call])
+  }, [user?.$id, initializing, call])
 
   useEffect(() => {
     fetchEvents()
@@ -155,7 +167,7 @@ export function AlgorithmUpdatePanel() {
             </div>
             <div>
               <p className="text-sm font-medium text-gray-700">
-                No algorithm updates detected
+                No ranking-change candidates detected
               </p>
               <p className="text-xs text-gray-500 mt-1 max-w-xs">
                 We monitor for coordinated drift across query categories.

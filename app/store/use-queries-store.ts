@@ -4,6 +4,8 @@ import { persist, createJSONStorage } from "zustand/middleware"
 import { toast } from "sonner"
 import type { QueryConfig } from "@/types/type"
 
+let queryFetchSequence = 0
+
 // ─── SSR-safe storage ─────────────────────────────────────────────────────────
 
 const safeStorage = createJSONStorage(() => {
@@ -90,12 +92,18 @@ export const useQueriesStore = create<QueriesStoreType>()(
           return
         }
 
-        if (isLoading) {
+        if (isLoading && userId === currentUserId) {
           console.log("[QueriesStore] Already loading, skipping")
           return
         }
 
-        set({ isLoading: true, error: null })
+        const requestSequence = ++queryFetchSequence
+        set({
+          isLoading: true,
+          error: null,
+          currentUserId: userId ?? null,
+          ...(userId !== currentUserId ? { queries: [] } : {}),
+        })
 
         try {
           let url = "/api/queries"
@@ -122,6 +130,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
             (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
           )
 
+          if (requestSequence !== queryFetchSequence) return
           set({
             queries:       sorted,
             isLoading:     false,
@@ -134,7 +143,7 @@ export const useQueriesStore = create<QueriesStoreType>()(
           const message = err instanceof Error ? err.message : "Failed to fetch queries"
           console.error("[QueriesStore] fetchQueries error:", err)
           // ✅ Preserve existing queries on transient error (network blip, 500)
-          set({ error: message, isLoading: false })
+          if (requestSequence === queryFetchSequence) set({ error: message, isLoading: false })
           toast.error(message)
         }
       },

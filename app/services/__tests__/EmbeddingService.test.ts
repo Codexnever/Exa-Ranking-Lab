@@ -57,4 +57,27 @@ describe("EmbeddingService provider cache behavior", () => {
     expect(result.vectors.map(item => item?.[0])).toEqual([97, 98, 99])
     expect(gemini).toHaveBeenLastCalledWith(["a", "c"])
   })
+
+  test("fixed snapshot content uses L1, then Redis after a simulated restart", async () => {
+    const shared = new MemoryStore()
+    const firstProvider = jest.fn(async () => [vector(7)])
+    const first = new EmbeddingService({
+      cache: new EmbeddingCache(new LruEmbeddingCache(10), shared),
+      providers: { gemini: firstProvider, openai: jest.fn() } as EmbeddingProviders,
+    })
+    const contentHash = "fixed-snapshot-content-hash"
+    expect((await first.embed("unchanged content", contentHash)).cached).toBe(false)
+    expect((await first.embed("unchanged content", contentHash)).cached).toBe(true)
+    expect(firstProvider).toHaveBeenCalledTimes(1)
+
+    const restartedProvider = jest.fn(async () => [vector(9)])
+    const restarted = new EmbeddingService({
+      cache: new EmbeddingCache(new LruEmbeddingCache(10), shared),
+      providers: { gemini: restartedProvider, openai: jest.fn() } as EmbeddingProviders,
+    })
+    const restored = await restarted.embed("unchanged content", contentHash)
+    expect(restored.cached).toBe(true)
+    expect(restored.vector[0]).toBe(7)
+    expect(restartedProvider).not.toHaveBeenCalled()
+  })
 })

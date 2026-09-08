@@ -580,7 +580,7 @@ export function documentToEvent(
       ),
     )
 
-  const affectedQueries =
+  const parsedAffectedQueries =
     parseJson<
       Array<
         Omit<
@@ -593,7 +593,13 @@ export function documentToEvent(
     >(
       document.affectedQueries,
       [],
-    ).map(
+    )
+
+  if (!Array.isArray(parsedAffectedQueries)) {
+    throw new TypeError("Stored affectedQueries must be an array")
+  }
+
+  const affectedQueries = parsedAffectedQueries.map(
       (point) => ({
         ...point,
 

@@ -29,6 +29,8 @@ import { analyticsCalculations } from "@/app/logic/analyticsLogic";
 import { useAuth } from "@/lib/middleware/authentication/auth-context";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
+import { summarizeContentAnomalies } from "@/components/analytics/content-anomaly-evidence";
+import { AnalyticsLoadCoordinator } from "./analytics-load-coordinator";
 
 import { PredictiveRankingsWidget } from "@/components/analytics/PredictiveRankingsWidget";
 import { SemanticHeatmap } from "@/components/analytics/SemanticHeatmap";
@@ -121,13 +123,13 @@ export default function Analytics() {
   } = useQueriesStore();
 
   const {
-    isConnected, connectionStatus, semanticInsights, enhancedMetrics,
+    isConnected, connectionStatus, semanticInsights, enhancedMetrics, analyticsData: weaviateAnalytics,
     isLoading: weaviateLoading, error: weaviateError,
     getSemanticAnalytics, syncData, assessDataQuality, syncQueries,
-    getConnectionHealth, initializeWeaviateMode, vectorsAvailable,
+    getConnectionHealth, vectorsAvailable,
   } = useWeaviateStore();
 
-  // ✅ FIX 1: console.log → debugLog — was logging on every render in production
+  //  FIX 1: console.log → debugLog — was logging on every render in production
   debugLog('Weaviate store state:', {
     semanticInsights, enhancedMetrics, isConnected,
     connectionStatus, vectorsAvailable,
@@ -135,14 +137,14 @@ export default function Analytics() {
 
   const {
     allSnapshots, isLoadingAnalytics: isLoadingSnapshots,
-    fetchAllSnapshots, checkAndRefreshIfEmpty,
+    fetchAllSnapshots,
   } = useSnapshotsStore();
 
   const isMountedRef    = useRef(true);
-  const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastFetchTimeRef = useRef(0);
+  const loadCoordinatorRef = useRef(new AnalyticsLoadCoordinator());
 
   const [timeRange,               setTimeRange]               = useState("30d");
+  const [showAllAnomalies,        setShowAllAnomalies]        = useState(false);
   const [deduplicationStrategy,   setDeduplicationStrategy]   = useState<DeduplicationStrategy>("latest");
   const [isRefreshing,            setIsRefreshing]            = useState(false);
   const [isSyncing,               setIsSyncing]               = useState(false);
@@ -203,6 +205,33 @@ export default function Analytics() {
     });
 
     if (isAIPowered) {
+      if (weaviateAnalytics) {
+        // The semantic endpoint intentionally omits raw snapshots. Build the
+        // filter-sensitive traditional sections from the already-loaded local
+        // snapshot/query state, then overlay the server's semantic results.
+        // This keeps Domains, Rankings, Performance, and AI Insights aligned
+        // on the first load as well as after a mode switch.
+        const calculated = analyticsCalculations(
+          stableQueries, stableSnapshots, timeRange, filters, deduplicationStrategy
+        );
+        return {
+          ...calculated,
+          ...weaviateAnalytics,
+          filteredSnapshots: calculated.filteredSnapshots,
+          rankingTrendData: calculated.rankingTrendData,
+          categoryDistribution: calculated.categoryDistribution,
+          successRateByHour: calculated.successRateByHour,
+          performanceData: calculated.performanceData,
+          topPerformingQueries: calculated.topPerformingQueries,
+          queryPerformanceStats: calculated.queryPerformanceStats,
+          hasSemanticData:    !!(semanticInsights || enhancedMetrics),
+          isVectorEnhanced:   vectorsAvailable ?? false,
+          vectorsAvailable:   vectorsAvailable ?? false,
+          semanticInsights:   semanticInsights ?? weaviateAnalytics.semanticInsights,
+          enhancedMetrics:    enhancedMetrics ?? weaviateAnalytics.enhancedMetrics,
+          isWeaviateSource:   true,
+        };
+      }
       if (analytics) {
         const ae = analytics as EnhancedAnalyticsData;
         return {
@@ -255,7 +284,7 @@ export default function Analytics() {
   }, [
     analytics, isAIPowered, stableQueries, stableSnapshots,
     timeRange, filters, deduplicationStrategy,
-    semanticInsights, enhancedMetrics, timeRangeMs, vectorsAvailable,
+    semanticInsights, enhancedMetrics, weaviateAnalytics, timeRangeMs, vectorsAvailable,
   ]);
 
   const analyzedSnapshotGroupCount = useMemo(
@@ -294,7 +323,7 @@ export default function Analytics() {
             (enhancedMetrics.contentCoherence as any).score || 0;
         }
 
-        // ✅ FIX 2: was returning literal string "rs time" as avgResponseTime.
+        //  FIX 2: was returning literal string "rs time" as avgResponseTime.
         // Now derives from successRateByHour same as the traditional branch,
         // so the Response Time card shows a real value in AI mode too.
         const sr = analyticsData?.successRateByHour;
@@ -380,111 +409,91 @@ export default function Analytics() {
       : info;
   }, [deduplicationStrategy, isAIPowered]);
 
-  const debouncedFetch = useCallback(async (force = false) => {
-    const now = Date.now();
-    if (!force && now - lastFetchTimeRef.current < 5000) return;
-    if (!userId || typeof userId !== "string" || userId.trim() === "" || !isMountedRef.current) return;
+  const loadAnalytics = useCallback(async (
+    selection: { key: string; userId: string; source: "appwrite" | "weaviate"; range: string; rangeMs: number },
+    force = false,
+  ) => {
+    const coordinator = loadCoordinatorRef.current;
+    coordinator.select(selection.key);
+    setDataLoaded(false);
+    setInitializationState("loading");
 
     try {
-      lastFetchTimeRef.current = now;
-      const promises: Promise<any>[] = [];
+      const result = await coordinator.load(selection.key, async () => {
+        await Promise.all([
+          fetchQueries(selection.userId, force),
+          fetchAllSnapshots(selection.userId),
+        ]);
 
-      if (fetchQueries)      promises.push(fetchQueries(userId, force));
-      if (fetchAllSnapshots) promises.push(fetchAllSnapshots(userId));
-
-      if (dataSource === "weaviate") {
-        if (initializeWeaviateMode && initializationState !== "success") {
-          setInitializationState("loading");
-          try {
-            await initializeWeaviateMode(userId, timeRange);
-            setInitializationState("success");
-          } catch {
-            setInitializationState("error");
-          }
-        } else if (getSemanticAnalytics) {
-          promises.push(getSemanticAnalytics(userId, timeRange));
+        if (selection.source === "weaviate") {
+          await getSemanticAnalytics(selection.userId, selection.range);
+        } else {
+          await fetchAnalytics(
+            selection.userId,
+            selection.rangeMs,
+            useQueriesStore.getState().queries,
+            force,
+          );
         }
-      } else {
-        if (fetchAnalytics) promises.push(fetchAnalytics(userId, timeRangeMs, stableQueries, force));
-      }
+      }, { force });
 
-      if (promises.length > 0) await Promise.allSettled(promises);
-      if (isMountedRef.current) setDataLoaded(true);
-    } catch {
-      if (isMountedRef.current) {
+      if (result !== "stale" && coordinator.isCurrent(selection.key) && isMountedRef.current) {
+        setInitializationState("success");
         setDataLoaded(true);
-        if (dataSource === "weaviate") setInitializationState("error");
+      }
+    } catch {
+      if (coordinator.isCurrent(selection.key) && isMountedRef.current) {
+        setInitializationState("error");
+        setDataLoaded(true);
       }
     }
-  }, [
-    userId, dataSource, timeRange, timeRangeMs,
-    fetchQueries, fetchAllSnapshots, fetchAnalytics,
-    getSemanticAnalytics, stableQueries,
-    initializeWeaviateMode, initializationState,
-  ]);
+  }, [fetchQueries, fetchAllSnapshots, getSemanticAnalytics, fetchAnalytics]);
+
+  const loadSelection = useMemo(() => {
+    if (!userId?.trim()) return null;
+    return {
+      key: `${userId}|${dataSource}|${timeRange}`,
+      userId,
+      source: dataSource,
+      range: timeRange,
+      rangeMs: timeRangeMs,
+    };
+  }, [userId, dataSource, timeRange, timeRangeMs]);
 
   useEffect(() => {
-    if (userId && typeof userId === "string" && userId.trim() !== "" && !dataLoaded && isMountedRef.current) {
-      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
-      checkAndRefreshIfEmpty?.(userId);
-      fetchTimeoutRef.current = setTimeout(() => {
-        if (isMountedRef.current) debouncedFetch(true).catch(() => {});
-      }, 100);
-    }
-    return () => { if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current); };
-  }, [userId, dataLoaded, dataSource, debouncedFetch, checkAndRefreshIfEmpty]);
+    if (loadSelection) void loadAnalytics(loadSelection);
+  }, [loadSelection, loadAnalytics]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
     };
   }, []);
 
-  const handleDataSourceChange = useCallback(async (newSource: "appwrite" | "weaviate") => {
+  const handleDataSourceChange = useCallback((newSource: "appwrite" | "weaviate") => {
     const setAnalyticsSource = useAnalyticsStore.getState().setDataSource;
     const setWeaviateSource  = useWeaviateStore.getState().setDataSource;
 
-    setIsRefreshing(true);
     setDataLoaded(false);
     setInitializationState("pending");
-
-    try {
-      setAnalyticsSource(newSource);
-      setWeaviateSource(newSource);
-
-      if (newSource === "weaviate") {
-        setIsSyncing(true);
-        setInitializationState("loading");
-        if (userId) {
-          await getSemanticAnalytics(userId, timeRange);
-          setInitializationState("success");
-          toast.success("AI Analytics enabled!");
-        }
-      } else {
-        await debouncedFetch(true);
-      }
-    } catch {
-      setInitializationState("error");
-    } finally {
-      setIsSyncing(false);
-      setIsRefreshing(false);
-      setDataLoaded(true);
-    }
-  }, [userId, timeRange, debouncedFetch, getSemanticAnalytics]);
+    setAnalyticsSource(newSource);
+    setWeaviateSource(newSource);
+    if (newSource === "weaviate") toast.success("AI Analytics enabled!");
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing || !isMountedRef.current) return;
     setIsRefreshing(true);
     try {
-      await debouncedFetch(true);
+      if (loadSelection) await loadAnalytics(loadSelection, true);
       toast.success(`Analytics refreshed${isAIPowered ? " with AI enhancements" : ""}`);
     } catch (error: any) {
       toast.error("Failed to refresh: " + (error?.message ?? "Unknown error"));
     } finally {
       if (isMountedRef.current) setIsRefreshing(false);
     }
-  }, [isRefreshing, debouncedFetch, isAIPowered]);
+  }, [isRefreshing, loadSelection, loadAnalytics, isAIPowered]);
 
   const handleSync = useCallback(async () => {
     if (!userId || isSyncing || !isAIPowered) return;
@@ -499,13 +508,13 @@ export default function Analytics() {
       hasErrors
         ? toast.warning("Sync completed with some issues")
         : toast.success(`AI data synchronized — ${stats.synced ?? 0} queries processed`);
-      await debouncedFetch(true);
+      if (loadSelection) await loadAnalytics(loadSelection, true);
     } catch (error: any) {
       toast.error("Sync failed: " + (error?.message ?? "Unknown error"));
     } finally {
       setIsSyncing(false);
     }
-  }, [userId, isSyncing, isAIPowered, syncData, syncQueries, debouncedFetch]);
+  }, [userId, isSyncing, isAIPowered, syncData, syncQueries, loadSelection, loadAnalytics]);
 
   const handleExecuteQueriesForAnalytics = useCallback(async () => {
     if (!userId || isExecutingQueries || !isMountedRef.current) return;
@@ -523,7 +532,7 @@ export default function Analytics() {
       toast.dismiss("execute-queries");
       if (result.successful > 0) {
         toast.success(`Executed ${result.successful} quer${result.successful === 1 ? "y" : "ies"} successfully!`, { duration: 5000 });
-        await debouncedFetch(true);
+        if (loadSelection) await loadAnalytics(loadSelection, true);
       } else {
         toast.warning("No queries were executed successfully");
       }
@@ -534,7 +543,7 @@ export default function Analytics() {
     } finally {
       if (isMountedRef.current) setIsExecutingQueries(false);
     }
-  }, [userId, isExecutingQueries, debouncedFetch]);
+  }, [userId, isExecutingQueries, loadSelection, loadAnalytics]);
 
   const csvEscape = useCallback((value: unknown): string => {
     const str = value === null || value === undefined ? "" : String(value);
@@ -616,6 +625,11 @@ export default function Analytics() {
     (queryTypeFilter === "all" || !queryTypeFilter) &&
     (domainFilter    === "all" || !domainFilter)    &&
     (isAIPowered || deduplicationStrategy === "latest");
+
+  const anomalySummary = useMemo(() => {
+    const observations = semanticInsights?.contentAnomalies ?? [];
+    return summarizeContentAnomalies(observations);
+  }, [semanticInsights?.contentAnomalies]);
 
   if (!user) {
     return (
@@ -1106,7 +1120,25 @@ export default function Analytics() {
                   <SemanticHeatmap
                     snapshots={(analyticsData as any).filteredSnapshots || []}
                     queries={stableQueries}
-                    semanticAnalytics={semanticInsights ?? undefined}
+                    semanticAnalytics={semanticInsights ? {
+                      enhancedMetrics: {
+                        diversityIndex: enhancedMetrics?.diversityIndex,
+                        contentCoherence:
+                          typeof enhancedMetrics?.contentCoherence === "number"
+                            ? enhancedMetrics.contentCoherence
+                            : enhancedMetrics?.contentCoherence?.overallCoherence ??
+                              enhancedMetrics?.contentCoherence?.score,
+                      },
+                      semanticInsights: {
+                        semanticClusters: {
+                          clusters: semanticInsights.semanticClusters ?? [],
+                        },
+                        contentAnomalies: {
+                          count: semanticInsights.contentAnomalies?.length ?? 0,
+                          anomalies: semanticInsights.contentAnomalies ?? [],
+                        },
+                      },
+                    } : undefined}
                   />
                 </div>
 
@@ -1149,7 +1181,7 @@ export default function Analytics() {
                           <div className="text-2xl font-bold text-orange-600">
                             {enhancedMetrics.anomalyCount || 0}
                           </div>
-                          <div className="text-sm text-orange-700">Anomalies Detected</div>
+                          <div className="text-sm text-orange-700">Anomalous Result Observations</div>
                         </div>
                       </div>
                     </CardContent>
@@ -1242,26 +1274,47 @@ export default function Analytics() {
                   </CardContent>
                 </Card>
 
-                {semanticInsights?.contentAnomalies && semanticInsights.contentAnomalies.length > 0 && (
+                {anomalySummary.observations.length > 0 && (
                   <Card>
                     <CardHeader>
-                      <CardTitle>Content Anomalies Detected</CardTitle>
-                      <CardDescription>AI-identified content deviating from expected patterns</CardDescription>
+                      <CardTitle>Content Anomaly Evidence</CardTitle>
+                      <CardDescription>
+                        {enhancedMetrics?.anomalyCount ?? anomalySummary.observations.length} anomalous result observations ·{" "}
+                        {anomalySummary.affectedQueries} affected queries ·{" "}
+                        {anomalySummary.uniqueDocuments} unique documents · {timeRange} range
+                      </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-3">
-                        {semanticInsights.contentAnomalies.slice(0, 5).map((anomaly: any, index: number) => (
-                          <div key={index} className="border rounded-lg p-3">
+                        {anomalySummary.observations
+                          .slice(0, showAllAnomalies ? undefined : 5)
+                          .map((anomaly, index: number) => (
+                          <div key={`${anomaly.queryId || "unknown"}-${anomaly.url || index}-${anomaly.timestamp || index}`} className="border rounded-lg p-3">
                             <div className="flex items-center justify-between mb-2">
-                              <Badge variant="destructive" className="text-xs">{anomaly.type}</Badge>
-                              <span className="text-xs text-gray-500">Score: {Number(anomaly.anomalyScore).toFixed(2)}</span>
+                              <Badge variant="destructive" className="text-xs">Content anomaly</Badge>
+                              <span className="text-xs text-gray-500">Heuristic score: {Number(anomaly.anomalyScore || 0).toFixed(2)}</span>
                             </div>
-                            <h4 className="font-medium text-sm mb-1">{anomaly.title}</h4>
-                            <p className="text-xs text-gray-600 mb-1">{anomaly.description}</p>
-                            <a href={anomaly.url} target="_blank" rel="noopener noreferrer"
-                              className="text-xs text-blue-500 hover:underline">{anomaly.url}</a>
+                            <h4 className="font-medium text-sm mb-1">{anomaly.title || "Untitled result"}</h4>
+                            <p className="text-xs text-gray-600 mb-1">
+                              Query: {anomaly.queryName || anomaly.queryId || "Unknown query"} ·{" "}
+                              {anomaly.timestamp && !Number.isNaN(new Date(anomaly.timestamp).getTime())
+                                ? new Date(anomaly.timestamp).toLocaleString()
+                                : "Unknown observation time"}
+                            </p>
+                            <p className="text-xs text-gray-600 mb-1">
+                              Its full-vector cosine similarity was more than two population standard deviations below its query centroid.
+                            </p>
+                            {anomaly.url ? (
+                              <a href={anomaly.url} target="_blank" rel="noopener noreferrer"
+                                className="text-xs text-blue-500 hover:underline break-all">{anomaly.url}</a>
+                            ) : <span className="text-xs text-gray-400">URL unavailable</span>}
                           </div>
                         ))}
+                        {anomalySummary.observations.length > 5 && (
+                          <Button variant="outline" size="sm" onClick={() => setShowAllAnomalies(value => !value)}>
+                            {showAllAnomalies ? "Show less" : `Show all ${anomalySummary.observations.length}`}
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
                   </Card>

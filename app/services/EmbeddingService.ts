@@ -45,23 +45,27 @@ export class EmbeddingService {
   async embed(text: string, contentHash?: string): Promise<EmbeddingResult> {
     const identity = contentHash ?? this.prepareText(text)
     const geminiRequest = this.request(GEMINI_NAMESPACE, identity)
-    const [geminiHit] = await this.cache.getMany([geminiRequest])
-    if (geminiHit) return { vector: geminiHit, mode: "gemini", cached: true }
+    let geminiCalled = false
     try {
-      const [vector] = await this.providers.gemini([text])
-      await this.cacheValid([geminiRequest], [vector])
-      return { vector, mode: "gemini", cached: false }
+      const [vector] = await this.cache.resolveMany([geminiRequest], () => {
+        geminiCalled = true
+        return this.providers.gemini([text])
+      })
+      if (!vector) throw new Error("Gemini embedding was unavailable")
+      return { vector, mode: "gemini", cached: !geminiCalled }
     } catch (error) {
       this.logFailure("Gemini", error)
     }
 
     const openaiRequest = this.request(OPENAI_NAMESPACE, identity)
-    const [openaiHit] = await this.cache.getMany([openaiRequest])
-    if (openaiHit) return { vector: openaiHit, mode: "openai", cached: true }
+    let openaiCalled = false
     try {
-      const [vector] = await this.providers.openai([text])
-      await this.cacheValid([openaiRequest], [vector])
-      return { vector, mode: "openai", cached: false }
+      const [vector] = await this.cache.resolveMany([openaiRequest], () => {
+        openaiCalled = true
+        return this.providers.openai([text])
+      })
+      if (!vector) throw new Error("OpenAI embedding was unavailable")
+      return { vector, mode: "openai", cached: !openaiCalled }
     } catch (error) {
       this.logFailure("OpenAI", error)
       return { vector: [], mode: "position-only", cached: false }
@@ -73,45 +77,50 @@ export class EmbeddingService {
     if (!texts.length) return { vectors: [], mode: "gemini", cacheHits: 0, cacheMisses: 0 }
     const identities = texts.map((text, index) => contentHashes?.[index] ?? this.prepareText(text))
     const requests = identities.map(identity => this.request(GEMINI_NAMESPACE, identity))
-    const results = await this.cache.getMany(requests)
-    const missing = results.flatMap((value, index) => value ? [] : [index])
+    const geminiCached = await this.cache.getMany(requests)
+    const missing = geminiCached.flatMap((value, index) => value ? [] : [index])
     const initialHits = texts.length - missing.length
-    if (!missing.length) return { vectors: results, mode: "gemini", cacheHits: initialHits, cacheMisses: 0 }
-
+    if (!missing.length) return { vectors: geminiCached, mode: "gemini", cacheHits: initialHits, cacheMisses: 0 }
     try {
-      const vectors = await this.providers.gemini(missing.map(index => texts[index]))
-      this.assertBatch(vectors, missing.length)
-      await this.cacheValid(missing.map(index => requests[index]), vectors)
-      missing.forEach((index, offset) => { results[index] = vectors[offset] })
-      return { vectors: results, mode: "gemini", cacheHits: initialHits, cacheMisses: missing.length }
+      const missRequests = missing.map(index => requests[index])
+      const missVectors = await this.cache.resolveMany(
+        missRequests,
+        unresolved => this.providers.gemini(unresolved.map(request => texts[requests.indexOf(request)])),
+        new Array(missRequests.length).fill(null),
+      )
+      missing.forEach((index, offset) => { geminiCached[index] = missVectors[offset] })
+      return { vectors: geminiCached, mode: "gemini", cacheHits: initialHits, cacheMisses: missing.length }
     } catch (error) {
       this.logFailure("Gemini batch", error)
     }
 
     const fallbackRequests = missing.map(index => this.request(OPENAI_NAMESPACE, identities[index]))
-    const fallbackHits = await this.cache.getMany(fallbackRequests)
-    const fallbackMissing = fallbackHits.flatMap((value, index) => value ? [] : [index])
-    fallbackHits.forEach((vector, offset) => { if (vector) results[missing[offset]] = vector })
+    const fallbackCached = await this.cache.getMany(fallbackRequests)
+    const fallbackMissing = fallbackCached.flatMap((value, index) => value ? [] : [index])
+    fallbackCached.forEach((vector, offset) => { if (vector) geminiCached[missing[offset]] = vector })
     if (!fallbackMissing.length) {
-      return { vectors: results, mode: "openai", cacheHits: initialHits + fallbackHits.length, cacheMisses: missing.length }
+      return { vectors: geminiCached, mode: "openai", cacheHits: initialHits + fallbackCached.length, cacheMisses: missing.length }
     }
     try {
-      const vectors = await this.providers.openai(fallbackMissing.map(offset => texts[missing[offset]]))
-      this.assertBatch(vectors, fallbackMissing.length)
-      await this.cacheValid(fallbackMissing.map(offset => fallbackRequests[offset]), vectors)
-      fallbackMissing.forEach((offset, vectorIndex) => { results[missing[offset]] = vectors[vectorIndex] })
+      const unresolvedRequests = fallbackMissing.map(index => fallbackRequests[index])
+      const vectors = await this.cache.resolveMany(
+        unresolvedRequests,
+        unresolved => this.providers.openai(unresolved.map(request => texts[missing[fallbackRequests.indexOf(request)]])),
+        new Array(unresolvedRequests.length).fill(null),
+      )
+      fallbackMissing.forEach((offset, vectorIndex) => { geminiCached[missing[offset]] = vectors[vectorIndex] })
       return {
-        vectors: results,
+        vectors: geminiCached,
         mode: "openai",
-        cacheHits: initialHits + fallbackHits.filter(Boolean).length,
+        cacheHits: initialHits + fallbackCached.filter(Boolean).length,
         cacheMisses: missing.length,
       }
     } catch (error) {
       this.logFailure("OpenAI batch", error)
       return {
-        vectors: results,
+        vectors: geminiCached,
         mode: "position-only",
-        cacheHits: initialHits + fallbackHits.filter(Boolean).length,
+        cacheHits: initialHits + fallbackCached.filter(Boolean).length,
         cacheMisses: missing.length,
       }
     }
@@ -124,11 +133,6 @@ export class EmbeddingService {
 
   private request(namespaceValue: EmbeddingCacheNamespace, identity: string): EmbeddingCacheRequest {
     return { namespace: namespaceValue, identity }
-  }
-
-  private async cacheValid(requests: EmbeddingCacheRequest[], vectors: number[][]): Promise<void> {
-    this.assertBatch(vectors, requests.length)
-    await this.cache.setMany(requests, vectors)
   }
 
   private assertBatch(vectors: number[][], expected: number): void {

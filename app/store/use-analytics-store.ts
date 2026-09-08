@@ -5,6 +5,8 @@ import { toast } from "sonner"                          // ✅ static import, no
 import type { AnalyticsData, RankingSnapshot, QueryConfig } from "@/types/type"
 import { analyticsCalculations } from "@/app/logic/analyticsLogic"
 
+let analyticsRequestSequence = 0
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AnalyticsState {
@@ -128,6 +130,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
           return
         }
 
+        const requestSequence = ++analyticsRequestSequence
         set({ isLoading: true, error: null })
 
         try {
@@ -136,10 +139,13 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
               ? await get()._getWeaviateAnalytics(userId, timeRangeMs, queries)
               : await get()._getAppwriteAnalytics(userId, timeRangeMs, queries)
 
-          set({ analytics: data, isLoading: false, error: null })
+          if (requestSequence === analyticsRequestSequence) {
+            set({ analytics: data, isLoading: false, error: null })
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to fetch analytics"
           console.error("[AnalyticsStore] fetchAnalytics failed:", err)
+          if (requestSequence !== analyticsRequestSequence) return
           set({ error: message, isLoading: false })
           toast.error(`Analytics error: ${message}`)
 

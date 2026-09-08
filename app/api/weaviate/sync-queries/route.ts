@@ -72,48 +72,40 @@ export async function POST(request: NextRequest) {
     let errorCount   = 0
     const errorIds:  string[] = []
 
-    const BATCH_SIZE    = 10
-    const BATCH_DELAY   = 100
+    const BATCH_SIZE = 50
+    const BATCH_DELAY = 100
 
     for (let i = 0; i < queries.length; i += BATCH_SIZE) {
       const batch = queries.slice(i, i + BATCH_SIZE)
 
-      const results = await Promise.allSettled(
-        batch.map(async query => {
-          //  Map QueryConfig → SimilarQuery (correct field names)
-          const weaviateQuery: SimilarQuery = {
-            id:        query.id,
-            name:      query.name,
-            query:     query.query,
-            category:  query.category,
-            userId:    user.$id,           // always from auth
-            createdAt: new Date(query.createdAt),
-            lastRun:   query.lastRun ? new Date(query.lastRun) : undefined,
-            similarity: 0,
-          }
+      // 1. Map all items in the batch into SimilarQuery objects
+      const weaviateQueries: SimilarQuery[] = batch.map(query => ({
+        id:         query.id,
+        name:       query.name,
+        query:      query.query,
+        category:   query.category,
+        userId:     user.$id,
+        createdAt:  new Date(query.createdAt),
+        lastRun:    query.lastRun ? new Date(query.lastRun) : undefined,
+        similarity: 0,
+      }))
 
-          //  Actual sync — not a TODO no-op
-          await weaviate.syncQuery(weaviateQuery)
-          console.log(`[SyncQueries] Synced: ${query.id} (${query.name})`)
-        })
-      )
+      // 2. Send ALL 50 items together in ONE call
+      try {
+        await weaviate.syncQueriesBatch(weaviateQueries)
+        syncedCount += batch.length
+        console.log(`[SyncQueries] Synced batch of ${batch.length} queries (${i + 1}-${i + batch.length})`)
+      } catch (err) {
+        errorCount += batch.length
+        errorIds.push(...batch.map(q => q.id))
+        console.error(`[SyncQueries] Batch ${i}-${i + batch.length} failed:`, err)
+      }
 
-      results.forEach((r, idx) => {
-        if (r.status === "fulfilled") {
-          syncedCount++
-        } else {
-          errorCount++
-          errorIds.push(batch[idx].id)
-          //  Log full error server-side, never send to client
-          console.error(`[SyncQueries] Failed ${batch[idx].id}:`, r.reason)
-        }
-      })
-
+      // 3. Throttle slightly between major batches to respect provider quotas
       if (i + BATCH_SIZE < queries.length) {
         await new Promise(r => setTimeout(r, BATCH_DELAY))
       }
     }
-
     console.log(`[SyncQueries] Done — synced: ${syncedCount}, errors: ${errorCount}`)
 
     return NextResponse.json({

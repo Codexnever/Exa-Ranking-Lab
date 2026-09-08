@@ -4,6 +4,8 @@ import { persist, createJSONStorage } from "zustand/middleware"
 import { toast } from "sonner"
 import type { RankingSnapshot, RankingChange } from "@/types/type"
 
+let analyticsFetchSequence = 0
+
 // ─── SSR-safe storage ─────────────────────────────────────────────────────────
 
 const safeStorage = createJSONStorage(() => {
@@ -155,6 +157,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
       // ── Analytics fetch ────────────────────────────────────────────────────
 
       fetchAllSnapshots: async (userId?, queryId?) => {
+        const requestSequence = ++analyticsFetchSequence
         set({ isLoadingAnalytics: true, error: null })
         //  Snapshot existing data for rollback on error
         const previous = get().allSnapshots
@@ -176,6 +179,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
             (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
           )
 
+          if (requestSequence !== analyticsFetchSequence) return
           set({
             allSnapshots:       sorted,
             isLoadingAnalytics: false,
@@ -188,7 +192,9 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
           const message = err instanceof Error ? err.message : "Failed to fetch analytics snapshots"
           console.error("[SnapshotsStore] Analytics fetch error:", err)
           //  Restore previous data on error — don't leave the store empty
-          set({ error: message, isLoadingAnalytics: false, allSnapshots: previous })
+          if (requestSequence === analyticsFetchSequence) {
+            set({ error: message, isLoadingAnalytics: false, allSnapshots: previous })
+          }
           toast.error(message)
         }
       },

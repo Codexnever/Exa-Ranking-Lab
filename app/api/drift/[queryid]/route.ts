@@ -2,6 +2,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { databaseService } from "@/app/services/database/database-service";
 import { analyzeDrift } from "@/app/logic/driftAnalyzer";
+import { getEmbeddingService } from "@/app/services/EmbeddingService";
 import { withEnhancedSecurity } from "@/lib/middleware/security/security-middleware";
 import { SecurityContext } from "@/types/type";
 
@@ -32,7 +33,9 @@ async function getSingleDriftHandler(
     //    analysis), not just the drift computation itself.
     const routeStartTime = performance.now();
 
+    const queryLoadStartedAt = performance.now();
     const query = await databaseService.queryService.getQuery(queryid);
+    const queryLoadMs = performance.now() - queryLoadStartedAt;
     if (!query) {
       return NextResponse.json({
         error: "Query not found",
@@ -47,7 +50,9 @@ async function getSingleDriftHandler(
       }, { status: 403 });
     }
 
+    const snapshotFetchStartedAt = performance.now();
     const snapshots = await databaseService.snapshotService.getSnapshots(queryid, userId);
+    const snapshotFetchMs = performance.now() - snapshotFetchStartedAt;
     console.log(`[Drift API] Found ${snapshots.length} snapshots for query ${queryid}`);
 
     if (snapshots.length < 2) {
@@ -76,7 +81,11 @@ async function getSingleDriftHandler(
 
     // analyzeDrift() returns its OWN totalProcessingTime — pure computation
     // time (embedding calls + comparison math), excluding auth/DB latency.
+    const cacheBefore = getEmbeddingService().cacheStats;
+    const driftStartedAt = performance.now();
     const driftResult = await analyzeDrift(queryid, query.name, snapshots);
+    const driftCalculationMs = performance.now() - driftStartedAt;
+    const cacheAfter = getEmbeddingService().cacheStats;
 
     //  Route-level wall-clock time — includes auth, DB fetch, everything.
     //    Kept SEPARATE from driftResult.totalProcessingTime instead of
@@ -94,6 +103,22 @@ async function getSingleDriftHandler(
       `drift computation: ${driftResult.totalProcessingTime.toFixed(2)}ms, ` +
       `full request: ${routeProcessingTime.toFixed(2)}ms`
     );
+    if (process.env.PERFORMANCE_DEBUG === "true") console.info("[Drift API] Single-query timing (approximate process deltas)", {
+      queryId: queryid,
+      queryLoadMs: Math.round(queryLoadMs),
+      snapshotFetchMs: Math.round(snapshotFetchMs),
+      driftCalculationMs: Math.round(driftCalculationMs),
+      totalMs: Math.round(routeProcessingTime),
+      embeddingRequests: cacheAfter.totalRequests - cacheBefore.totalRequests,
+      embeddingKeyLookups: cacheAfter.embeddingKeyLookups - cacheBefore.embeddingKeyLookups,
+      l1Hits: cacheAfter.l1Hits - cacheBefore.l1Hits,
+      redisHits: cacheAfter.redisHits - cacheBefore.redisHits,
+      cacheMisses: cacheAfter.totalMisses - cacheBefore.totalMisses,
+      providerLoadOperations: cacheAfter.providerLoadOperations - cacheBefore.providerLoadOperations,
+      providerInputs: cacheAfter.providerInputs - cacheBefore.providerInputs,
+      inflightHits: cacheAfter.inflightHits - cacheBefore.inflightHits,
+      redisFailures: cacheAfter.redisFailures - cacheBefore.redisFailures,
+    });
 
     return NextResponse.json({
       ...driftResult,

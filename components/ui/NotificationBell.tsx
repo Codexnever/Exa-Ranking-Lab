@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Bell, BellRing, AlertTriangle, TrendingUp, X, ExternalLink } from "lucide-react"
+import { Bell, BellRing, AlertTriangle, ExternalLink } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -34,16 +34,19 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open,          setOpen]          = useState(false)
   const [loading,       setLoading]       = useState(false)
+  const [error,         setError]         = useState<string | null>(null)
 
   const unreadCount = notifications.filter(n => !n.read).length
 
   const fetchNotifications = useCallback(async () => {
     if (!userId) return
     setLoading(true)
+    setError(null)
     try {
       const data = await call<Notification[]>("GET", "/notifications")
       if (Array.isArray(data)) setNotifications(data)
     } catch {
+      setError("Drift alerts are unavailable. Try again.")
       // silent — bell just shows 0 if fetch fails
     } finally {
       setLoading(false)
@@ -58,18 +61,28 @@ export function NotificationBell() {
   }, [fetchNotifications])
 
   const markAsRead = async (id: string) => {
+    const previous = notifications
     setNotifications(prev =>
       prev.map(n => n.$id === id ? { ...n, read: true } : n)
     )
     try {
-      await call("PATCH", `/notifications/${id}/read`)
+      await call("PATCH", `/notifications/${id}/read`).catch(error => {
+        setNotifications(previous)
+        setError("Could not save the read state. Try again.")
+        throw error
+      })
     } catch { /* optimistic update — ignore failure */ }
   }
 
   const markAllRead = async () => {
+    const previous = notifications
     setNotifications(prev => prev.map(n => ({ ...n, read: true })))
     try {
-      await call("PATCH", "/notifications/read-all")
+      await call("PATCH", "/notifications/read-all").catch(error => {
+        setNotifications(previous)
+        setError("Could not mark all alerts as read. Try again.")
+        throw error
+      })
     } catch { /* optimistic */ }
   }
 
@@ -126,7 +139,14 @@ export function NotificationBell() {
 
         {/* List */}
         <div className="max-h-96 overflow-y-auto">
-          {loading && notifications.length === 0 ? (
+          {error ? (
+            <div className="px-4 py-6 text-center text-sm text-red-600" role="alert">
+              <p>{error}</p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={fetchNotifications}>
+                Try again
+              </Button>
+            </div>
+          ) : loading && notifications.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-gray-500">
               Loading alerts...
             </div>

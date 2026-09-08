@@ -8,6 +8,7 @@ import {
   DataQualityResult,
   CachedAnalytics
 } from '@/types/type';
+import type { EnhancedAnalyticsData } from '@/types/type';
 
 interface SyncStats {
   queries?: { synced: number; errors: number; total: number };
@@ -43,9 +44,12 @@ interface SemanticInsights {
   weaviateMetrics?: WeaviateMetrics;
   semanticClusters?: Array<{
     id: string;
-    queries: string[];
-    centroid: number[];
-    coherenceScore: number;
+    theme: string;
+    size: number;
+    coherence: number;
+    queryIds?: string[];
+    items?: Array<unknown>;
+    centroid?: number[];
   }>;
   trendAnalysis?: {
     growingTopics: string[];
@@ -59,6 +63,7 @@ interface WeaviateState {
   isConnected: boolean;
   semanticInsights: SemanticInsights | null;
   enhancedMetrics: EnhancedMetrics | null;
+  analyticsData: EnhancedAnalyticsData | null;
   isLoading: boolean;
   error: string | null;
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -121,6 +126,8 @@ interface WeaviateActions {
 
 type WeaviateStore = WeaviateState & WeaviateActions;
 
+let semanticAnalyticsRequestSequence = 0;
+
 export const useWeaviateStore = create<WeaviateStore>()(
   persist(
     (set, get) => ({
@@ -129,6 +136,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
       isConnected: false,
       semanticInsights: null,
       enhancedMetrics: null,
+      analyticsData: null,
       isLoading: false,
       error: null,
       connectionStatus: 'disconnected',
@@ -153,6 +161,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
             // Complete cleanup when switching to appwrite
             newState.semanticInsights = null;
             newState.enhancedMetrics = null;
+            newState.analyticsData = null;
             newState.isConnected = false;
             newState.connectionStatus = 'disconnected';
             newState.vectorsAvailable = false;
@@ -183,20 +192,10 @@ export const useWeaviateStore = create<WeaviateStore>()(
         console.log('[WeaviateStore] Initializing Weaviate mode...');
 
         try {
-          // First try to get analytics data
+          // Initialization is read-only. Query synchronization is an explicit
+          // user action; an empty analytics result is still a valid result and
+          // must not start a write/retry cycle.
           await get().getSemanticAnalytics(userId, timeRange);
-
-          // If that succeeds and we don't have vectors, try syncing
-          const { vectorsAvailable } = get();
-          if (!vectorsAvailable) {
-            console.log('[WeaviateStore] No vectors available, attempting sync...');
-            try {
-              await get().syncQueries(userId);
-            } catch (syncError) {
-              console.warn('[WeaviateStore] Sync failed during initialization:', syncError);
-              // Don't throw - analytics might still work with existing data
-            }
-          }
         } catch (error) {
           console.error('[WeaviateStore] Weaviate initialization failed:', error);
           // Set error state but don't throw
@@ -282,6 +281,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
 
       // FIXED: Completely rewritten getSemanticAnalytics with better error handling
       getSemanticAnalytics: async (userId: string, timeRange: string) => {
+        const requestSequence = ++semanticAnalyticsRequestSequence;
         const { dataSource } = get();
 
         console.log(`[WeaviateStore] getSemanticAnalytics called - dataSource: ${dataSource}, userId: ${userId}, timeRange: ${timeRange}`);
@@ -292,6 +292,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
           set({
             semanticInsights: null,
             enhancedMetrics: null,
+            analyticsData: null,
             isConnected: false,
             connectionStatus: 'disconnected',
             vectorsAvailable: false,
@@ -358,7 +359,9 @@ export const useWeaviateStore = create<WeaviateStore>()(
           const processedInsights: SemanticInsights = {
             contentAnomalies: Array.isArray(rawSemanticInsights.contentAnomalies)
               ? rawSemanticInsights.contentAnomalies
-              : [],
+              : Array.isArray(rawSemanticInsights.contentAnomalies?.anomalies)
+                ? rawSemanticInsights.contentAnomalies.anomalies
+                : [],
             weaviateMetrics: {
               totalVectors: rawSemanticInsights.weaviateMetrics?.totalVectors || 0,
               embeddingDimensions: rawSemanticInsights.weaviateMetrics?.embeddingDimensions || 0,
@@ -368,7 +371,9 @@ export const useWeaviateStore = create<WeaviateStore>()(
             },
             semanticClusters: Array.isArray(rawSemanticInsights.semanticClusters)
               ? rawSemanticInsights.semanticClusters
-              : [],
+              : Array.isArray(rawSemanticInsights.semanticClusters?.clusters)
+                ? rawSemanticInsights.semanticClusters.clusters
+                : [],
             trendAnalysis: rawSemanticInsights.trendAnalysis || {
               growingTopics: [],
               decliningTopics: [],
@@ -390,9 +395,23 @@ export const useWeaviateStore = create<WeaviateStore>()(
           const totalVectors = processedInsights.weaviateMetrics?.totalVectors || 0;
           const hasValidData = totalVectors > 0 || processedInsights.contentAnomalies!.length > 0;
 
+          if (requestSequence !== semanticAnalyticsRequestSequence) {
+            return {
+              ...responseData,
+              semanticInsights: processedInsights,
+              enhancedMetrics: processedMetrics,
+              vectorsAvailable: totalVectors > 0
+            };
+          }
+
           set({
             semanticInsights: processedInsights,
             enhancedMetrics: processedMetrics,
+            analyticsData: {
+              ...responseData,
+              semanticInsights: processedInsights,
+              enhancedMetrics: processedMetrics,
+            } as EnhancedAnalyticsData,
             vectorsAvailable: totalVectors > 0,
             isLoading: false,
             error: null,
@@ -410,6 +429,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
           console.log(`[WeaviateStore] Final state - Connected: ${hasValidData}, Vectors: ${totalVectors}`);
 
           return {
+            ...responseData,
             semanticInsights: processedInsights,
             enhancedMetrics: processedMetrics,
             vectorsAvailable: totalVectors > 0
@@ -419,12 +439,14 @@ export const useWeaviateStore = create<WeaviateStore>()(
           console.error('[WeaviateStore] Semantic analytics fetch error:', error);
 
           // Record failed operation
+          if (requestSequence !== semanticAnalyticsRequestSequence) throw error;
           get().recordOperation(operationType, false);
 
           // Set error state
           set({
             semanticInsights: null,
             enhancedMetrics: null,
+            analyticsData: null,
             vectorsAvailable: false,
             isLoading: false,
             isConnected: false,
@@ -981,6 +1003,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
         set({
           semanticInsights: null,
           enhancedMetrics: null,
+          analyticsData: null,
           isConnected: false,
           connectionStatus: 'disconnected',
           error: null,

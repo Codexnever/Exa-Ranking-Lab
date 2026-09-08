@@ -375,6 +375,16 @@ describe("identity and persistence compatibility", () => {
     expect(legacy.evidence.detectionReasons[0].message).toContain("not stored")
   })
 
+  test("malformed legacy affectedQueries shapes are rejected for record-level skipping", () => {
+    expect(() => documentToEvent({
+      eventId: "bad",
+      category: "news",
+      severity: "minor",
+      affectedQueries: "{}",
+      detectedAt: new Date(NOW).toISOString(),
+    })).toThrow(/affectedQueries must be an array/)
+  })
+
   test("stored schema-v2 events without v2.1 additions remain readable", async () => {
     const results = batchWithHistories()
     const [event] = await makeDetector().detect(results, metadata(results), "user", NOW)

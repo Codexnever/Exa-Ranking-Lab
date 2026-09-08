@@ -72,25 +72,68 @@ export function planNativeRqUpdate(
   existing: WeaviateClassDefinition,
   requested: WeaviateQuantization,
   serverVersion: string,
-): { action: "none" | "update"; classDefinition: WeaviateClassDefinition; status: WeaviateQuantization } {
+): {
+  action: "none" | "update"
+  classDefinition: WeaviateClassDefinition
+  status: WeaviateQuantization
+} {
+  // App is not managing quantization.
+  // Leave whatever Weaviate already has completely untouched.
+  if (requested === "none") {
+    return {
+      action: "none",
+      classDefinition: existing,
+      status: "none",
+    }
+  }
+
   const config = existing.vectorIndexConfig ?? {}
   const rq = config.rq as { enabled?: boolean; bits?: number } | undefined
+
+  // rq-8 was explicitly requested.
   if (rq?.enabled) {
-    if ((rq.bits ?? 8) !== 8) throw new Error("Existing Weaviate RQ uses a conflicting bit width; it will not be overwritten")
-    return { action: "none", classDefinition: existing, status: "rq-8" }
+    if ((rq.bits ?? 8) !== 8) {
+      throw new Error(
+        "Existing Weaviate RQ uses a conflicting bit width; it will not be overwritten"
+      )
+    }
+
+    return {
+      action: "none",
+      classDefinition: existing,
+      status: "rq-8",
+    }
   }
-  if (requested === "none") return { action: "none", classDefinition: existing, status: "none" }
+
   const [major, minor] = serverVersion.split(".").map(Number)
-  if (!Number.isFinite(major) || !Number.isFinite(minor) || major < 1 || (major === 1 && minor < 32)) {
-    throw new Error(`WEAVIATE_QUANTIZATION=rq-8 requires Weaviate 1.32+; detected ${serverVersion}`)
+
+  if (
+    !Number.isFinite(major) ||
+    !Number.isFinite(minor) ||
+    major < 1 ||
+    (major === 1 && minor < 32)
+  ) {
+    throw new Error(
+      `WEAVIATE_QUANTIZATION=rq-8 requires Weaviate 1.32+; detected ${serverVersion}`
+    )
   }
+
   if ((existing.vectorIndexType ?? "hnsw") !== "hnsw") {
-    throw new Error("WEAVIATE_QUANTIZATION=rq-8 in-place enablement is limited to HNSW collections")
+    throw new Error(
+      "WEAVIATE_QUANTIZATION=rq-8 in-place enablement is limited to HNSW collections"
+    )
   }
+
   for (const name of ["bq", "pq", "sq"] as const) {
     const quantizer = config[name] as { enabled?: boolean } | undefined
-    if (quantizer?.enabled) throw new Error(`Existing Weaviate ${name.toUpperCase()} quantization will not be overwritten`)
+
+    if (quantizer?.enabled) {
+      throw new Error(
+        `Existing Weaviate ${name.toUpperCase()} quantization will not be overwritten`
+      )
+    }
   }
+
   return {
     action: "update",
     status: "rq-8",
@@ -98,7 +141,11 @@ export function planNativeRqUpdate(
       ...existing,
       vectorIndexConfig: {
         ...config,
-        rq: { enabled: true, bits: 8, rescoreLimit: 20 },
+        rq: {
+          enabled: true,
+          bits: 8,
+          rescoreLimit: 20,
+        },
       },
     },
   }
@@ -278,6 +325,20 @@ function formatError(err: unknown): string {
     try { return JSON.stringify(e) } catch { return String(e) }
   }
   return String(err)
+}
+
+export function classifyWeaviateFailure(err: unknown): "cancelled" | "timeout" | "transport_terminated" | "transport" {
+  const record = err && typeof err === "object" ? err as Record<string, unknown> : {}
+  const cause = record.cause && typeof record.cause === "object"
+    ? record.cause as Record<string, unknown>
+    : {}
+  const name = String(record.name ?? "")
+  const code = String(record.code ?? cause.code ?? "")
+  const message = formatError(err).toLowerCase()
+  if (name === "AbortError" || code === "ABORT_ERR") return "cancelled"
+  if (/timeout|timed out/.test(message) || /TIMEOUT/i.test(code)) return "timeout"
+  if (message.includes("terminated") || code === "UND_ERR_SOCKET") return "transport_terminated"
+  return "transport"
 }
 
 // ─── Gemini Embedding 2 ────────────────────────────────────────────────────────
@@ -689,7 +750,12 @@ export class WeaviateService {
           console.warn(`[WeaviateService][Weaviate] ${ctx} — non-retryable: ${msg}`)
           throw e
         }
-        console.warn(`[WeaviateService][Weaviate] ${ctx} attempt ${i}/${this.MAX_RETRIES}: ${msg}`)
+        const failureType = classifyWeaviateFailure(e)
+        if (failureType === "cancelled") {
+          console.warn(`[WeaviateService][Weaviate] ${ctx} — cancelled: ${msg}`)
+          throw e
+        }
+        console.warn(`[WeaviateService][Weaviate] ${ctx} attempt ${i}/${this.MAX_RETRIES} (${failureType}): ${msg}`)
         if (i < this.MAX_RETRIES) await new Promise(r => setTimeout(r, this.RETRY_DELAY * i))
       }
     }
@@ -701,10 +767,8 @@ export class WeaviateService {
   /** Single embedding — cache-first, then Gemini. */
   private async getEmbedding(text: string, contentKey?: string): Promise<number[]> {
     const request = { namespace: GEMINI_CACHE_NAMESPACE, identity: contentKey ?? text.slice(0, GEMINI_MAX_CHARS) }
-    const [cached] = await this.embeddingCache.getMany([request])
-    if (cached) return cached
-    const vector = await fetchGeminiEmbedding(text)
-    await this.embeddingCache.setMany([request], [vector])
+    const [vector] = await this.embeddingCache.resolveMany([request], () => fetchGeminiEmbedding(text).then(value => [value]))
+    if (!vector) throw new Error("Gemini embedding was unavailable")
     return vector
   }
 
@@ -714,17 +778,11 @@ export class WeaviateService {
    */
   private async getBatchEmbeddings(texts: string[], keys: string[]): Promise<number[][]> {
     const requests = keys.map(identity => ({ namespace: GEMINI_CACHE_NAMESPACE, identity }))
-    const results = await this.embeddingCache.getMany(requests)
-    const missIndices = results.flatMap((value, index) => value ? [] : [index])
-    if (missIndices.length === 0) return results as number[][]
-    const vectors = await fetchGeminiBatchEmbeddings(missIndices.map(index => texts[index]))
-    await this.embeddingCache.setMany(missIndices.map(index => requests[index]), vectors)
-
-    for (let j = 0; j < missIndices.length; j++) {
-      const i = missIndices[j]
-      results[i] = vectors[j]
-    }
-
+    const results = await this.embeddingCache.resolveMany(
+      requests,
+      missing => fetchGeminiBatchEmbeddings(missing.map(request => texts[requests.indexOf(request)])),
+    )
+    if (results.some(vector => !vector)) throw new Error("Gemini embedding batch was incomplete")
     return results as number[][]
   }
 
@@ -840,32 +898,58 @@ export class WeaviateService {
     }
   }
 
-  /** Sync a query intent as recordType="query_intent". */
-  async syncQuery(query: SimilarQuery): Promise<void> {
+
+/**
+   * Sync multiple query intents in a single batch operation.
+   * Leverages the shared L1/Redis cache for embeddings and
+   * Weaviate's objectsBatcher for database writes.
+   */
+  async syncQueriesBatch(queries: SimilarQuery[]): Promise<void> {
+    if (!queries.length) return
     if (!this.isConnected) await this.initialize()
 
-    const vector = await this.getEmbedding(`${query.name} ${query.query}`)
+    // 1. Prepare combined text for embeddings
+    const texts = queries.map(q => `${q.name} ${q.query}`)
 
-    await this.withRetry(
-      () => this._client.data
-        .creator()
-        .withClassName(COLLECTION_NAME)
-        .withProperties({
-          recordType: "query_intent",
-          queryId:    query.id,
-          name:       query.name,
-          query:      query.query,
-          category:   query.category,
-          userId:     query.userId,
-          timestamp:  query.createdAt.toISOString(),
-          lastRun:    query.lastRun?.toISOString() ?? null,
-        })
-        .withVector(vector)
-        .do(),
-      `sync query ${query.id}`
-    )
+    // We use the raw text as the cache identity key, which aligns with
+    // the single getEmbedding approach and the new cache namespace rules.
+    const vectors = await this.getBatchEmbeddings(texts, texts)
+
+    // 2. Map to Weaviate's expected batch object shape
+    const toInsert = queries.map((query, idx) => ({
+      class: COLLECTION_NAME,
+      properties: {
+        recordType: "query_intent",
+        queryId:    query.id,
+        name:       query.name,
+        query:      query.query,
+        category:   query.category,
+        userId:     query.userId,
+        timestamp:  query.createdAt.toISOString(),
+        lastRun:    query.lastRun?.toISOString() ?? null,
+      },
+      vector: vectors[idx], // Full vectors; Weaviate handles the 8-bit RQ natively
+    }))
+
+    // 3. Insert into Weaviate using BATCH_SIZE chunks (defaults to 20)
+    for (let i = 0; i < toInsert.length; i += this.BATCH_SIZE) {
+      const batch = toInsert.slice(i, i + this.BATCH_SIZE)
+
+      await this.withRetry(
+        () => this._client.batch.objectsBatcher().withObjects(...batch).do(),
+        `batch insert queries (${i} to ${i + batch.length})`
+      )
+
+      // Brief pause between batch chunks to prevent rate-limiting
+      if (i + this.BATCH_SIZE < toInsert.length) {
+        await new Promise(r => setTimeout(r, 300))
+      }
+    }
   }
 
+  async syncQuery(query: SimilarQuery): Promise<void> {
+    await this.syncQueriesBatch([query])
+  }
   async semanticSearch(
     query:     string,
     userId:    string,

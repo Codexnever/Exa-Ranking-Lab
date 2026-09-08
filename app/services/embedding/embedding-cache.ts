@@ -37,10 +37,46 @@ export interface EmbeddingCacheStats {
   l1Hits: number
   redisHits: number
   totalRequests: number
+  embeddingKeyLookups: number
   totalMisses: number
   redisFailures: number
+  redisMisses: number
+  redisSets: number
+  redisTimeouts: number
+  providerLoadOperations: number
+  providerInputs: number
+  inflightHits: number
   hitRate: number
   redisConfigured: boolean
+}
+
+type CacheDebugEvent =
+  | "L1_HIT" | "L1_MISS" | "REDIS_HIT" | "REDIS_MISS"
+  | "REDIS_SET" | "REDIS_ERROR" | "REDIS_TIMEOUT"
+  | "PROVIDER_START" | "PROVIDER_END" | "INFLIGHT_HIT"
+
+function debugEnabled(): boolean {
+  return process.env.EMBEDDING_CACHE_DEBUG?.trim().toLowerCase() === "true"
+}
+
+function debugCacheEvent(
+  event: CacheDebugEvent,
+  request: EmbeddingCacheRequest,
+  key: string,
+  extra: Record<string, unknown> = {},
+): void {
+  if (!debugEnabled()) return
+  const identityHash = createHash("sha256").update(request.identity, "utf8").digest("hex")
+  console.info(`[EmbeddingCache] ${event}`, {
+    keyFingerprint: key.slice("embedding:v1:".length, "embedding:v1:".length + 12),
+    provider: request.namespace.provider,
+    model: request.namespace.model,
+    task: request.namespace.task,
+    preparationVersion: request.namespace.preparationVersion,
+    identityHash: identityHash.slice(0, 12),
+    identityLength: request.identity.length,
+    ...extra,
+  })
 }
 
 interface LruEntry {
@@ -89,7 +125,11 @@ export class LruEmbeddingCache {
 
 export function createEmbeddingCacheKey(request: EmbeddingCacheRequest): string {
   const { namespace, identity } = request
-  if (!identity) throw new TypeError("Embedding cache identity is required")
+
+  if (!identity) {
+    throw new TypeError("Embedding cache identity is required")
+  }
+
   const material = JSON.stringify({
     schema: 1,
     provider: namespace.provider,
@@ -99,6 +139,7 @@ export function createEmbeddingCacheKey(request: EmbeddingCacheRequest): string 
     preparationVersion: namespace.preparationVersion,
     identity,
   })
+
   return `embedding:v1:${createHash("sha256").update(material, "utf8").digest("hex")}`
 }
 
@@ -154,8 +195,16 @@ export class EmbeddingCache {
   private l1Hits = 0
   private redisHits = 0
   private totalRequests = 0
+  private embeddingKeyLookups = 0
   private totalMisses = 0
   private redisFailures = 0
+  private redisMisses = 0
+  private redisSets = 0
+  private redisTimeouts = 0
+  private providerLoadOperations = 0
+  private providerInputs = 0
+  private inflightHits = 0
+  private readonly inflight = new Map<string, Promise<number[]>>()
 
   constructor(
     private readonly l1 = new LruEmbeddingCache(),
@@ -165,6 +214,7 @@ export class EmbeddingCache {
 
   async getMany(requests: EmbeddingCacheRequest[]): Promise<Array<number[] | null>> {
     this.totalRequests += requests.length
+    this.embeddingKeyLookups += requests.length
     const results: Array<number[] | null> = new Array(requests.length).fill(null)
     const misses: Array<{ index: number; key: string; request: EmbeddingCacheRequest }> = []
     requests.forEach((request, index) => {
@@ -173,7 +223,9 @@ export class EmbeddingCache {
       if (local) {
         this.l1Hits++
         results[index] = local
+        debugCacheEvent("L1_HIT", request, key)
       } else {
+        debugCacheEvent("L1_MISS", request, key)
         misses.push({ index, key, request })
       }
     })
@@ -182,16 +234,103 @@ export class EmbeddingCache {
         const values = await this.shared.mget(misses.map(miss => miss.key))
         misses.forEach((miss, remoteIndex) => {
           const vector = decodeCachedEmbedding(values[remoteIndex], miss.request.namespace)
-          if (!vector) return
+          if (!vector) {
+            this.redisMisses++
+            debugCacheEvent("REDIS_MISS", miss.request, miss.key)
+            return
+          }
           this.redisHits++
           this.l1.set(miss.key, vector)
           results[miss.index] = vector
+          debugCacheEvent("REDIS_HIT", miss.request, miss.key)
         })
-      } catch {
+      } catch (error) {
         this.redisFailures++
+        const timeout = isTimeoutError(error)
+        if (timeout) this.redisTimeouts++
+        misses.forEach(miss => debugCacheEvent(timeout ? "REDIS_TIMEOUT" : "REDIS_ERROR", miss.request, miss.key))
       }
     }
     this.totalMisses += results.filter(result => result === null).length
+    return results
+  }
+
+  /** Resolve cache misses once per process while preserving batch provider calls. */
+  async resolveMany(
+    requests: EmbeddingCacheRequest[],
+    loader: (missing: EmbeddingCacheRequest[]) => Promise<number[][]>,
+    knownResults?: Array<number[] | null>,
+  ): Promise<Array<number[] | null>> {
+    if (knownResults && knownResults.length !== requests.length) {
+      throw new TypeError("Known cache results and requests must align")
+    }
+    const results = knownResults ? [...knownResults] : await this.getMany(requests)
+    const waiters: Array<{ indexes: number[]; promise: Promise<number[]> }> = []
+    const owned = new Map<string, { request: EmbeddingCacheRequest; indexes: number[]; resolve: (v: number[]) => void; reject: (e: unknown) => void }>()
+
+    requests.forEach((request, index) => {
+      if (results[index]) return
+      const key = createEmbeddingCacheKey(request)
+      const existing = this.inflight.get(key)
+      if (existing) {
+        this.inflightHits++
+        debugCacheEvent("INFLIGHT_HIT", request, key)
+        waiters.push({ indexes: [index], promise: existing })
+        return
+      }
+      const duplicate = owned.get(key)
+      if (duplicate) {
+        duplicate.indexes.push(index)
+        return
+      }
+      let resolve!: (vector: number[]) => void
+      let reject!: (error: unknown) => void
+      const promise = new Promise<number[]>((ok, fail) => { resolve = ok; reject = fail })
+      this.inflight.set(key, promise)
+      owned.set(key, { request, indexes: [index], resolve, reject })
+      waiters.push({ indexes: [index], promise })
+    })
+
+    const ownedEntries = [...owned.entries()]
+    if (ownedEntries.length) {
+      const ownedRequests = ownedEntries.map(([, value]) => value.request)
+      const first = ownedEntries[0]
+      const start = performance.now()
+      this.providerLoadOperations++
+      this.providerInputs += ownedRequests.length
+      debugCacheEvent("PROVIDER_START", first[1].request, first[0], { inputCount: ownedRequests.length })
+      try {
+        const vectors = await loader(ownedRequests)
+        if (vectors.length !== ownedRequests.length) throw new Error("Embedding provider returned an incomplete batch")
+        vectors.forEach((vector, index) => validateVector(vector, ownedRequests[index].namespace.dimensions))
+        await this.setMany(ownedRequests, vectors)
+        ownedEntries.forEach(([, value], index) => {
+          value.indexes.forEach(resultIndex => { results[resultIndex] = vectors[index] })
+          value.resolve(vectors[index])
+        })
+        debugCacheEvent("PROVIDER_END", first[1].request, first[0], {
+          inputCount: ownedRequests.length,
+          durationMs: Math.round(performance.now() - start),
+          success: true,
+        })
+      } catch (error) {
+        ownedEntries.forEach(([, value]) => value.reject(error))
+        debugCacheEvent("PROVIDER_END", first[1].request, first[0], {
+          inputCount: ownedRequests.length,
+          durationMs: Math.round(performance.now() - start),
+          success: false,
+        })
+        await Promise.allSettled(waiters.map(waiter => waiter.promise))
+        throw error
+      } finally {
+        ownedEntries.forEach(([key]) => this.inflight.delete(key))
+      }
+    }
+
+    await Promise.all(waiters.map(async waiter => {
+      const vector = await waiter.promise
+      waiter.indexes.forEach(index => { results[index] = vector })
+    }))
     return results
   }
 
@@ -208,8 +347,13 @@ export class EmbeddingCache {
     if (!entries.length || !this.shared) return
     try {
       await this.shared.mset(entries, this.ttlSeconds)
-    } catch {
+      this.redisSets += entries.length
+      requests.forEach((request, index) => debugCacheEvent("REDIS_SET", request, entries[index].key))
+    } catch (error) {
       this.redisFailures++
+      const timeout = isTimeoutError(error)
+      if (timeout) this.redisTimeouts++
+      requests.forEach((request, index) => debugCacheEvent(timeout ? "REDIS_TIMEOUT" : "REDIS_ERROR", request, entries[index].key))
     }
   }
 
@@ -221,8 +365,15 @@ export class EmbeddingCache {
       l1Hits: this.l1Hits,
       redisHits: this.redisHits,
       totalRequests: this.totalRequests,
+      embeddingKeyLookups: this.embeddingKeyLookups,
       totalMisses: this.totalMisses,
       redisFailures: this.redisFailures,
+      redisMisses: this.redisMisses,
+      redisSets: this.redisSets,
+      redisTimeouts: this.redisTimeouts,
+      providerLoadOperations: this.providerLoadOperations,
+      providerInputs: this.providerInputs,
+      inflightHits: this.inflightHits,
       hitRate: this.totalRequests ? hits / this.totalRequests : 0,
       redisConfigured: Boolean(this.shared),
     }
@@ -240,7 +391,15 @@ class UpstashSharedEmbeddingStore implements SharedEmbeddingStore {
   async mset(entries: Array<{ key: string; value: string }>, ttlSeconds: number): Promise<void> {
     const pipeline = this.redis.pipeline()
     entries.forEach(entry => pipeline.set(entry.key, entry.value, { ex: ttlSeconds }))
-    await this.withTimeout(pipeline.exec())
+    // Properly inspect the pipeline results for hidden Upstash errors.
+    const results = await this.withTimeout(pipeline.exec<unknown[]>())
+    if (Array.isArray(results)) {
+      const errors = results.filter(res => res instanceof Error)
+      if (errors.length > 0) {
+        console.error("[EmbeddingCache] Upstash Redis rejected the write:", errors[0])
+        throw new Error("Redis pipeline write failed")
+      }
+    }
   }
 
   private async withTimeout<T>(operation: Promise<T>): Promise<T> {
@@ -279,4 +438,8 @@ function validateVector(vector: number[], dimensions?: number): void {
   if (!Array.isArray(vector) || vector.length === 0) throw new TypeError("Embedding vector must not be empty")
   if (dimensions !== undefined && vector.length !== dimensions) throw new TypeError("Embedding dimensions do not match")
   if (vector.some(value => !Number.isFinite(value))) throw new TypeError("Embedding vector must contain finite values")
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && /timed out|timeout/i.test(error.message)
 }

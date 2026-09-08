@@ -70,11 +70,11 @@ const EMBEDDING_MODE_LABELS: Record<string, { label: string; color: string }> = 
 export default function QueryDriftPage({
   params,
 }: {
-  params: Promise<{ queryid: string }>
+  params: Promise<{ queryId: string }>
 }) {
-  const { queryid } = use(params);
+  const { queryId } = use(params);
   const router      = useRouter();
-  const { userId }  = useAuth();
+  const { userId, initializing }  = useAuth();
 
   const [driftResult, setDriftResult] = useState<EnhancedDriftResult | null>(null);
   //  FIX: snapshots state added — CoverageGapChart needs this but it was
@@ -88,7 +88,17 @@ export default function QueryDriftPage({
   const handleBack = () => router.push("/drift");
 
   useEffect(() => {
-    if (!userId || !queryid) return;
+    if (initializing) return;
+    if (!userId) {
+      setError("Authentication is required to load drift data");
+      setLoading(false);
+      return;
+    }
+    if (!queryId) {
+      setError("The requested query ID is missing");
+      setLoading(false);
+      return;
+    }
 
     const fetchDriftData = async () => {
       try {
@@ -97,8 +107,8 @@ export default function QueryDriftPage({
 
         // Fetch drift result and snapshots in parallel
         const [driftData, snapshotsData] = await Promise.all([
-          secureCall("GET", `/drift/${queryid}`),
-          secureCall("GET", `/snapshots?queryId=${queryid}`),
+          secureCall("GET", `/drift/${queryId}`),
+          secureCall("GET", `/snapshots?queryId=${queryId}`),
         ]);
 
         const drift = driftData instanceof Response
@@ -130,7 +140,7 @@ export default function QueryDriftPage({
     };
 
     fetchDriftData();
-  }, [userId, queryid]);
+  }, [userId, queryId, initializing, secureCall]);
 
   if (loading) {
     return (

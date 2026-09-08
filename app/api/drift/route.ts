@@ -2,6 +2,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { databaseService } from "@/app/services/database/database-service";
 import { analyzeDriftForQueries } from "@/app/logic/driftAnalyzer";
+import { getEmbeddingService } from "@/app/services/EmbeddingService";
 import { withEnhancedSecurity } from "@/lib/middleware/security/security-middleware";
 import { SecurityContext } from "@/types/type";
 
@@ -15,11 +16,12 @@ async function getDriftHandler(request: NextRequest, context: SecurityContext) {
     console.log(`[Drift API] Starting analysis for user: ${userId}, forceRefresh: ${forceRefresh}`);
     const startTime = performance.now();
 
-    // Fetch queries and snapshots for the authenticated user
+    const snapshotFetchStartedAt = performance.now();
     const [queries, snapshots] = await Promise.all([
       databaseService.queryService.getQueries(userId),
       databaseService.snapshotService.getSnapshots(queryid, userId)
     ]);
+    const snapshotFetchMs = performance.now() - snapshotFetchStartedAt;
 
     console.log(`[Drift API] Found ${queries.length} queries, ${snapshots.length} snapshots`);
 
@@ -37,16 +39,34 @@ async function getDriftHandler(request: NextRequest, context: SecurityContext) {
     }
 
     //  Enhanced drift analysis with performance metrics
+    const cacheBefore = getEmbeddingService().cacheStats;
+    const driftStartedAt = performance.now();
     const driftResults = await analyzeDriftForQueries(
       queries.map((q) => ({ id: q.id, name: q.name })),
       snapshots,
     );
+    const driftCalculationMs = performance.now() - driftStartedAt;
+    const cacheAfter = getEmbeddingService().cacheStats;
     const totalProcessingTime = performance.now() - startTime;
 
     // Sort by latest drift score (highest drift first)
     driftResults.sort((a, b) => (b.latestDrift || 0) - (a.latestDrift || 0));
 
     console.log(`[Drift API] Analysis completed in ${totalProcessingTime.toFixed(2)}ms`);
+    if (process.env.PERFORMANCE_DEBUG === "true") console.info("[Drift API] Timing (approximate process deltas)", {
+      snapshotFetchMs: Math.round(snapshotFetchMs),
+      driftCalculationMs: Math.round(driftCalculationMs),
+      totalMs: Math.round(totalProcessingTime),
+      embeddingRequests: cacheAfter.totalRequests - cacheBefore.totalRequests,
+      embeddingKeyLookups: cacheAfter.embeddingKeyLookups - cacheBefore.embeddingKeyLookups,
+      l1Hits: cacheAfter.l1Hits - cacheBefore.l1Hits,
+      redisHits: cacheAfter.redisHits - cacheBefore.redisHits,
+      cacheMisses: cacheAfter.totalMisses - cacheBefore.totalMisses,
+      providerLoadOperations: cacheAfter.providerLoadOperations - cacheBefore.providerLoadOperations,
+      providerInputs: cacheAfter.providerInputs - cacheBefore.providerInputs,
+      inflightHits: cacheAfter.inflightHits - cacheBefore.inflightHits,
+      redisFailures: cacheAfter.redisFailures - cacheBefore.redisFailures,
+    });
 
     return NextResponse.json({
       results: driftResults,

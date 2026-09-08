@@ -1,11 +1,21 @@
 import {
   buildSearchResultWhere,
   calculateFullVectorAnomalies,
+  classifyWeaviateFailure,
   cosineSimilarity,
   getRequestedWeaviateQuantization,
   planNativeRqUpdate,
   takeUniqueCanonicalSearchHits,
 } from "../weaviate-service";
+
+describe("Weaviate failure classification", () => {
+  test("distinguishes cancellation, timeout, and terminated transports", () => {
+    expect(classifyWeaviateFailure(Object.assign(new Error("cancelled"), { name: "AbortError" }))).toBe("cancelled");
+    expect(classifyWeaviateFailure(new Error("request timed out"))).toBe("timeout");
+    expect(classifyWeaviateFailure(new TypeError("terminated"))).toBe("transport_terminated");
+    expect(classifyWeaviateFailure(new Error("connection reset"))).toBe("transport");
+  });
+});
 
 describe("Weaviate ranked search", () => {
   test("deduplicates canonical documents before applying the final limit", () => {

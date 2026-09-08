@@ -349,7 +349,7 @@ async function handler(request: NextRequest) {
     console.log(`\n[Cron] Execution complete — ${succeeded.length} succeeded, ${failed.length} failed, ${skipped} skipped`)
 
     // ── STEP 7: Post-processing (alerts + algorithm detection) ────────────────
-    console.log(`[Cron] Starting post-processing (fire-and-forget)...`)
+    console.log(`[Cron] Starting bounded post-processing...`)
 
     const successByUser = new Map<string, string[]>()
     for (const r of succeeded) {
@@ -367,12 +367,13 @@ async function handler(request: NextRequest) {
       })
     }
 
+    const postProcessing: Promise<void>[] = []
     for (const [userId, queryIds] of successByUser) {
       if (queryIds.length === 0) continue
 
       console.log(`[Cron:PostProcess] Running drift analysis for userId=${userId} (${queryIds.length} queries)`)
 
-      Promise.allSettled(
+      const userPostProcessing = Promise.allSettled(
         queryIds.map(async qid => {
           console.log(`[Cron:PostProcess] Fetching snapshots for queryId=${qid}`)
           const snapshots = await databaseService.snapshotService.getSnapshots(qid, userId)
@@ -423,9 +424,12 @@ async function handler(request: NextRequest) {
       }).catch((err: unknown) => {
         console.error(`[Cron:PostProcess] ❌ Failed for userId=${userId}: ${formatError(err)}`)
       })
+      postProcessing.push(userPostProcessing)
     }
 
     // ── STEP 8: Final summary ─────────────────────────────────────────────────
+    await Promise.allSettled(postProcessing)
+
     const durationMs = Date.now() - startTime
     console.log(`\n${"=".repeat(60)}`)
     console.log(`[Cron] 🏁 Run ${runId} complete in ${durationMs}ms`)

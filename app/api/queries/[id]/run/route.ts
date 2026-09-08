@@ -67,13 +67,16 @@ export const POST = withEnhancedSecurity(
     context:     SecurityContext,
     routeParams: { params: Promise<{ id: string }> }
   ) => {
+    const endpointStartedAt = performance.now()
     const { id: queryId } = await routeParams.params
 
     if (!queryId || typeof queryId !== "string") {
       return NextResponse.json({ error: "Invalid query ID" }, { status: 400 })
     }
 
+    const queryLoadStartedAt = performance.now()
     const query = await databaseService.queryService.getQuery(queryId)
+    const queryLoadMs = performance.now() - queryLoadStartedAt
     if (!query || query.userId !== context.user.$id) {
       return NextResponse.json({ error: "Query not found" }, { status: 404 })
     }
@@ -90,7 +93,10 @@ export const POST = withEnhancedSecurity(
       }
     }
 
-    const promise = executeQuery(context.user, query, queryId)
+    const promise = executeQuery(context.user, query, queryId, {
+      endpointStartedAt,
+      queryLoadMs,
+    })
     activeExecutions.set(execKey, { timestamp: Date.now(), promise })
 
     try {
@@ -117,16 +123,19 @@ export const POST = withEnhancedSecurity(
 async function executeQuery(
   user:    { $id: string },
   query:   QueryConfig,
-  queryId: string
+  queryId: string,
+  routeTiming: { endpointStartedAt: number; queryLoadMs: number },
 ): Promise<NextResponse> {
   try {
     const filters = query.filters ?? {}
 
+    const settingsLoadStartedAt = performance.now()
     const settingsRes = await databases.listDocuments(
       DATABASE_ID,
       COLLECTIONS.SETTINGS,
       [Query.equal("userId", user.$id)]
     )
+    const settingsLoadMs = performance.now() - settingsLoadStartedAt
 
     const apiKey = settingsRes?.documents?.[0]?.apiKey as string | undefined
     if (!apiKey) {
@@ -140,6 +149,7 @@ async function executeQuery(
 
     console.log(`[QueryRun] Executing search for query: ${queryId}`)
 
+    const exaWallStartedAt = performance.now()
     const exaResponse = await exaClient.search({
       query:          query.query,
       category:       query.category,
@@ -150,9 +160,11 @@ async function executeQuery(
       endDate:        filters.endDate,
       numResults:     filters.numResults,
     })
+    const exaWallMs = performance.now() - exaWallStartedAt
 
     const { responseTime, searchTime } = exaResponse
 
+    const resultProcessingStartedAt = performance.now()
     const mappedResults: SearchResult[] = (exaResponse.results ?? []).map(
       (r, idx) => {
         const title    = r.title    ?? ""
@@ -184,6 +196,7 @@ async function executeQuery(
         } as SearchResult
       }
     )
+    const resultProcessingMs = performance.now() - resultProcessingStartedAt
 
     console.log(
       `[QueryRun] ${mappedResults.length} results for query: ${queryId} ` +
@@ -206,6 +219,7 @@ async function executeQuery(
       )
     }
 
+    const snapshotCreateStartedAt = performance.now()
     const snapshot = await databaseService.snapshotService.createSnapshot({
       queryId:  query.id,
       userId:   user.$id,
@@ -226,6 +240,7 @@ async function executeQuery(
       },
       timestamp: new Date(),
     })
+    const snapshotCreateMs = performance.now() - snapshotCreateStartedAt
 
     console.log(`[QueryRun] Snapshot created: ${snapshot.id}`)
 
@@ -240,9 +255,12 @@ async function executeQuery(
         )
       })
 
+    const postSnapshotStartedAt = performance.now()
     await databaseService.queryService.updateQuery(query.id, { lastRun: new Date() })
+    const postSnapshotMs = performance.now() - postSnapshotStartedAt
 
-    return NextResponse.json({
+    const responsePreparationStartedAt = performance.now()
+    const response = NextResponse.json({
       success:        true,
       results:        mappedResults,
       searchTime,
@@ -252,7 +270,6 @@ async function executeQuery(
       snapshotId:     snapshot.id,
       source:         "query_run_api",
       requestId:      exaResponse.requestId,
-      // NEW: surface coverage gap to client so UI can show it immediately
       coverageGap: {
         numRequested: coverageGap.numRequested,
         numReturned:  coverageGap.numReturned,
@@ -260,6 +277,26 @@ async function executeQuery(
         status:       coverageGap.status,
       },
     })
+    const responsePreparationMs = performance.now() - responsePreparationStartedAt
+    const handlerTotalMs = performance.now() - routeTiming.endpointStartedAt
+
+    if (process.env.PERFORMANCE_DEBUG === "true") console.info("[QueryRun] Timing", {
+      queryId,
+      handlerTotalMs: Math.round(handlerTotalMs),
+      securityMiddlewareExcluded: true,
+      queryLoadMs: Math.round(routeTiming.queryLoadMs),
+      settingsLoadMs: Math.round(settingsLoadMs),
+      exaReportedSearchMs: typeof searchTime === "number" ? searchTime : null,
+      exaResponseTimeFieldMs: typeof responseTime === "number" ? responseTime : null,
+      exaWallMs: Math.round(exaWallMs),
+      resultProcessingMs: Math.round(resultProcessingMs),
+      snapshotCreateMs: Math.round(snapshotCreateMs),
+      postSnapshotMs: Math.round(postSnapshotMs),
+      responsePreparationMs: Math.round(responsePreparationMs),
+      weaviateSyncAwaited: false,
+    })
+
+    return response
 
   } catch (err) {
     console.error(`[QueryRun] Execution failed for query ${queryId}:`, formatSyncError(err))

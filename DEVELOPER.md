@@ -93,6 +93,7 @@ WEAVIATE_QUANTIZATION=none           # none | rq-8 (explicit, irreversible opt-i
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 EMBEDDING_CACHE_TTL_SECONDS=604800
+EMBEDDING_CACHE_DEBUG=false
 
 # Gemini (primary embedding model)
 GEMINI_API_KEY=
@@ -559,6 +560,10 @@ RQ-8 configuration:
 At collection creation, `rq-8` is included in `vectorIndexConfig`. For an existing collection, initialization reads the complete class definition, verifies the server version and HNSW index, refuses existing conflicting BQ/PQ/SQ or non-8-bit RQ, preserves every existing field, and updates only the `rq` configuration. `none` never performs a schema update. Native quantization cannot be disabled after enablement, so production rollout must be an explicit configuration change preceded by schema backup/inspection. The service never deletes or recreates a collection.
 
 Production `nearVector` order, certainty, and distance are authoritative. Node.js no longer trains a process-local codebook or performs BQ/PQ reranking. Content anomaly detection requests `_additional { vector }`, validates full vectors, and uses cosine similarity to a per-query centroid; malformed and dimension-mismatched vectors are skipped.
+
+Content-anomaly output is observation-level, not a unique-document count. Results are grouped by `queryId`; groups smaller than three are skipped. The centroid is the component-wise mean of all valid, same-dimensional full vectors in the group. Each vector is compared with that centroid using cosine similarity. With population mean `mu` and population standard deviation `sigma` of those similarities, an observation is flagged when `similarity < mu - 2 * sigma`; its heuristic score is `(mu - similarity) / sigma`. The time-range cutoff is applied in the Weaviate query. Repeated canonical URLs across snapshots or chunks can therefore produce multiple observations, while the Analytics UI separately reports affected-query and canonical-document counts. This project-specific two-standard-deviation rule is not a calibrated probability and can be influenced by extreme observations.
+
+Notification behavior is separate: scheduled-query post-processing is awaited before the cron response, and a drift alert requires a threshold crossing. Manual query and drift routes do not create alerts. `COLLECTION_NOTIFICATIONS` must be configured consistently for reads and writes; missing configuration produces a server-side service error rather than a false empty state. Email additionally requires server-only `RESEND_API_KEY` and `NOTIFICATION_EMAIL_FROM`; webhook and email channel failures do not prevent in-app storage attempts.
 
 ### Legacy cleanup
 

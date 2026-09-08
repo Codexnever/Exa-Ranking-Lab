@@ -1,6 +1,7 @@
 // app/api/weaviate/semantic-analytics/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/middleware/authentication/auth"
+import { databaseService } from "@/app/services/database/database-service"
 
 // ─── Singletons ───────────────────────────────────────────────────────────────
 
@@ -56,9 +57,11 @@ export async function GET(request: NextRequest) {
     const analyticsService = await getEnhancedService()
 
     //  userId always from auth session — not from query string
+    const queries = await databaseService.queryService.getQueries(user.$id)
     const analyticsData = await analyticsService.getSemanticAnalytics(
       user.$id,
-      timeRangeMs
+      timeRangeMs,
+      queries
     )
 
     //  Strip filteredSnapshots — large raw array the client never needs

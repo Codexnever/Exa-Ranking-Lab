@@ -8,6 +8,7 @@
 // process-scheduled-route.ts after all queries have been processed.
 
 import type { DriftAnalysisResult } from "@/types/type"
+import { getNotificationEmailSender, getNotificationsCollectionId } from "@/lib/services/notification-config"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,35 @@ const DEFAULT_CONFIG: AlertConfig = {
   emailEnabled:      true,
 }
 
+export function detectDriftThresholdCrossings(
+  results: DriftAnalysisResult[],
+  config: Pick<AlertConfig, "highThreshold" | "criticalThreshold"> = DEFAULT_CONFIG,
+): DriftAlert[] {
+  const alerts: DriftAlert[] = []
+  for (const result of results) {
+    const current = result.latestDrift ?? 0
+    const previous = result.driftTimeline?.length >= 2
+      ? result.driftTimeline[result.driftTimeline.length - 2]?.driftScore ?? 0
+      : 0
+    const driftType = current >= config.criticalThreshold && previous < config.criticalThreshold
+      ? "critical"
+      : current >= config.highThreshold && previous < config.highThreshold
+        ? "high"
+        : null
+    if (!driftType) continue
+    alerts.push({
+      userId: result.queryId,
+      queryId: result.queryId,
+      queryName: result.queryName,
+      driftScore: current,
+      driftType,
+      timestamp: new Date(),
+      driftTimeline: { previous, current, change: current - previous },
+    })
+  }
+  return alerts
+}
+
 // ─── DriftAlertService ───────────────────────────────────────────────────────
 
 export class DriftAlertService {
@@ -66,9 +96,15 @@ export class DriftAlertService {
     const high     = alerts.filter(a => a.driftType === "high")
 
     try {
-      if (this.config.emailEnabled) {
+      if (
+        this.config.emailEnabled &&
+        process.env.RESEND_API_KEY &&
+        getNotificationEmailSender()
+      ) {
         await this.sendEmailAlert(userId, critical, high)
         alertsFired++
+      } else if (this.config.emailEnabled) {
+        console.info("[DriftAlertService] Email channel disabled")
       }
     } catch (err) {
       const msg = `Email alert failed: ${err instanceof Error ? err.message : String(err)}`
@@ -149,8 +185,9 @@ export class DriftAlertService {
     high:     DriftAlert[]
   ): Promise<void> {
     const resendKey = process.env.RESEND_API_KEY
-    if (!resendKey) {
-      console.warn("[DriftAlertService] RESEND_API_KEY not set — email skipped")
+    const sender = getNotificationEmailSender()
+    if (!resendKey || !sender) {
+      console.info("[DriftAlertService] Email channel disabled")
       return
     }
 
@@ -176,7 +213,7 @@ export class DriftAlertService {
         "Authorization": `Bearer ${resendKey}`,
       },
       body: JSON.stringify({
-        from:    "Exa Ranking Lab <alerts@yourdomain.com>",
+        from:    sender,
         to:      [userEmail],
         subject,
         html,
@@ -274,15 +311,14 @@ export class DriftAlertService {
   // ── Appwrite storage for in-app notifications ──────────────────────────────
 
   private async storeAlertsInAppwrite(userId: string, alerts: DriftAlert[]): Promise<void> {
-    const notificationsCollectionId = process.env.COLLECTION_NOTIFICATIONS
-    if (!notificationsCollectionId) return
+    const notificationsCollectionId = getNotificationsCollectionId()
 
     // Lazy import to avoid bundling Appwrite SDK everywhere
-    const { databases, ID } = await import("@/app/server/appwrite/appwrite-server")
+    const { databases, ID, DATABASE_ID } = await import("@/app/server/appwrite/appwrite-server")
 
-    for (const alert of alerts) {
-      await databases.createDocument(
-        process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID!,
+    const storageResults = await Promise.allSettled(alerts.map((alert) =>
+      databases.createDocument(
+        DATABASE_ID,
         notificationsCollectionId,
         ID.unique(),
         {
@@ -295,7 +331,11 @@ export class DriftAlertService {
           read:       false,
           createdAt:  new Date().toISOString(),
         }
-      )
+      ),
+    ))
+    const failedWrites = storageResults.filter((result) => result.status === "rejected").length
+    if (failedWrites > 0) {
+      throw new Error(`Failed to store ${failedWrites} of ${alerts.length} notifications`)
     }
   }
 

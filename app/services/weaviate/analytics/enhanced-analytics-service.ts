@@ -90,16 +90,16 @@ export class EnhancedAnalyticsService extends AnalyticsService {
       const snapshots   = await this.getSnapshotsForUser(userId, timeRangeMs)
       const traditional = this.calculateEnhancedAnalyticsFromSnapshots(snapshots, queries)
 
-      const [contentAnomalies, semanticClusters, contentEvolution] = await Promise.all([
-        this.weaviateService.detectContentAnomalies(userId, timeRangeMs),
-        this.analyzeSemanticClusters(userId, timeRangeMs),
-        this.analyzeContentEvolution(userId, timeRangeMs, snapshots),
+      const contentAnomalies = await this.weaviateService.detectContentAnomalies(userId, timeRangeMs)
+      const [semanticClusters, contentEvolution] = await Promise.all([
+        this.analyzeSemanticClusters(contentAnomalies),
+        this.analyzeContentEvolution(contentAnomalies, timeRangeMs, snapshots),
       ])
 
       const semanticInsights: SemanticInsights = {
         contentAnomalies: {
           count:                contentAnomalies.length,
-          anomalies:            contentAnomalies.slice(0, 10),
+            anomalies:            contentAnomalies,
           severityDistribution: this.categorizeAnomalies(contentAnomalies),
         },
         semanticClusters: {
@@ -205,14 +205,8 @@ export class EnhancedAnalyticsService extends AnalyticsService {
 
   // ── Cluster analysis ───────────────────────────────────────────────────────
 
-  private async analyzeSemanticClusters(
-    userId:      string,
-    timeRangeMs: number
-  ): Promise<any[]> {
+  private async analyzeSemanticClusters(anomalies: any[]): Promise<any[]> {
     try {
-      await this.weaviateService.initialize()
-      const anomalies = await this.weaviateService.detectContentAnomalies(userId, timeRangeMs)
-
       const grouped = new Map<string, any[]>()
       for (const anomaly of anomalies) {
         const theme  = this.extractTheme(anomaly.title ?? "")
@@ -246,13 +240,11 @@ export class EnhancedAnalyticsService extends AnalyticsService {
    * ✅ Replaces 7 sequential Weaviate calls with 1.
    */
   private async analyzeContentEvolution(
-    userId:      string,
+    allAnomalies: any[],
     timeRangeMs: number,
     snapshots:   RankingSnapshot[]
   ): Promise<any> {
     try {
-      // Single Weaviate call for the full range
-      const allAnomalies = await this.weaviateService.detectContentAnomalies(userId, timeRangeMs)
       const periods      = this.createTimePeriods(timeRangeMs, 7)
       const evolutionData: any[] = []
 
