@@ -55,7 +55,7 @@ export function DomainAnalysis({ snapshots }: DomainAnalysisProps) {
     <Card className="h-[500px] flex flex-col">
       <CardHeader>
         <CardTitle className="text-gray-900">Domain Analysis</CardTitle>
-        <CardDescription>Domain authority tracking and ranking distribution</CardDescription>
+        <CardDescription>Result observations by domain in the filtered snapshots; repeated documents may count more than once</CardDescription>
       </CardHeader>
       <CardContent className="flex-1 overflow-auto">
         {topDomains.length === 0 ? (

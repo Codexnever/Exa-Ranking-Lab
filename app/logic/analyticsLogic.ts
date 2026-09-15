@@ -125,8 +125,9 @@ export function createAverageSnapshot(snapshots: RankingSnapshot[]): RankingSnap
   if (snapshots.length === 1) return snapshots[0]
 
   const base = snapshots[0]
-  const avgResponseTime =
-    snapshots.reduce((sum, s) => sum + (Number(s.metadata?.responseTime) || 0), 0) / snapshots.length
+  const measuredTimes = snapshots.map(s => s.metadata?.responseTime)
+    .filter((t): t is number => typeof t === 'number' && Number.isFinite(t) && t > 0)
+  const avgResponseTime = measuredTimes.length ? measuredTimes.reduce((sum, t) => sum + t, 0) / measuredTimes.length : 0
 
   const urlMap = new Map<string, { positions: number[]; title: string; snippet: string; raw: any }>()
 
@@ -343,10 +344,12 @@ export function calculateSuccessRateByHour(snapshots: RankingSnapshot[]) {
     for (const snapshot of snapshots) {
       if (!snapshot?.timestamp || !snapshot?.metadata) continue
       const hour = new Date(snapshot.timestamp).getHours()
+      if (!Number.isFinite(hour)) continue
       hourly[hour].total++
       if (snapshot.results?.length) {
         hourly[hour].success++
-        hourly[hour].times.push(Number(snapshot.metadata.responseTime) || 0)
+        const time = snapshot.metadata.responseTime
+        if (typeof time === 'number' && Number.isFinite(time) && time > 0) hourly[hour].times.push(time)
       } else {
         hourly[hour].failures++
       }
@@ -375,7 +378,7 @@ export function calculateSuccessRateByHour(snapshots: RankingSnapshot[]) {
       avgTime + margin,
     ]
 
-    return { hour, successRate, avgTime, failureRate, confidenceInterval }
+    return { hour, successRate, avgTime, responseTime: stats.times.length ? avgTime : null, failureRate, confidenceInterval, timingCount: stats.times.length }
   })
 }
 
@@ -478,7 +481,7 @@ export function calculateSummaryMetrics(
   // Avg response time
   const responseTimes = snapshots
     .map(s => s.metadata?.responseTime)
-    .filter((t): t is number => typeof t === "number")
+    .filter((t): t is number => typeof t === "number" && Number.isFinite(t) && t > 0)
   const avgResponseTime = responseTimes.length
     ? responseTimes.reduce((s, t) => s + t, 0) / responseTimes.length
     : 0

@@ -443,6 +443,22 @@ Check whether the per-query and coordination thresholds passed, whether movement
 
 An older event is restored with compatibility defaults and its authoritative stored description. Missing additive v2.1 evidence is not treated as storage corruption.
 
+#### Ranking Changes evidence presentation
+
+Analytics → Ranking Changes is available in both data-source modes, independently of semantic-service initialization. The existing Analytics load coordinator is unchanged. The tab only reads authenticated `GET /api/analytics/algorithm-events?limit=10`; global date/category/domain filters do not scope these latest ten saved events. Scheduled processing remains the detection trigger, and an empty event list is not an evaluation-status or health report.
+
+`EventPersistence.documentToEvent` attaches optional `recordedEvidence` by reading the original document before compatibility defaults are applied. `recorded-evidence.ts` allowlists bounded finite numeric fields, strings, boolean flags, and saved gate explanations. The UI uses this object for baseline summaries and settings, preserving recorded zeros and distinguishing explicitly unavailable history from evidence never recorded. Existing aliases, formulas, persistence writes, and stored descriptions remain unchanged.
+
+Expanded events show median/MAD, robust or absolute-epsilon comparison, separate affected/all-observed averages, history counts, recorded boundaries/settings, and confidence-cap evidence. A missing gate is never marked passed. Evidence scores are not calibrated probabilities. No historical chart is possible: reliable timestamped category-window observations are not saved, and expansion does not recompute them.
+
+The panel retains a per-instance, user-and-endpoint-scoped request cache for immediate tab revisits (60 seconds), coalesces in-flight reads, and ignores obsolete effect responses. Retry and Refresh bypass completed cache entries; failures are not cached. The panel stays mounted across tab switches without initiating requests while inactive. Changing authenticated users invalidates its request cache.
+
+### Browser snapshot cache and realtime lifetime
+
+`snapshots-storage` version 1 persists only `pagination.itemsPerPage` (integer 1–100, default 20). Snapshot arrays, result text, ownership, freshness and loading flags stay in memory and are fetched again after reload. Migration allowlists the page-size preference from older cache entries; it never clears unrelated storage. The serialized preference envelope is under 100 bytes, with a defensive 1,024-character write ceiling. Identical writes are skipped even after quota/security failures; a changed preference can try again. Cache failure does not fail a snapshot fetch. Empty successful responses count as loaded, and owner changes invalidate pending snapshot responses.
+
+Realtime subscriptions depend on stable health callbacks and authenticated identity, not health-state transitions or pagination. Snapshot handlers read current pagination when refreshing. Delayed snapshot/analytics refresh timers are canceled on cleanup. Strict Mode can replay setup once; idle health assessment must not restart subscriptions. Semantic analytics cache statistics are not a vector inventory: a missing `totalVectors` is logged as “not supplied,” not a measured zero.
+
 ### Anomaly detection (WeaviateService.detectContentAnomalies)
 
 ```
@@ -745,6 +761,31 @@ This collection is preserved for backward safety but application code no longer 
 
 ## 12. Zustand Stores
 
+### Analytics health and timing contract
+
+`app/analytics/page.tsx` computes snapshot-derived chart inputs from the full in-memory snapshot store in both modes. `/api/analytics` is a summary response and intentionally omits raw snapshots; it is not a replacement for those chart inputs. Category counts use configured queries; domain counts use result observations after snapshot filters and the selected snapshot deduplication policy. Successful empty responses remain empty. Source revisits invalidate the coordinator's completed selection while ordinary rerenders retain coalescing.
+
+Health values are distinct signals, not interchangeable service guarantees:
+
+| Display/source | Exact criteria | Scope and missing evidence |
+| --- | --- | --- |
+| AI operation health (`analytics-health.ts`) | Excellent: connected, vector availability recorded, last success age <120 seconds and rounded success rate >=80%. Good: connected, age <300 seconds, rate >=60%. Otherwise poor when last success age >600 seconds or rate <40%; explicit error is poor. Remaining cases are connecting or unknown. | Success rate uses retained operations younger than 10 minutes. No valid last success means unknown, not disconnected. Inactive mode is not applicable. No live probe is performed. |
+| Realtime/activity quality (`ConnectionHealthProvider.tsx`) | Last activity age <30 seconds excellent, <60 good, <120 poor, otherwise disconnected; failure fraction >0.3 or reconnect attempts >3 downgrade to poor unless disconnected. | Activity heuristic, not proof of socket or Weaviate connectivity. Idle sessions age out. |
+| System-health card | Rounded sum: connection evidence 30 points; `min(stability/100*30,30)`; semantic stability `min(semantic/100*25,25)` or 10 when absent; `min(snapshotCount/100*15,15)`. >=80 Excellent, >=60 Good, otherwise Needs Attention; warning below70. | Project heuristic, not calibrated probability or uptime. Missing ranking stability defaults to zero; missing semantic evidence contributes the existing 10-point fallback. Thresholds were not recalibrated. |
+
+| Timing display | Source and measurement | Unit/aggregation | Legacy behavior |
+| --- | --- | --- | --- |
+| Snapshot list/details | Saved `metadata.responseTime` from query execution | Milliseconds; formatter converts to seconds/minutes for display | Missing/`none` unavailable; historic semantics are not backfilled |
+| Analytics response summary | Valid positive finite saved timings in selected snapshots | Arithmetic mean per selected snapshot, milliseconds before formatting | Missing/zero/non-finite excluded; no hourly average-of-averages |
+| Hourly performance | Valid saved timings among successful snapshots in each hour | Millisecond mean; `responseTime` aliases chart data, `timingCount` records denominator | No measured timing yields null chart responseTime; legacy avgTime retains zero compatibility |
+| Query-run provider field | Exa response `searchTime`, also exposed as responseTime alias | Provider-reported value interpreted by existing code as milliseconds | Not independently measured RTT; exact historical provider span is not established by local code |
+| Query-run debug wall/handler | Monotonic measurement around awaited Exa call / handler stages | Milliseconds, current request only | Not the saved searchTime; background Weaviate sync is not awaited |
+| Browser slow-request diagnostic | Secure client's elapsed HTTP request | Milliseconds | Includes network/server response, not equivalent to Exa internal timing |
+
+Illustrative only: saved timings 1000, 1000 and 4000 ms average to 2000 ms (2 seconds). A missing fourth timing does not change the denominator to four. Snapshot deduplication may select or synthesize observations before aggregation; this is not a claim about all historical requests.
+
+`EMBEDDING_CACHE_DEBUG=true` enables safe server batch diagnostics. Redis writes are successful only after the pipeline acknowledges all writes. A failure may leave an unknown partial write count and remains fail-open. L1 hits skip Redis; Traditional aggregation does not call the embedding cache. Restart the local server after changing its environment. Never clear shared Redis or rerun live searches merely to demonstrate a cache miss.
+
 ### use-analytics-store
 Holds `analytics`, `dataSource` ("appwrite" | "weaviate"), `isLoading`,
 `fetchAnalytics()`, `setDataSource()`
@@ -842,7 +883,7 @@ Run this exact sequence after every deploy:
        -H "Authorization: Bearer $CRON_SECRET"
   ```
 - Check `algorithm_events` collection after run
-- Check Analytics → AI Insights → Algorithm Update Detector panel
+- Check Analytics → Ranking Changes → Ranking-Change Detection
 
 **Step 5 — Notification bell**
 - After step 3 creates a notification, bell should show red badge within 2 min

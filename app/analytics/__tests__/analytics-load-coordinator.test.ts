@@ -7,6 +7,15 @@ function deferred() {
 }
 
 describe("AnalyticsLoadCoordinator", () => {
+  it("reloads a revisited mode because store payloads were replaced, without idle refetches", async () => {
+    const coordinator = new AnalyticsLoadCoordinator()
+    const task = jest.fn(async () => {})
+    await coordinator.load("owner|appwrite|30d", task)
+    await coordinator.load("owner|weaviate|30d", task)
+    await coordinator.load("owner|appwrite|30d", task)
+    await coordinator.load("owner|appwrite|30d", task)
+    expect(task).toHaveBeenCalledTimes(3)
+  })
   it("coalesces initial load and Strict Mode replay for the same selection", async () => {
     const coordinator = new AnalyticsLoadCoordinator()
     const pending = deferred()

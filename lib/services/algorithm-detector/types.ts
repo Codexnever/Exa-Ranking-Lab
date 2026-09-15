@@ -151,6 +151,7 @@ export interface RankingChangeEvidence {
 }
 
 export interface AlgorithmUpdateEvent {
+  recordedEvidence?: import('./recorded-evidence').RecordedDetectorEvidence
   id: string
   detectedAt: Date
   category: string

@@ -173,6 +173,10 @@ Set server-only `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enabl
 
 `WEAVIATE_QUANTIZATION=none` is the safe default. `rq-8` explicitly requests Weaviate-native 8-bit rotational quantization with a rescore limit of 20 on HNSW and requires Weaviate 1.32+. Roll out by inspecting the existing collection configuration and server version first, then opting in deliberately. Quantization cannot be disabled or replaced safely in place; the service refuses conflicting quantizers and never recreates the collection. Cache hit statistics and native quantization status are separate—Redis caches provider outputs, while RQ compresses Weaviate's vector index. Judgment and Strategy Lab latency are separate Appwrite batching concerns.
 
+### Browser snapshot storage
+
+Full snapshots stay in memory, backed by server storage; only the bounded snapshot page-size preference is saved in localStorage. Reloading fetches snapshot data again. Browser quota or privacy restrictions do not turn successful server fetches into failures. Old snapshot-cache entries migrate to preferences only without clearing unrelated browser storage. Realtime subscriptions remain active across ordinary rerenders; user changes and unmounts clean them up.
+
 ## Algorithm Update Detector v2.1
 
 Detector v2.1 identifies coordinated ranking-change candidates whose movement is unusual compared with the category's historical volatility. It observes external ranking behaviour; it cannot prove that Exa or another provider deployed an internal algorithm update. High drift alone is insufficient: enough related queries must move together, and a mature historical baseline must show that the category-wide movement is unusual.
@@ -231,7 +235,11 @@ These are project engineering defaults that require production calibration, not 
 
 The detector has two modes. **Baseline-aware** candidates passed the historical comparison. During cold start or insufficient history, **fixed-threshold** candidates can still be stored, but they are explicitly unverified and their confidence is capped at `49`, below moderate severity. Confidence is an evidence score, not a calibrated probability.
 
-The existing panel is under **Analytics → Weaviate data source → AI Insights → Algorithm Update Detector**. It reads stored events and displays category, severity, drift rate, average drift score, affected queries, and the stored description. Refreshing or opening the panel does not run detection. More structured evidence is available from authenticated `GET /api/analytics/algorithm-events?limit=10`; the panel does not yet render median, MAD, robust deviation, detection mode, confidence-cap metadata, or change classification.
+Open **Analytics → Ranking Changes** in either data-source mode. This independent panel reads the latest ten saved candidates for your account, even when semantic analytics is unavailable. Analytics date, category, and domain filters do not apply to this list. Opening it, expanding an event, or refreshing saved events does not run detection or synchronization.
+
+Expand a candidate for its recorded historical median/MAD, all-observed and affected-query averages, comparison method, history counts, confidence cap, evaluation window, and gate explanations. Baseline-aware candidates have historical support; fixed-threshold candidates are unverified fallback evidence. Scores are evidence scores, not probabilities. Missing legacy values say “Not recorded for this event”; recorded zero values remain zero. Saved descriptions are preserved. No chart is shown because timestamped historical window observations are not persisted.
+
+An empty list means no saved candidates were returned. It does not establish that scheduled detection ran or that rankings were stable; suppressed candidates are not persisted.
 
 ### Analytics signals and alerts
 
@@ -260,6 +268,16 @@ npm run build
 The last verified project state had 37 passing focused detector tests, 288 passing full-suite tests, zero lint errors with existing warnings, and 47/47 static pages generated. Detection itself runs from scheduled-query processing, not from opening the Analytics UI.
 
 ## Metric semantics
+
+### Analytics populations, timing and cache diagnostics
+
+Traditional Analytics combines authenticated snapshot data in memory with configured queries; it does not require persisted snapshot bodies or Redis. Category distribution counts configured queries. Domain counts represent result observations in the selected, filtered/deduplicated snapshots, not unique canonical documents. Switching data sources reloads that selection once; reading Analytics does not automatically synchronize vectors.
+
+Response-time summaries average valid saved search timings, not page-loading duration or equally weighted hourly averages. Missing and legacy zero measurements are excluded. Historical provider timing semantics can be ambiguous; these numbers must not be described as total endpoint latency.
+
+For server-side embedding diagnostics, set `EMBEDDING_CACHE_DEBUG=true` in your local server environment and restart Node. Logs appear in the server terminal, not the browser. `REDIS_READ_START/END` report requested/hit/miss counts; `REDIS_WRITE_START/END` distinguish attempted from acknowledged writes. Failures produce `REDIS_ERROR` or `REDIS_TIMEOUT`; L1 hits can avoid Redis entirely. Keys and input identities are fingerprinted; no text or vectors are logged. Disable the flag after investigation. AI operations that actually request embeddings can exercise this cache; a cached Analytics response may not. Traditional Analytics does not use it.
+
+AI health reflects recent client-observed API operations, not a continuous database probe. “Not checked” differs from a failed operation, and missing vector inventory is not zero. The separate system-health score is a project heuristic; see [health and timing details](DEVELOPER.md#analytics-health-and-timing-contract).
 
 - `0`: accepted not relevant; `1`: accepted relevant; `2`: accepted highly relevant.
 - **Unjudged is not irrelevant.** Unjudged results occupy ranking positions for nDCG but never become grade 0 truth.

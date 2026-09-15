@@ -16,6 +16,7 @@ interface RealTimeProviderProps {
 
 export function RealTimeProvider({ children }: RealTimeProviderProps) {
   const { user } = useAuth();
+  const userId = user?.$id;
   const { recordActivity } = useConnectionHealth();
   const [subscriptionsReady, setSubscriptionsReady] = useState(false);
 
@@ -26,12 +27,12 @@ export function RealTimeProvider({ children }: RealTimeProviderProps) {
   useRealTimeAnalytics();
 
   useEffect(() => {
-    if (user) {
+    if (userId) {
       // Mark subscriptions as ready after user is authenticated
       const timer = setTimeout(() => {
         setSubscriptionsReady(true);
         recordActivity('provider-init');
-        console.log('[RealTimeProvider] Subscriptions initialized for user:', user.$id);
+        console.log('[RealTimeProvider] Subscriptions initialized for user:', userId);
       }, 500);
       
       return () => clearTimeout(timer);
@@ -39,7 +40,7 @@ export function RealTimeProvider({ children }: RealTimeProviderProps) {
       setSubscriptionsReady(false);
       console.log('[RealTimeProvider] User logged out, subscriptions disabled');
     }
-  }, [user, recordActivity]);
+  }, [userId, recordActivity]);
 
   // Optional: Show connection status indicator
   useEffect(() => {

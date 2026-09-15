@@ -1,310 +1,106 @@
-// components/analytics/AlgorithmUpdatePanel.tsx
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Zap, ChevronDown, ChevronUp, AlertTriangle,
-  TrendingDown, Info, RefreshCw,
-} from "lucide-react"
-import { useAuth } from "@/lib/middleware/authentication/auth-context"
-import { useSecureApi } from "@/lib/api/use-secureApi"
-import type { AlgorithmUpdateEvent } from "@/types/type"
+import { useState, useEffect, useRef } from 'react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { useAuth } from '@/lib/middleware/authentication/auth-context'
+import { useSecureApi } from '@/lib/api/use-secureApi'
+import type { AlgorithmUpdateEvent } from '@/types/type'
+import { sanitizeRecordedEvidence } from '@/lib/services/algorithm-detector/recorded-evidence'
+import { HistoricalBaselineEvidence } from './HistoricalBaselineEvidence'
+import { DetectorEventRequests } from './detector-event-requests'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function safeFixed(v: unknown, d = 1): string {
-  return typeof v === "number" && isFinite(v) ? v.toFixed(d) : "—"
-}
-
-function formatDate(dateStr: string | Date): string {
-  const d = new Date(dateStr)
-  if (isNaN(d.getTime())) return "Unknown date"
-  return d.toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  })
-}
-
-const SEVERITY_CONFIG = {
-  major:    { color: "#dc2626", bg: "#fef2f2", border: "#fecaca", label: "Major",    icon: "🚨" },
-  moderate: { color: "#d97706", bg: "#fffbeb", border: "#fde68a", label: "Moderate", icon: "⚠️" },
-  minor:    { color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", label: "Minor",    icon: "ℹ️" },
-} as const
+const endpoint = '/analytics/algorithm-events?limit=10'
+const missing = 'Not recorded for this event'
+const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1) : missing
 
 export function normalizeAlgorithmEvents(data: unknown): AlgorithmUpdateEvent[] {
   if (!Array.isArray(data)) return []
-
-  return data.flatMap((candidate) => {
-    if (!candidate || typeof candidate !== "object") return []
-    const event = candidate as AlgorithmUpdateEvent & { affectedQueries?: unknown }
+  return data.slice(0, 10).flatMap(candidate => {
+    if (!candidate || typeof candidate !== 'object') return []
+    const event = candidate as AlgorithmUpdateEvent
     try {
-      const affectedQueries = typeof event.affectedQueries === "string"
-        ? JSON.parse(event.affectedQueries)
-        : (event.affectedQueries ?? [])
-      if (!Array.isArray(affectedQueries)) return []
-      return [{ ...event, affectedQueries } as AlgorithmUpdateEvent]
-    } catch {
-      return []
-    }
+      const queries: unknown = typeof event.affectedQueries === 'string'
+        ? JSON.parse(event.affectedQueries) : event.affectedQueries ?? []
+      if (!Array.isArray(queries)) return []
+      return [{ ...event, affectedQueries: queries.filter(q => q && typeof q === 'object' && typeof q.queryId === 'string'),
+        recordedEvidence: sanitizeRecordedEvidence(event.recordedEvidence) }]
+    } catch { return [] }
   })
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
-export function AlgorithmUpdatePanel() {
-  const { user, initializing }  = useAuth()
-  const { call }  = useSecureApi({ showErrorToast: false })
-
-  const [events,   setEvents]   = useState<AlgorithmUpdateEvent[]>([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<string | null>(null)
-
-  const fetchEvents = useCallback(async () => {
-    if (initializing) return
-    if (!user?.$id) {
-      setEvents([])
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await call<AlgorithmUpdateEvent[]>("GET", "/analytics/algorithm-events?limit=10")
-      setEvents(normalizeAlgorithmEvents(data))
-    } catch {
-      setError("Failed to load algorithm update events")
-      setEvents([])
-    } finally {
-      setLoading(false)
-    }
-  }, [user?.$id, initializing, call])
+export function AlgorithmUpdatePanel({ active = true }: { active?: boolean }) {
+  const { user, initializing } = useAuth()
+  const { call } = useSecureApi({ showErrorToast: false })
+  const requests = useRef(new DetectorEventRequests<AlgorithmUpdateEvent[]>())
+  const [state, setState] = useState<{ owner?: string; status: 'loading' | 'success' | 'error'; events: AlgorithmUpdateEvent[] }>({ status: 'loading', events: [] })
+  const [refresh, setRefresh] = useState(0)
+  const forceNext = useRef(false)
+  const userId = user?.$id
 
   useEffect(() => {
-    fetchEvents()
-  }, [fetchEvents])
+    if (initializing) return
+    if (!userId) { requests.current.clear(); return }
+    if (!active) return
+    let cancelled = false
+    const force = forceNext.current
+    forceNext.current = false
+    setState({ owner: userId, status: 'loading', events: [] })
+    requests.current.load(JSON.stringify([userId, endpoint]), async () => {
+      const data = await call<unknown>('GET', endpoint)
+      if (!Array.isArray(data)) throw new Error('Invalid event list')
+      return normalizeAlgorithmEvents(data)
+    }, force).then(events => {
+      if (!cancelled) setState({ owner: userId, status: 'success', events })
+    }).catch(() => {
+      if (!cancelled) setState({ owner: userId, status: 'error', events: [] })
+    })
+    return () => { cancelled = true }
+  }, [active, userId, initializing, call, refresh])
 
-  // ── Loading ────────────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-yellow-500" />
-            Algorithm Update Detector
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {[1, 2].map(i => (
-              <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
-            ))}
+  const retry = () => { forceNext.current = true; setRefresh(value => value + 1) }
+  const loading = state.owner !== userId || state.status === 'loading'
+  return <Card>
+    <CardHeader>
+      <div className='flex flex-wrap items-center justify-between gap-3'>
+        <CardTitle>Ranking-Change Detection</CardTitle>
+        {userId && !initializing && <Button variant='outline' size='sm' disabled={loading} onClick={retry}>Refresh saved events</Button>}
+      </div>
+      <CardDescription>Looks for coordinated ranking movement and compares it with historical category behavior when sufficient history is available.</CardDescription>
+    </CardHeader>
+    <CardContent className='space-y-5'>
+      <div className='space-y-2 text-sm'>
+        <ul className='list-disc pl-5 space-y-1'>
+          <li>Coverage: enough valid queries must be observed.</li>
+          <li>Movement: affected queries cross their configured drift threshold.</li>
+          <li>Coordination: enough observed queries move together.</li>
+          <li>History: current category-wide movement is compared with earlier category windows.</li>
+          <li>Limited history: fixed-threshold candidates are unverified and their confidence is capped.</li>
+        </ul>
+        <p>Candidates describe externally observed search behavior, not confirmed internal Exa algorithm deployments.</p>
+        <p><strong>Illustrative example:</strong> A category that normally moves a lot may produce no candidate despite high drift. A normally stable category experiencing coordinated movement may qualify.</p>
+        <p>Content anomalies are semantically unusual result observations. Drift alerts concern individual queries crossing configured drift thresholds. Ranking-change candidates concern coordinated category movement assessed by the detector.</p>
+        <p className='text-muted-foreground'>Latest ten saved events for your account. Analytics date, category, and domain filters do not apply. Each event retains its own recorded evaluation window. Opening this tab only reads saved events.</p>
+      </div>
+      {initializing ? <p role='status'>Checking authentication…</p>
+        : !userId ? <p>Sign in to view saved ranking-change candidates.</p>
+        : loading ? <p role='status'>Loading saved ranking-change candidates…</p>
+        : state.status === 'error' ? <div role='alert'><p>Saved ranking-change candidates could not be loaded.</p><Button onClick={retry} variant='outline'>Retry</Button></div>
+        : state.events.length === 0 ? <div><p className='font-medium'>No saved ranking-change candidates found.</p>
+          <p>This does not establish that detection ran or rankings were stable. Scheduled processing can save candidates; suppressed candidates are not stored.</p></div>
+        : <div className='space-y-3'>{state.events.map((event, index) => <details key={event.id ?? index} className='border rounded-lg p-4'>
+          <summary className='cursor-pointer space-y-1'>
+            <span className='font-semibold'>{event.category || 'Unknown category'}</span>{' · '}{event.severity}
+            <span className='block text-sm'>{Number.isFinite(new Date(event.detectedAt).getTime()) ? new Date(event.detectedAt).toLocaleString() : missing}</span>
+            <span className='block text-sm'>Drift rate: {typeof event.recordedEvidence?.numbers.driftRate === 'number' ? number(event.recordedEvidence.numbers.driftRate * 100) + '%' : missing} · {event.affectedQueries.length} affected queries · Average drift score (legacy field): {number(event.recordedEvidence?.numbers.avgDriftScore)}</span>
+          </summary>
+          <div className='space-y-4 pt-4'>
+            <p className='text-sm'>{event.description ?? event.detail ?? missing}</p>
+            <HistoricalBaselineEvidence value={event.recordedEvidence} />
+            <h3 className='font-semibold'>Affected queries</h3>
+            <ul className='text-sm space-y-1'>{event.affectedQueries.map((query, i) => <li key={i}>{query.queryName || query.queryId}: {number(query.driftScore)}</li>)}</ul>
           </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  // ── Error ──────────────────────────────────────────────────────────────────
-  if (error) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-yellow-500" />
-            Algorithm Update Detector
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center justify-center py-8 text-center gap-3">
-            <AlertTriangle className="h-8 w-8 text-red-400" />
-            <p className="text-sm text-gray-600">{error}</p>
-            <Button variant="outline" size="sm" onClick={fetchEvents}>
-              <RefreshCw className="h-4 w-4 mr-2" />Retry
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  // ── Render ─────────────────────────────────────────────────────────────────
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-gray-900">
-              <Zap className="h-5 w-5 text-yellow-500" />
-              Algorithm Update Detector
-            </CardTitle>
-            <CardDescription>
-              Detected when ≥60% of queries in a category drift simultaneously
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            {events.length > 0 && (
-              <Badge variant="destructive" className="text-xs">
-                {events.length} event{events.length !== 1 ? "s" : ""}
-              </Badge>
-            )}
-            <Button variant="ghost" size="sm" onClick={fetchEvents}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent>
-        {events.length === 0 ? (
-          // ── Empty state ──────────────────────────────────────────────────
-          <div className="flex flex-col items-center justify-center py-10 text-center gap-3">
-            <div className="h-12 w-12 rounded-full bg-green-50 flex items-center justify-center">
-              <Zap className="h-6 w-6 text-green-500" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-700">
-                No ranking-change candidates detected
-              </p>
-              <p className="text-xs text-gray-500 mt-1 max-w-xs">
-                We monitor for coordinated drift across query categories.
-                Events appear here when ≥60% of a category's queries drift
-                on the same day.
-              </p>
-            </div>
-            <div className="text-xs text-gray-400 space-y-1 text-left bg-gray-50 rounded-lg p-3 w-full max-w-sm">
-              <p className="font-medium text-gray-500 mb-2">Detection requirements:</p>
-              <p>• At least 3 queries in the same category</p>
-              <p>• 60%+ of those queries drift above score 30</p>
-              <p>• All within a 24-hour window</p>
-            </div>
-          </div>
-        ) : (
-          // ── Events list ──────────────────────────────────────────────────
-          <div className="space-y-3">
-            {events.map(event => {
-              const sev     = SEVERITY_CONFIG[event.severity] ?? SEVERITY_CONFIG.minor
-              const isOpen  = expanded === event.id
-              const driftPct = Math.round((event.driftRate ?? 0) * 100)
-              const affectedQueries = Array.isArray(event.affectedQueries)
-                ? event.affectedQueries
-                : []
-
-              return (
-                <div
-                  key={event.id}
-                  className="border rounded-lg overflow-hidden transition-all"
-                  style={{ borderColor: sev.border }}
-                >
-                  {/* Header row */}
-                  <button
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:opacity-90 transition-opacity"
-                    style={{ backgroundColor: sev.bg }}
-                    onClick={() => setExpanded(isOpen ? null : event.id)}
-                  >
-                    <span className="text-lg flex-shrink-0">{sev.icon}</span>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm text-gray-900">
-                          {event.category}
-                        </span>
-                        <Badge
-                          className="text-xs"
-                          style={{
-                            backgroundColor: sev.color + "20",
-                            color:           sev.color,
-                            border:          `1px solid ${sev.color}40`,
-                          }}
-                        >
-                          {sev.label}
-                        </Badge>
-                        <span className="text-xs text-gray-500">
-                          {formatDate(event.detectedAt)}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-600 mt-0.5">
-                        {affectedQueries.length} queries affected ·{" "}
-                        {driftPct}% drift rate ·{" "}
-                        avg score {safeFixed(event.avgDriftScore)}
-                      </p>
-                    </div>
-
-                    {isOpen
-                      ? <ChevronUp  className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                      : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                    }
-                  </button>
-
-                  {/* Expanded detail */}
-                  {isOpen && (
-                    <div className="px-4 py-3 border-t bg-white space-y-4">
-
-                      {/* Description */}
-                      <div className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg">
-                        <Info className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-gray-600 leading-relaxed">
-                          {event.detail ?? event.description}
-                        </p>
-                      </div>
-
-                      {/* Stats */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="text-center p-2 border rounded-lg">
-                          <div className="text-lg font-bold" style={{ color: sev.color }}>
-                            {driftPct}%
-                          </div>
-                          <div className="text-xs text-gray-500">Drift Rate</div>
-                        </div>
-                        <div className="text-center p-2 border rounded-lg">
-                          <div className="text-lg font-bold text-gray-900">
-                            {safeFixed(event.avgDriftScore)}
-                          </div>
-                          <div className="text-xs text-gray-500">Avg Score</div>
-                        </div>
-                        <div className="text-center p-2 border rounded-lg">
-                          <div className="text-lg font-bold text-gray-900">
-                            {affectedQueries.length}
-                          </div>
-                          <div className="text-xs text-gray-500">Queries</div>
-                        </div>
-                      </div>
-
-                      {/* Affected queries */}
-                      {affectedQueries.length > 0 && (
-                        <div>
-                          <p className="text-xs font-semibold text-gray-700 mb-2">
-                            Affected Queries
-                          </p>
-                          <div className="space-y-1">
-                            {affectedQueries.map((q, i) => (
-                              <div
-                                key={q.queryId ?? i}
-                                className="flex items-center justify-between text-xs px-2 py-1.5 bg-gray-50 rounded"
-                              >
-                                <span className="text-gray-700 truncate flex-1 mr-2">
-                                  {q.queryName ?? q.queryId}
-                                </span>
-                                <Badge variant="outline" className="text-xs flex-shrink-0">
-                                  <TrendingDown className="h-2.5 w-2.5 mr-1 text-red-500" />
-                                  {safeFixed(q.driftScore)}
-                                </Badge>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
+        </details>)}</div>}
+    </CardContent>
+  </Card>
 }

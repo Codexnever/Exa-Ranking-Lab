@@ -67,7 +67,7 @@ export function useAvgResponseTimeImprovement(
           } =>
             typeof snapshot?.metadata
               ?.responseTime === "number" &&
-            snapshot.metadata.responseTime > 0,
+            Number.isFinite(snapshot.metadata.responseTime) && snapshot.metadata.responseTime > 0,
         )
 
       if (validSnapshots.length === 0) {

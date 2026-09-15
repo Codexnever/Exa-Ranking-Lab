@@ -24,6 +24,8 @@ export function useRealTimeAnalytics() {
     let unsubscribe: (() => void) | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
     let reconnectAttempts = 0;
+    let active = true;
+    const refreshTimers = new Set<ReturnType<typeof setTimeout>>();
 
     const setupSubscription = async () => {
       try {
@@ -32,6 +34,7 @@ export function useRealTimeAnalytics() {
         unsubscribe = client.subscribe(
           `databases.${DATABASE_ID}.collections.${COLLECTIONS.SNAPSHOTS}.documents`,
           async (payload) => {
+            if (!active) return;
             const startTime = Date.now();
             
             try {
@@ -45,9 +48,12 @@ export function useRealTimeAnalytics() {
                   payload.events?.includes('database.documents.update')) {
                 
                 // ✅ Refresh with delay for DB consistency
-                setTimeout(async () => {
+                const timer = setTimeout(async () => {
+                  refreshTimers.delete(timer);
+                  if (!active) return;
                   try {
                     await fetchAllSnapshots(user.$id);
+                    if (!active) return;
                     
                     const freshSnapshots = useSnapshotsStore.getState().allSnapshots;
                     
@@ -65,6 +71,7 @@ export function useRealTimeAnalytics() {
                     recordError(refreshError instanceof Error ? refreshError.message : 'Analytics refresh failed');
                   }
                 }, 500);
+                refreshTimers.add(timer);
               }
             } catch (error) {
               console.error("[Real-Time] Analytics processing error:", error);
@@ -95,6 +102,8 @@ export function useRealTimeAnalytics() {
     setupSubscription();
 
     return () => {
+      active = false;
+      refreshTimers.forEach(clearTimeout);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (unsubscribe) {
         try {

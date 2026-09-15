@@ -6,6 +6,7 @@ import {
 import { ConfidenceScorer } from "./ConfidenceScorer"
 import { DescriptionBuilder } from "./DescriptionBuilder"
 import { SilentLogger } from "./logger"
+import { readRecordedEvidence } from "./recorded-evidence"
 
 import type {
   AlgorithmEventRepository,
@@ -1097,6 +1098,7 @@ export function documentToEvent(
       "string"
         ? document.description
         : undefined,
+    recordedEvidence: readRecordedEvidence(document),
   }
 }
 

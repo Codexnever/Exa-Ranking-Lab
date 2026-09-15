@@ -13,7 +13,6 @@ export function useRealTimeSnapshots() {
   const { userId } = useAuth();
   const { recordActivity, recordError, recordReconnectAttempt } = useConnectionHealth();
   const fetchSnapshotsComplete = useSnapshotsStore((state) => state.fetchSnapshotsComplete);
-  const pagination = useSnapshotsStore((state) => state.pagination);
 
   useEffect(() => {
     if (!userId) return;
@@ -21,6 +20,8 @@ export function useRealTimeSnapshots() {
     let unsubscribe: (() => void) | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
     let reconnectAttempts = 0;
+    let active = true;
+    const refreshTimers = new Set<ReturnType<typeof setTimeout>>();
 
     const setupSubscription = async () => {
       try {
@@ -29,6 +30,7 @@ export function useRealTimeSnapshots() {
         unsubscribe = client.subscribe(
           `databases.${DATABASE_ID}.collections.${COLLECTIONS.SNAPSHOTS}.documents`,
           async (payload) => {
+            if (!active) return;
             const startTime = Date.now();
             
             try {
@@ -46,8 +48,11 @@ export function useRealTimeSnapshots() {
                 console.log('[RealTime] Processing snapshot event for:', document.id);
                 
                 // ✅ Refresh both paginated and complete datasets
-                setTimeout(async () => {
+                const timer = setTimeout(async () => {
+                  refreshTimers.delete(timer);
+                  if (!active) return;
                   try {
+                    const { pagination } = useSnapshotsStore.getState();
                     await fetchSnapshotsComplete(
                       pagination.currentPage, 
                       pagination.itemsPerPage, 
@@ -58,6 +63,7 @@ export function useRealTimeSnapshots() {
                     console.error("[Real-Time] Failed to refresh snapshots:", error);
                   }
                 }, 500); // 500ms delay to ensure database consistency
+                refreshTimers.add(timer);
                 
                 // ✅ Record successful activity with response time
                 const responseTime = Date.now() - startTime;
@@ -98,6 +104,8 @@ export function useRealTimeSnapshots() {
     setupSubscription();
 
     return () => {
+      active = false;
+      refreshTimers.forEach(clearTimeout);
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
       }
@@ -111,5 +119,5 @@ export function useRealTimeSnapshots() {
         }
       }
     };
-  }, [userId, fetchSnapshotsComplete, pagination.currentPage, pagination.itemsPerPage, recordActivity, recordError, recordReconnectAttempt]);
+  }, [userId, fetchSnapshotsComplete, recordActivity, recordError, recordReconnectAttempt]);
 }

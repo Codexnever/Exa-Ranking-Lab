@@ -193,14 +193,14 @@ export function RevolutionaryStatsCard({
         <CardContent>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Overall Health Score</span>
+              <span className="text-sm text-gray-600">Heuristic Health Score</span>
               <span className={`text-2xl font-bold ${getHealthColor(statsData.systemHealth)}`}>
                 {statsData.systemHealth}%
               </span>
             </div>
             <Progress value={statsData.systemHealth} className="h-2" />
             <div className="grid grid-cols-2 gap-4 text-xs text-gray-500">
-              <div>Vector DB: {weaviateConnected ? "Connected" : "Disconnected"}</div>
+              <div>AI operation evidence: {weaviateConnected ? "Available" : "Not verified"}</div>
               <div>Data Points: {statsData.snapshotCount}</div>
             </div>
           </div>
@@ -369,11 +369,11 @@ export function RevolutionaryStatsCard({
           <CardContent className="pt-4 pb-4">
             <Clock className="h-6 w-6 mx-auto mb-2 text-blue-600" />
             <div className="text-lg font-bold text-blue-600">
-              {typeof statsData.avgResponseTime === 'number' 
+              {typeof statsData.avgResponseTime === 'number' && Number.isFinite(statsData.avgResponseTime) && statsData.avgResponseTime > 0
                 ? `${statsData.avgResponseTime}ms`
-                : statsData.avgResponseTime || "N/A"}
+                : "N/A"}
             </div>
-            <p className="text-xs text-gray-500">Avg Response</p>
+            <p className="text-xs text-gray-500">Mean saved search timing (ms)</p>
           </CardContent>
         </Card>
 
@@ -429,7 +429,7 @@ export function RevolutionaryStatsCard({
                 <p>• {statsData.anomalyCount} content anomalies detected. Review AI insights for details.</p>
               )}
               {!statsData.weaviateConnected && (
-                <p>• Vector database is offline. Switch to AI mode for enhanced analytics.</p>
+                <p>• Current vector database connectivity has not been verified by this display.</p>
               )}
             </div>
           </CardContent>

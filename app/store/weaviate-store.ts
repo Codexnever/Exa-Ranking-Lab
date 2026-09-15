@@ -1,5 +1,6 @@
 // Enhanced Weaviate Store with improved analytics integration - FIXED VERSION
 import { create } from 'zustand';
+import { analyticsHealth } from './analytics-health';
 import { persist } from 'zustand/middleware';
 import {
   ContentCoherenceResult,
@@ -363,11 +364,13 @@ export const useWeaviateStore = create<WeaviateStore>()(
                 ? rawSemanticInsights.contentAnomalies.anomalies
                 : [],
             weaviateMetrics: {
-              totalVectors: rawSemanticInsights.weaviateMetrics?.totalVectors || 0,
+              ...rawSemanticInsights.weaviateMetrics,
+              totalVectors: typeof rawSemanticInsights.weaviateMetrics?.totalVectors === 'number' &&
+                Number.isFinite(rawSemanticInsights.weaviateMetrics.totalVectors)
+                ? rawSemanticInsights.weaviateMetrics.totalVectors : undefined,
               embeddingDimensions: rawSemanticInsights.weaviateMetrics?.embeddingDimensions || 0,
               lastIndexed: rawSemanticInsights.weaviateMetrics?.lastIndexed || Date.now(),
               clusterCount: rawSemanticInsights.weaviateMetrics?.clusterCount || 0,
-              ...rawSemanticInsights.weaviateMetrics
             },
             semanticClusters: Array.isArray(rawSemanticInsights.semanticClusters)
               ? rawSemanticInsights.semanticClusters
@@ -426,7 +429,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
           get().recordOperation(operationType, true);
 
           console.log(`[WeaviateStore] Semantic analytics processed successfully`);
-          console.log(`[WeaviateStore] Final state - Connected: ${hasValidData}, Vectors: ${totalVectors}`);
+          console.log(`[WeaviateStore] Final state - Connected: ${hasValidData}, Reported vectors: ${processedInsights.weaviateMetrics?.totalVectors ?? 'not supplied'}`);
 
           return {
             ...responseData,
@@ -494,71 +497,7 @@ export const useWeaviateStore = create<WeaviateStore>()(
       },
 
       // FIXED: Enhanced getConnectionHealth with better logic
-      getConnectionHealth: () => {
-        const {
-          operationHistory,
-          lastSuccessfulOperation,
-          vectorsAvailable,
-          dataSource,
-          connectionStatus,
-          isConnected
-        } = get();
-
-        console.log('[WeaviateStore] getConnectionHealth called', {
-          dataSource,
-          connectionStatus,
-          isConnected,
-          vectorsAvailable,
-          lastSuccessfulOperation,
-          operationHistoryLength: operationHistory.length
-        });
-
-        // If not in weaviate mode, return disconnected
-        if (dataSource !== 'weaviate') {
-          return { isHealthy: false, quality: 'disconnected', successRate: 0 };
-        }
-
-        const now = Date.now();
-
-        // If no successful operations yet
-        if (!lastSuccessfulOperation) {
-          return { isHealthy: false, quality: 'disconnected', successRate: 0 };
-        }
-
-        // Calculate success rate from recent operations (last 10 minutes)
-        const recentOperations = operationHistory.filter(op => now - op.timestamp < 10 * 60 * 1000);
-        const successRate = recentOperations.length > 0
-          ? Math.round((recentOperations.filter(op => op.success).length / recentOperations.length) * 100)
-          : 0;
-
-        const timeSinceLastSuccess = now - lastSuccessfulOperation;
-
-        let quality: string;
-        let isHealthy: boolean;
-
-        // Determine health based on multiple factors
-        if (connectionStatus === 'connected' && vectorsAvailable && timeSinceLastSuccess < 2 * 60 * 1000 && successRate >= 80) {
-          quality = 'excellent';
-          isHealthy = true;
-        } else if (connectionStatus === 'connected' && timeSinceLastSuccess < 5 * 60 * 1000 && successRate >= 60) {
-          quality = 'good';
-          isHealthy = true;
-        } else if (connectionStatus === 'error' || timeSinceLastSuccess > 10 * 60 * 1000 || successRate < 40) {
-          quality = 'poor';
-          isHealthy = false;
-        } else if (connectionStatus === 'connecting') {
-          quality = 'connecting';
-          isHealthy = false;
-        } else {
-          quality = 'disconnected';
-          isHealthy = false;
-        }
-
-        const healthResult = { isHealthy, quality, successRate };
-        console.log('[WeaviateStore] Connection health result:', healthResult);
-
-        return healthResult;
-      },
+      getConnectionHealth: () => analyticsHealth(get()),
 
       // Enhanced syncQueries with better error handling and state management
       syncQueries: async (userId: string) => {

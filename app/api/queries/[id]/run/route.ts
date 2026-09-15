@@ -200,7 +200,7 @@ async function executeQuery(
 
     console.log(
       `[QueryRun] ${mappedResults.length} results for query: ${queryId} ` +
-      `(Exa searchTime: ${searchTime}ms, RTT: ${responseTime}ms)`
+      `(Exa-reported searchTime: ${searchTime}ms, responseTime alias: ${responseTime}ms)`
     )
 
     // ✅ NEW: compute config hash + coverage gap before creating snapshot

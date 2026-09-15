@@ -44,7 +44,7 @@ export function PerformanceCharts({
         <CardHeader>
           <CardTitle className="text-gray-900 text-lg">⚡ Performance Metrics</CardTitle>
           <CardDescription>
-            Real-time API speed and query success analysis.
+            Saved search timing and query success by hour; not live API latency.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-2">
@@ -91,7 +91,7 @@ export function PerformanceCharts({
                     //    chart's tooltip and did nothing in this context).
                     //    Formatter now matches the actual keys used below.
                     formatter={(value: unknown, name: string | number | undefined) =>
-                      name === "responseTime"
+                      name === "Response Time" || name === "responseTime"
                         ? formatResponseTime(typeof value === "string" || typeof value === "number" ? value : undefined)
                         : `${value}%`
                     }
@@ -155,7 +155,7 @@ export function PerformanceCharts({
                   <Tooltip
                     contentStyle={{ fontSize: 14 }}
                     formatter={(value: unknown, name: string | number | undefined) =>
-                      name === "avgTime"
+                      name === "Avg Response Time" || name === "avgTime"
                         ? formatResponseTime(typeof value === "string" || typeof value === "number" ? value : undefined)
                         : `${value}%`
                     }

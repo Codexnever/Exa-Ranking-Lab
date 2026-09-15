@@ -36,6 +36,37 @@ class SharedStore implements SharedEmbeddingStore {
 }
 
 describe("embedding cache", () => {
+  test("Redis diagnostics are opt-in and distinguish acknowledged batches from write failures", async () => {
+    const previous = process.env.EMBEDDING_CACHE_DEBUG
+    const info = jest.spyOn(console, "info").mockImplementation(() => undefined)
+    try {
+      delete process.env.EMBEDDING_CACHE_DEBUG
+      const shared = new SharedStore()
+      const cache = new EmbeddingCache(new LruEmbeddingCache(10), shared, 123)
+      await cache.getMany([request("private-content")])
+      expect(info).not.toHaveBeenCalled()
+      process.env.EMBEDDING_CACHE_DEBUG = "true"
+      await cache.setMany([request("private-content")], [[1, 2, 3]])
+      const restarted = new EmbeddingCache(new LruEmbeddingCache(10), shared)
+      await restarted.getMany([request("private-content"), request("absent")])
+      expect(info.mock.calls).toEqual(expect.arrayContaining([
+        ["[EmbeddingCache] REDIS_WRITE_END", expect.objectContaining({ writtenCount: 1, success: true })],
+        ["[EmbeddingCache] REDIS_READ_END", expect.objectContaining({ requestedCount: 2, hitCount: 1, missCount: 1 })],
+      ]))
+      info.mockClear()
+      jest.spyOn(shared, "mset").mockRejectedValue(new Error("sensitive transport details"))
+      await cache.setMany([request("other")], [[3, 2, 1]])
+      const logs = JSON.stringify(info.mock.calls)
+      expect(logs).toContain("REDIS_ERROR")
+      expect(logs).not.toContain("REDIS_WRITE_END")
+      expect(logs).not.toContain("sensitive transport details")
+      expect(logs).not.toContain("private-content")
+    } finally {
+      info.mockRestore()
+      if (previous === undefined) delete process.env.EMBEDDING_CACHE_DEBUG
+      else process.env.EMBEDDING_CACHE_DEBUG = previous
+    }
+  })
   test("refreshes recency, evicts the least recently used item, and stays bounded", () => {
     const cache = new LruEmbeddingCache(2)
     cache.set("a", [1]); cache.set("b", [2]); expect(cache.get("a")).toEqual([1]); cache.set("c", [3])

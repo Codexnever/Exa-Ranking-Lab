@@ -664,6 +664,7 @@ export interface AppNotification {
 }
 
 export interface AlgorithmUpdateEvent {
+  recordedEvidence?: import('@/lib/services/algorithm-detector/recorded-evidence').RecordedDetectorEvidence
   id:              string
   detectedAt:      Date | string
   category:        string

@@ -6,6 +6,7 @@ import type { AnalyticsData, RankingSnapshot, QueryConfig } from "@/types/type"
 import { analyticsCalculations } from "@/app/logic/analyticsLogic"
 
 let analyticsRequestSequence = 0
+let completedRequestKey: string | null = null
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,8 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
       setDataSource: (source) => {
         const current = get().dataSource
         if (source === current) return
+        ++analyticsRequestSequence
+        completedRequestKey = null
         console.log(`[AnalyticsStore] Switching source: ${current} → ${source}`)
         set({ dataSource: source, analytics: null, lastCalculationHash: "" })
       },
@@ -121,8 +124,8 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
       ) => {
         const { analytics, dataSource } = get()
 
-        // Skip if we already have data and no force refresh requested
-        if (analytics && !forceRefresh) return
+        const requestKey = JSON.stringify([userId, dataSource, timeRangeMs])
+        if (analytics && completedRequestKey === requestKey && !forceRefresh) return
 
         if (!userId?.trim()) {
           console.error("[AnalyticsStore] fetchAnalytics: invalid userId", userId)
@@ -131,7 +134,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
         }
 
         const requestSequence = ++analyticsRequestSequence
-        set({ isLoading: true, error: null })
+        set({ isLoading: true, error: null, analytics: null })
 
         try {
           const data =
@@ -140,6 +143,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
               : await get()._getAppwriteAnalytics(userId, timeRangeMs, queries)
 
           if (requestSequence === analyticsRequestSequence) {
+            completedRequestKey = requestKey
             set({ analytics: data, isLoading: false, error: null })
           }
         } catch (err) {
@@ -149,15 +153,7 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
           set({ error: message, isLoading: false })
           toast.error(`Analytics error: ${message}`)
 
-          // Graceful fallback: recalculate from whatever snapshots are available
-          try {
-            const cached: RankingSnapshot[] = JSON.parse(
-              localStorage.getItem("snapshots") ?? "[]"
-            )
-            if (cached.length > 0) {
-              get().calculateAnalyticsFromSnapshots(cached, queries)
-            }
-          } catch { /* localStorage unavailable or malformed — ignore */ }
+          // Never replace a retrieval error with an unscoped legacy browser cache.
         }
       },
 
@@ -185,8 +181,11 @@ export const useAnalyticsStore = create<AnalyticsStore>()(
         }
       },
 
-      clearAnalytics: () =>
-        set({ analytics: null, error: null, lastCalculationHash: "" }),
+      clearAnalytics: () => {
+        ++analyticsRequestSequence
+        completedRequestKey = null
+        set({ analytics: null, error: null, isLoading: false, lastCalculationHash: "" })
+      },
 
       // ── Internal helpers ──────────────────────────────────────────────────
 

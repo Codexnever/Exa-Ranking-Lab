@@ -96,7 +96,7 @@ export class AnalyticsService {
       return this.calculateEnhancedAnalyticsFromSnapshots(snapshots, queries)
     } catch (err) {
       console.error("[AnalyticsService] getAnalytics failed:", err)
-      return this.getDefaultEnhancedAnalytics()
+      throw err
     }
   }
 
@@ -241,7 +241,7 @@ export class AnalyticsService {
   ): ResponseTimeStats {
     const times = snapshots
       .map(s => s.metadata?.responseTime)
-      .filter((t): t is number => typeof t === "number")
+      .filter((t): t is number => typeof t === "number" && Number.isFinite(t) && t > 0)
 
     if (!times.length) return { min: 0, max: 0, mean: 0, median: 0, stdDev: 0, percentile95: 0 }
 

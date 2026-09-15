@@ -52,6 +52,7 @@ export function ConnectionHealthProvider({ children }: ConnectionHealthProviderP
   });
 
   const responseTimeRef = useRef<number[]>([]);
+  const healthyRef = useRef(true);
 
   const recordActivity = useCallback((eventType?: string, responseTime?: number) => {
     const now = Date.now();
@@ -76,12 +77,13 @@ export function ConnectionHealthProvider({ children }: ConnectionHealthProviderP
         : prev.averageResponseTime,
     }));
     
-    if (!isHealthy) {
+    if (!healthyRef.current) {
+      healthyRef.current = true;
       setIsHealthy(true);
       setConnectionQuality('excellent');
       setMetrics(prev => ({ ...prev, reconnectAttempts: 0 }));
     }
-  }, [isHealthy]);
+  }, []);
 
   const recordError = useCallback((error?: string) => {
     setMetrics(prev => ({
@@ -132,6 +134,7 @@ export function ConnectionHealthProvider({ children }: ConnectionHealthProviderP
         quality = 'poor';
       }
       
+      healthyRef.current = healthy;
       setIsHealthy(healthy);
       setConnectionQuality(quality);
     };

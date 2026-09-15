@@ -25,6 +25,7 @@ import { useSnapshotsStore } from "@/app/store/use-snapshots-store";
 import { useWeaviateStore } from "@/app/store/weaviate-store";
 
 import { formatResponseTime } from "@/hooks/format-response-time";
+import { averageResponseTime } from "@/app/logic/response-time";
 import { analyticsCalculations } from "@/app/logic/analyticsLogic";
 import { useAuth } from "@/lib/middleware/authentication/auth-context";
 import { toast } from "sonner";
@@ -144,6 +145,7 @@ export default function Analytics() {
   const loadCoordinatorRef = useRef(new AnalyticsLoadCoordinator());
 
   const [timeRange,               setTimeRange]               = useState("30d");
+  const [activeTab, setActiveTab] = useState("overview");
   const [showAllAnomalies,        setShowAllAnomalies]        = useState(false);
   const [deduplicationStrategy,   setDeduplicationStrategy]   = useState<DeduplicationStrategy>("latest");
   const [isRefreshing,            setIsRefreshing]            = useState(false);
@@ -273,14 +275,11 @@ export default function Analytics() {
       }
     }
 
-    if (analytics) {
-      return { ...analytics, hasSemanticData: false, isVectorEnhanced: false, vectorsAvailable: false };
-    }
-
+    // Aggregate API omits raw snapshots and queries; calculate from loaded data.
     const calculated = analyticsCalculations(
       stableQueries, stableSnapshots, timeRange, filters, deduplicationStrategy
     );
-    return { ...calculated, hasSemanticData: false, isVectorEnhanced: false, vectorsAvailable: false };
+    return { ...analytics, ...calculated, hasSemanticData: false, isVectorEnhanced: false, vectorsAvailable: false };
   }, [
     analytics, isAIPowered, stableQueries, stableSnapshots,
     timeRange, filters, deduplicationStrategy,
@@ -323,23 +322,11 @@ export default function Analytics() {
             (enhancedMetrics.contentCoherence as any).score || 0;
         }
 
-        //  FIX 2: was returning literal string "rs time" as avgResponseTime.
-        // Now derives from successRateByHour same as the traditional branch,
-        // so the Response Time card shows a real value in AI mode too.
-        const sr = analyticsData?.successRateByHour;
-        const validHours = Array.isArray(sr)
-          ? sr.filter((h: any) =>
-              h && typeof h === "object" &&
-              typeof h.avgTime === "number" && h.avgTime > 0
-            )
-          : [];
-        const rawAvgTime = validHours.length > 0
-          ? validHours.reduce((sum: number, h: any) => sum + h.avgTime, 0) / validHours.length
-          : 0;
+        // Average saved observations directly, not equally weighted hourly means.
 
         return {
           avgSuccessRate:    stabilityValue.toFixed(1),
-          avgResponseTime:   rawAvgTime > 0 ? formatResponseTime(Math.round(rawAvgTime)) : "N/A",
+          avgResponseTime:   formatResponseTime(averageResponseTime(analyticsData.filteredSnapshots ?? [])),
           contentCoherence:  coherenceValue.toFixed(1),
           diversityIndex:    enhancedMetrics.diversityIndex?.toFixed(1) || "0",
           isSemanticEnhanced: true,
@@ -364,13 +351,10 @@ export default function Analytics() {
         validHours.reduce((sum: number, h: any) => sum + h.successRate, 0) / validHours.length
       ).toFixed(1);
 
-      const rawAvgTime = (
-        validHours.reduce((sum: number, h: any) => sum + (h.avgTime || 0), 0) / validHours.length
-      ).toFixed(0);
 
       return {
         avgSuccessRate,
-        avgResponseTime: formatResponseTime(Number(rawAvgTime)),
+        avgResponseTime: formatResponseTime(averageResponseTime(analyticsData.filteredSnapshots ?? [])),
         isSemanticEnhanced: false,
       };
     } catch {
@@ -381,13 +365,14 @@ export default function Analytics() {
   const connectionHealth = useMemo(() => {
     try { return isAIPowered ? getConnectionHealth?.() ?? null : null; }
     catch { return null; }
-  }, [getConnectionHealth, isAIPowered]);
+  }, [getConnectionHealth, isAIPowered, connectionStatus, isConnected, vectorsAvailable, weaviateAnalytics]);
 
   const connectionHealthLabel = useMemo(() => {
     if (!connectionHealth) return null;
     if (typeof connectionHealth === "string") return connectionHealth;
     if (typeof connectionHealth === "object") {
       const ch: any = connectionHealth;
+      if (typeof ch.quality === "string") return ch.quality;
       if (typeof ch.status === "string") return ch.status;
       if (typeof ch.latencyMs === "number") return `${ch.latencyMs}ms latency`;
       if (typeof ch.healthy === "boolean") return ch.healthy ? "OK" : "Degraded";
@@ -424,6 +409,8 @@ export default function Analytics() {
           fetchQueries(selection.userId, force),
           fetchAllSnapshots(selection.userId),
         ]);
+
+        if (!coordinator.isCurrent(selection.key) || !isMountedRef.current) return;
 
         if (selection.source === "weaviate") {
           await getSemanticAnalytics(selection.userId, selection.range);
@@ -643,24 +630,11 @@ export default function Analytics() {
     );
   }
 
-  if (!isLoading && stableQueries.length === 0 && stableSnapshots.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-          <h3 className="text-lg font-medium mb-2">No Data Available</h3>
-          <p className="text-gray-500 mb-4">Create some queries and snapshots to see analytics</p>
-          <Button onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-            Refresh Data
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
+      {!isLoading && stableQueries.length === 0 && stableSnapshots.length === 0 && (
+        <p role="status">No query or snapshot data available. Create queries and snapshots for general analytics; saved candidates remain accessible in Ranking Changes.</p>
+      )}
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -831,6 +805,13 @@ export default function Analytics() {
         </div>
       </div>
 
+      {((!isAIPowered && analyticsError) || initializationState === "error") && (
+        <div role="alert" className="rounded-lg border border-red-200 p-4 text-sm">
+          Analytics retrieval failed. Available snapshot evidence may still be shown; this is not an empty successful response.
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing} className="ml-3">Retry Analytics</Button>
+        </div>
+      )}
+
       {/* ── Base stats grid — always visible ─────────────────────────────── */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -852,7 +833,7 @@ export default function Analytics() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">{performanceSummary.avgResponseTime}</div>
-            <p className="text-xs text-muted-foreground">Average processing time</p>
+            <p className="text-xs text-muted-foreground">Mean saved search timing; not page latency</p>
           </CardContent>
         </Card>
         <Card>
@@ -943,7 +924,7 @@ export default function Analytics() {
             <div className="text-right">
               <div className="text-sm text-gray-500">{isAIPowered ? "Vector Embeddings" : "Filtered Snapshots"}</div>
               <div className={`text-2xl font-bold ${isAIPowered ? "text-purple-600" : "text-blue-600"}`}>
-                {isAIPowered ? semanticInsights?.weaviateMetrics?.totalVectors || 0 : filteredSnapshotsLength}
+                {isAIPowered ? semanticInsights?.weaviateMetrics?.totalVectors ?? "Not reported" : filteredSnapshotsLength}
               </div>
               <div className="text-xs text-gray-400">
                 {isAIPowered ? "processed vectors" : `from ${stableSnapshots.length} total`}
@@ -954,18 +935,22 @@ export default function Analytics() {
       </Card>
 
       {/* ── Tabs ─────────────────────────────────────────────────────────── */}
-      <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className={`grid w-full ${isAIPowered ? "grid-cols-5" : "grid-cols-4"}`}>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 p-2 [&>button]:min-h-10 [&>button]:flex-1 [&>button]:basis-32 [&>button]:whitespace-nowrap [&>button]:px-4 [&>button]:py-2">
           <TabsTrigger value="overview"    className="gap-2"><TrendingUp className="h-4 w-4" />Overview</TabsTrigger>
           <TabsTrigger value="rankings">Rankings</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="domains">Domains</TabsTrigger>
+          <TabsTrigger value="ranking-changes">Ranking Changes</TabsTrigger>
           {isAIPowered && (
             <TabsTrigger value="ai-insights" className="gap-2">
               <Brain className="h-4 w-4" />AI Insights
             </TabsTrigger>
           )}
         </TabsList>
+        <TabsContent value="ranking-changes" forceMount hidden={activeTab !== "ranking-changes"}>
+          <AlgorithmUpdatePanel active={activeTab === "ranking-changes"} />
+        </TabsContent>
 
         {/* Overview */}
         <TabsContent value="overview" className="space-y-6">
@@ -1110,11 +1095,6 @@ export default function Analytics() {
                   />
                 )}
 
-                {/* ✅ FIX 4: AlgorithmUpdatePanel now lives here as a
-                    standalone sibling Card in the AI Insights tab.
-                    Previously nested inside a Performance tab Card grid
-                    cell which broke its layout and double-gated it. */}
-                <AlgorithmUpdatePanel />
 
                 <div className="grid gap-6 lg:grid-cols-2">
                   <SemanticHeatmap

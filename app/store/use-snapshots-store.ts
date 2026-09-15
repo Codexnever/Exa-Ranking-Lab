@@ -3,37 +3,16 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { toast } from "sonner"
 import type { RankingSnapshot, RankingChange } from "@/types/type"
+import { createSnapshotStorage, snapshotPreferences } from './snapshot-persistence'
 
 let analyticsFetchSequence = 0
+let paginatedFetchSequence = 0
 
 // ─── SSR-safe storage ─────────────────────────────────────────────────────────
 
-const safeStorage = createJSONStorage(() => {
-  if (typeof window === "undefined") {
-    return { getItem: () => null, setItem: () => {}, removeItem: () => {} } as unknown as Storage
-  }
-  return {
-    getItem: (key: string) => {
-      try { return localStorage.getItem(key) } catch { return null }
-    },
-    setItem: (key: string, value: string) => {
-      try {
-        // Size guard — snapshots can be large
-        const kb = new Blob([value]).size / 1024
-        if (kb > 4500) {
-          console.warn(`[SnapshotsStore] Skipping persist — too large (${kb.toFixed(0)}KB)`)
-          return
-        }
-        localStorage.setItem(key, value)
-      } catch (err) {
-        console.warn("[SnapshotsStore] localStorage.setItem failed:", err)
-      }
-    },
-    removeItem: (key: string) => {
-      try { localStorage.removeItem(key) } catch { /* ignore */ }
-    },
-  } as Storage
-})
+const safeStorage = createJSONStorage<ReturnType<typeof snapshotPreferences>>(() => createSnapshotStorage(
+  () => typeof window === 'undefined' ? undefined : window.localStorage
+))
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,7 +55,7 @@ type SnapshotsStore = SnapshotsState & SnapshotsActions
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useSnapshotsStore = create<SnapshotsStore>()(
-  persist(
+  persist<SnapshotsStore, [], [], ReturnType<typeof snapshotPreferences>>(
     (set, get) => ({
       // ── State ──────────────────────────────────────────────────────────────
       paginatedSnapshots: [],
@@ -95,8 +74,8 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
       setHydrated: () => set({ isHydrated: true }),
 
       checkAndRefreshIfEmpty: async (userId: string) => {
-        const { allSnapshots, lastUserId, isHydrated } = get()
-        if (!isHydrated || allSnapshots.length === 0 || lastUserId !== userId) {
+        const { lastFetch, lastUserId, isLoadingAnalytics } = get()
+        if (lastUserId !== userId || (lastFetch === null && !isLoadingAnalytics)) {
           await get().forceRefresh(userId)
         }
       },
@@ -109,7 +88,6 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
        */
       forceRefresh: async (userId: string) => {
         console.log("[SnapshotsStore] Force refresh for user:", userId)
-        set({ isLoadingAnalytics: true, error: null, lastUserId: userId })
         try {
           await get().fetchAllSnapshots(userId)
           set({ isHydrated: true })
@@ -125,6 +103,11 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
       // ── Paginated fetch ────────────────────────────────────────────────────
 
       fetchPaginatedSnapshots: async (page, limit, userId?, queryId?) => {
+        if (get().lastUserId !== (userId ?? null)) {
+          get().clearSnapshots()
+          set({ lastUserId: userId ?? null })
+        }
+        const requestSequence = ++paginatedFetchSequence
         set({ isLoadingPaginated: true, error: null })
         try {
           let url = `/api/snapshots/paginated?page=${page}&limit=${limit}`
@@ -135,6 +118,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
           if (!res.ok) throw new Error(`Paginated fetch failed: ${res.status}`)
 
           const result = await res.json()
+          if (requestSequence !== paginatedFetchSequence) return
           set({
             paginatedSnapshots: result.data ?? [],
             pagination: {
@@ -147,6 +131,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
             error: null,
           })
         } catch (err) {
+          if (requestSequence !== paginatedFetchSequence) return
           const message = err instanceof Error ? err.message : "Failed to fetch paginated snapshots"
           console.error("[SnapshotsStore] Paginated fetch error:", err)
           set({ error: message, isLoadingPaginated: false, paginatedSnapshots: [] })
@@ -157,6 +142,10 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
       // ── Analytics fetch ────────────────────────────────────────────────────
 
       fetchAllSnapshots: async (userId?, queryId?) => {
+        if (get().lastUserId !== (userId ?? null)) {
+          get().clearSnapshots()
+          set({ lastUserId: userId ?? null })
+        }
         const requestSequence = ++analyticsFetchSequence
         set({ isLoadingAnalytics: true, error: null })
         //  Snapshot existing data for rollback on error
@@ -189,6 +178,7 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
           })
           console.log(`[SnapshotsStore] Stored ${sorted.length} snapshots`)
         } catch (err) {
+          if (requestSequence !== analyticsFetchSequence) return
           const message = err instanceof Error ? err.message : "Failed to fetch analytics snapshots"
           console.error("[SnapshotsStore] Analytics fetch error:", err)
           //  Restore previous data on error — don't leave the store empty
@@ -277,34 +267,31 @@ export const useSnapshotsStore = create<SnapshotsStore>()(
         }
       },
 
-      clearSnapshots: () =>
+      clearSnapshots: () => {
+        ++analyticsFetchSequence
+        ++paginatedFetchSequence
         set({
           paginatedSnapshots: [],
           allSnapshots:       [],
-          pagination:         { currentPage: 1, totalPages: 0, totalItems: 0, itemsPerPage: 20 },
+          pagination:         { currentPage: 1, totalPages: 0, totalItems: 0, itemsPerPage: get().pagination.itemsPerPage },
+          isLoadingAnalytics: false,
+          isLoadingPaginated: false,
           error:              null,
           lastFetch:          null,
           lastUserId:         null,
-        }),
+        })
+      },
     }),
 
     {
       name:    "snapshots-storage",
       storage: safeStorage,
 
-      //  Persist ONLY lightweight metadata — not the full snapshot array
-      // Full data is always fetched fresh; we only need to know who last used the store
-      partialize: (state) => ({
-        pagination: {
-          currentPage:  1,
-          totalPages:   0,
-          totalItems:   0,
-          itemsPerPage: state.pagination.itemsPerPage,
-        },
-        lastFetch:  state.lastFetch,
-        lastUserId: state.lastUserId,
-        // Persist a capped subset for instant UI render before fresh fetch
-        allSnapshots: state.allSnapshots.slice(0, 50),
+      version: 1,
+      partialize: snapshotPreferences,
+      migrate: (stored) => snapshotPreferences(stored),
+      merge: (stored, current) => ({ ...current,
+        pagination: { ...current.pagination, ...snapshotPreferences(stored).pagination },
       }),
 
       onRehydrateStorage: () => (state) => {

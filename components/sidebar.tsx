@@ -25,7 +25,10 @@ export default function Sidebar() {
     metrics,
   } = useConnectionHealth()
 
-  const { dataSource, isConnected: weaviateConnected, error: weaviateError } = useWeaviateStore()
+  const weaviateState = useWeaviateStore()
+  const { isConnected: weaviateConnected, error: weaviateError } = weaviateState
+  const dataSource = useAnalyticsStore(state => state.dataSource)
+  const aiHealth = weaviateState.getConnectionHealth()
 
   const [activityStats, setActivityStats] = useState({
     totalEvents: 0, successfulEvents: 0, failedEvents: 0,
@@ -59,6 +62,15 @@ export default function Sidebar() {
     const secondsAgo = Math.floor((timeSinceActivity % 60000) / 1000)
 
     const isAIMode          = dataSource === "weaviate"
+    if (isAIMode) {
+      return {
+        icon: aiHealth.isHealthy ? CheckCircle : Clock,
+        color: aiHealth.isHealthy ? "text-green-600" : "text-gray-600",
+        bgColor: "bg-gray-50", borderColor: "border-gray-200",
+        status: aiHealth.quality === "unknown" ? "Not checked" : aiHealth.quality,
+        detail: "Recent API operations; not a live probe", showPulse: false,
+      }
+    }
     const aiConnectionHealthy = isAIMode ? weaviateConnected && !weaviateError : true
 
     let effectiveQuality = connectionQuality
@@ -236,7 +248,7 @@ export default function Sidebar() {
                   <span className="font-medium">{activityStats.totalEvents}</span>
                 </div>
                 <div className="text-gray-500">
-                  {dataSource === "weaviate" ? "AI Ops" : "Events"}
+                  Realtime events
                 </div>
               </div>
             </div>
@@ -265,7 +277,7 @@ export default function Sidebar() {
                     "font-medium",
                     weaviateConnected ? "text-green-700" : "text-red-700"
                   )}>
-                    Vector DB: {weaviateConnected ? "Connected" : "Disconnected"}
+                    Last AI operation: {weaviateError ? "Failed" : weaviateState.lastSuccessfulOperation ? "Succeeded" : "Not checked"}
                   </span>
                 </div>
                 {weaviateError && (
@@ -275,15 +287,13 @@ export default function Sidebar() {
             )}
 
             {/* Poor / disconnected status */}
-            {(connectionQuality === "poor" || connectionQuality === "disconnected") && (
+            {dataSource !== "weaviate" && (connectionQuality === "poor" || connectionQuality === "disconnected") && (
               <div className="mt-2 p-2 bg-white/80 rounded text-xs">
                 <div className="flex items-center gap-1 text-gray-600">
                   <AlertCircle className="h-3 w-3" />
                   <span>
                     {connectionQuality === "poor"
-                      ? (dataSource === "weaviate" && !weaviateConnected
-                          ? "AI features limited"
-                          : "Updates may be delayed")
+                      ? "Updates may be delayed"
                       : "Real-time features unavailable"
                     }
                   </span>

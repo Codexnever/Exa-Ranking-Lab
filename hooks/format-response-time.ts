@@ -1,4 +1,5 @@
 export function formatResponseTime(value: number | string | undefined): string {
+  if (value === undefined || value === null || value === "") return '-';
   const numericValue = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(numericValue)) return '-';
 

@@ -54,6 +54,7 @@ type CacheDebugEvent =
   | "L1_HIT" | "L1_MISS" | "REDIS_HIT" | "REDIS_MISS"
   | "REDIS_SET" | "REDIS_ERROR" | "REDIS_TIMEOUT"
   | "PROVIDER_START" | "PROVIDER_END" | "INFLIGHT_HIT"
+  | "REDIS_READ_START" | "REDIS_READ_END" | "REDIS_WRITE_START" | "REDIS_WRITE_END" | "REDIS_SKIPPED"
 
 function debugEnabled(): boolean {
   return process.env.EMBEDDING_CACHE_DEBUG?.trim().toLowerCase() === "true"
@@ -223,33 +224,48 @@ export class EmbeddingCache {
       if (local) {
         this.l1Hits++
         results[index] = local
-        debugCacheEvent("L1_HIT", request, key)
+        if (index < 5) debugCacheEvent("L1_HIT", request, key)
       } else {
-        debugCacheEvent("L1_MISS", request, key)
+        if (index < 5) debugCacheEvent("L1_MISS", request, key)
         misses.push({ index, key, request })
       }
     })
     if (misses.length && this.shared) {
+      const started = performance.now()
+      let hits = 0
+      debugCacheEvent("REDIS_READ_START", misses[0].request, misses[0].key, { requestedCount: misses.length })
       try {
         const values = await this.shared.mget(misses.map(miss => miss.key))
         misses.forEach((miss, remoteIndex) => {
           const vector = decodeCachedEmbedding(values[remoteIndex], miss.request.namespace)
           if (!vector) {
             this.redisMisses++
-            debugCacheEvent("REDIS_MISS", miss.request, miss.key)
+            if (remoteIndex < 5) debugCacheEvent("REDIS_MISS", miss.request, miss.key)
             return
           }
           this.redisHits++
+          hits++
           this.l1.set(miss.key, vector)
           results[miss.index] = vector
-          debugCacheEvent("REDIS_HIT", miss.request, miss.key)
+          if (remoteIndex < 5) debugCacheEvent("REDIS_HIT", miss.request, miss.key)
+        })
+        debugCacheEvent("REDIS_READ_END", misses[0].request, misses[0].key, {
+          requestedCount: misses.length, hitCount: hits, missCount: misses.length - hits,
+          durationMs: Math.round(performance.now() - started), success: true,
         })
       } catch (error) {
         this.redisFailures++
         const timeout = isTimeoutError(error)
         if (timeout) this.redisTimeouts++
-        misses.forEach(miss => debugCacheEvent(timeout ? "REDIS_TIMEOUT" : "REDIS_ERROR", miss.request, miss.key))
+        debugCacheEvent(timeout ? "REDIS_TIMEOUT" : "REDIS_ERROR", misses[0].request, misses[0].key,
+          { operation: "read", requestedCount: misses.length, durationMs: Math.round(performance.now() - started), success: false })
       }
+    }
+    if (requests.length && (!misses.length || !this.shared)) {
+      debugCacheEvent("REDIS_SKIPPED", requests[0], createEmbeddingCacheKey(requests[0]), {
+        operation: "read", reason: misses.length ? "not_configured" : "all_l1_hits",
+        requestedCount: requests.length, l1HitCount: requests.length - misses.length,
+      })
     }
     this.totalMisses += results.filter(result => result === null).length
     return results
@@ -274,7 +290,7 @@ export class EmbeddingCache {
       const existing = this.inflight.get(key)
       if (existing) {
         this.inflightHits++
-        debugCacheEvent("INFLIGHT_HIT", request, key)
+        if (index < 5) debugCacheEvent("INFLIGHT_HIT", request, key)
         waiters.push({ indexes: [index], promise: existing })
         return
       }
@@ -344,16 +360,24 @@ export class EmbeddingCache {
       this.l1.set(key, vector)
       entries.push({ key, value: encodeCachedEmbedding(request.namespace, vector) })
     })
-    if (!entries.length || !this.shared) return
+    if (!entries.length) return
+    if (!this.shared) {
+      debugCacheEvent("REDIS_SKIPPED", requests[0], entries[0].key, { operation: "write", reason: "not-configured", requestedCount: entries.length })
+      return
+    }
+    const started = performance.now()
+    debugCacheEvent("REDIS_WRITE_START", requests[0], entries[0].key, { requestedCount: entries.length, ttlSeconds: this.ttlSeconds })
     try {
       await this.shared.mset(entries, this.ttlSeconds)
       this.redisSets += entries.length
-      requests.forEach((request, index) => debugCacheEvent("REDIS_SET", request, entries[index].key))
+      debugCacheEvent("REDIS_SET", requests[0], entries[0].key, { writtenCount: entries.length, ttlSeconds: this.ttlSeconds })
+      debugCacheEvent("REDIS_WRITE_END", requests[0], entries[0].key, { writtenCount: entries.length, success: true, durationMs: Math.round(performance.now() - started) })
     } catch (error) {
       this.redisFailures++
       const timeout = isTimeoutError(error)
       if (timeout) this.redisTimeouts++
-      requests.forEach((request, index) => debugCacheEvent(timeout ? "REDIS_TIMEOUT" : "REDIS_ERROR", request, entries[index].key))
+      debugCacheEvent(timeout ? "REDIS_TIMEOUT" : "REDIS_ERROR", requests[0], entries[0].key,
+        { operation: "write", success: false, requestedCount: entries.length, writtenCount: "unknown", durationMs: Math.round(performance.now() - started) })
     }
   }
 
@@ -393,12 +417,8 @@ class UpstashSharedEmbeddingStore implements SharedEmbeddingStore {
     entries.forEach(entry => pipeline.set(entry.key, entry.value, { ex: ttlSeconds }))
     // Properly inspect the pipeline results for hidden Upstash errors.
     const results = await this.withTimeout(pipeline.exec<unknown[]>())
-    if (Array.isArray(results)) {
-      const errors = results.filter(res => res instanceof Error)
-      if (errors.length > 0) {
-        console.error("[EmbeddingCache] Upstash Redis rejected the write:", errors[0])
-        throw new Error("Redis pipeline write failed")
-      }
+    if (!Array.isArray(results) || results.length !== entries.length || results.some(result => result !== "OK")) {
+      throw new Error("Redis pipeline write was not fully acknowledged")
     }
   }
 

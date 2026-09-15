@@ -6,6 +6,8 @@ export class AnalyticsLoadCoordinator {
   private currentKey: string | null = null
 
   select(key: string): void {
+    // Completion markers do not retain data that stores replace on mode changes.
+    if (this.currentKey !== key) this.completed.delete(key)
     this.currentKey = key
   }
 
