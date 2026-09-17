@@ -952,12 +952,11 @@ export class AppwriteEvaluationRepository
           ),
         )
 
-      const payload =
-        await this.loadEvidence(
-          id,
-          judgment.datasetVersionId,
-          evidence.revision,
-        )
+      const evidenceMap = await this.loadEvidenceBatch([
+  { judgmentId: id, datasetVersionId: judgment.datasetVersionId, revision: evidence.revision },
+])
+const payload = evidenceMap.get(id)
+if (!payload) throw new TypeError(`Missing evidence for judgment ${id}`)
 
       return transformRelevanceJudgmentDocument(
         {
@@ -1024,12 +1023,11 @@ export class AppwriteEvaluationRepository
           ),
         )
 
-      const payload =
-        await this.loadEvidence(
-          judgment.id,
-          judgment.datasetVersionId,
-          evidence.revision,
-        )
+      const evidenceMap = await this.loadEvidenceBatch([
+  { judgmentId: judgment.id, datasetVersionId: judgment.datasetVersionId, revision: evidence.revision },
+])
+const payload = evidenceMap.get(judgment.id)
+if (!payload) throw new TypeError(`Missing evidence for judgment ${judgment.id}`)
 
       return transformRelevanceJudgmentDocument(
         {
@@ -1069,163 +1067,121 @@ export class AppwriteEvaluationRepository
    * external evidence payloads before transformation.
    */
   private async listJudgmentsByFilters(
-    filters: string[],
-  ): Promise<RelevanceJudgment[]> {
-    try {
-      const output:
-        RelevanceJudgment[] = []
+  filters: string[],
+): Promise<RelevanceJudgment[]> {
+  try {
+    const output: RelevanceJudgment[] = []
+    let offset = 0
 
-      let offset = 0
-
-      while (true) {
-        const result =
-          await databases.listDocuments(
-            DATABASE_ID,
-            COLLECTIONS.RELEVANCE_JUDGMENTS,
-            [
-              ...filters,
-              Query.limit(500),
-              Query.offset(offset),
-            ],
-          )
-
-        for (
-          const document of result.documents as Record<
-            string,
-            unknown
-          >[]
-        ) {
-          const payload =
-            await this.loadEvidence(
-              String(document.$id),
-              String(
-                document.datasetVersionId,
-              ),
-              String(
-                document.evidenceRevision,
-              ),
-            )
-
-          output.push(
-            transformRelevanceJudgmentDocument(
-              {
-                ...document,
-                assessmentsJson:
-                  JSON.stringify(
-                    payload.assessments,
-                  ),
-                sourceFeedbackIdsJson:
-                  JSON.stringify(
-                    payload.sourceFeedbackIds,
-                  ),
-                sourceSnapshotIdsJson:
-                  JSON.stringify(
-                    payload.sourceSnapshotIds,
-                  ),
-                observedRawUrlsJson:
-                  JSON.stringify(
-                    payload.observedRawUrls,
-                  ),
-                observedContentHashesJson:
-                  JSON.stringify(
-                    payload.observedContentHashes,
-                  ),
-              },
-            ),
-          )
-        }
-
-        offset += result.documents.length
-
-        if (
-          result.documents.length < 500
-        ) {
-          return output
-        }
-      }
-    } catch (error) {
-      storageError(
-        error,
-        "list relevance judgments",
+    while (true) {
+      const result = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.RELEVANCE_JUDGMENTS,
+        [...filters, Query.limit(500), Query.offset(offset)],
       )
+      if (result.documents.length === 0) break
+
+      const documents = result.documents as Record<string, unknown>[]
+      const evidenceMap = await this.loadEvidenceBatch(
+        documents.map((d) => ({
+          judgmentId: String(d.$id),
+          datasetVersionId: String(d.datasetVersionId),
+          revision: String(d.evidenceRevision),
+        })),
+      )
+
+      for (const document of documents) {
+        const payload = evidenceMap.get(String(document.$id))
+        if (!payload) throw new TypeError(`Missing evidence for judgment ${document.$id}`)
+
+        output.push(
+          transformRelevanceJudgmentDocument({
+            ...document,
+            assessmentsJson: JSON.stringify(payload.assessments),
+            sourceFeedbackIdsJson: JSON.stringify(payload.sourceFeedbackIds),
+            sourceSnapshotIdsJson: JSON.stringify(payload.sourceSnapshotIds),
+            observedRawUrlsJson: JSON.stringify(payload.observedRawUrls),
+            observedContentHashesJson: JSON.stringify(payload.observedContentHashes),
+          }),
+        )
+      }
+
+      offset += result.documents.length
+      if (result.documents.length < 500) return output
     }
+    return output
+  } catch (error) {
+    storageError(error, "list relevance judgments")
+  }
+}
+
+ /**
+ * Batch-loads evidence chunks for multiple judgments in a single query,
+ * replacing N sequential loadEvidence() calls with one round-trip.
+ */
+private async loadEvidenceBatch(
+  entries: { judgmentId: string; datasetVersionId: string; revision: string }[],
+): Promise<Map<string, Record<string, unknown>>> {
+  if (entries.length === 0) return new Map()
+
+  const judgmentIds = entries.map((e) => e.judgmentId)
+  const datasetVersionId = entries[0].datasetVersionId
+
+  const rows: Record<string, unknown>[] = []
+  let offset = 0
+
+  while (true) {
+    const result = await databases.listDocuments(
+      DATABASE_ID,
+      COLLECTIONS.RELEVANCE_JUDGMENT_PAYLOADS,
+      [
+        Query.equal("judgmentId", judgmentIds),
+        Query.equal("datasetVersionId", datasetVersionId),
+        Query.orderAsc("chunkIndex"),
+        Query.limit(500),
+        Query.offset(offset),
+      ],
+    )
+    rows.push(...(result.documents as Record<string, unknown>[]))
+    offset += result.documents.length
+    if (result.documents.length < 500) break
   }
 
-  /**
-   * Reassembles a chunked evidence revision and validates its persisted shape.
-   */
-  private async loadEvidence(
-    judgmentId: string,
-    datasetVersionId: string,
-    revision: string,
-  ): Promise<Record<string, unknown>> {
-    const rows =
-      await databases.listDocuments(
-        DATABASE_ID,
-        COLLECTIONS.RELEVANCE_JUDGMENT_PAYLOADS,
-        [
-          Query.equal(
-            "judgmentId",
-            judgmentId,
-          ),
-          Query.equal(
-            "datasetVersionId",
-            datasetVersionId,
-          ),
-          Query.equal(
-            "evidenceRevision",
-            revision,
-          ),
-          Query.orderAsc("chunkIndex"),
-          Query.limit(100),
-        ],
-      )
+  const byJudgment = new Map<string, Record<string, unknown>[]>()
+  for (const row of rows) {
+    const key = String(row.judgmentId)
+    if (!byJudgment.has(key)) byJudgment.set(key, [])
+    byJudgment.get(key)!.push(row)
+  }
 
-    const ordered = [
-      ...rows.documents,
-    ].sort(
-      (a, b) =>
-        Number(a.chunkIndex) -
-        Number(b.chunkIndex),
-    )
+  const revisionByJudgment = new Map(entries.map((e) => [e.judgmentId, e.revision]))
+  const output = new Map<string, Record<string, unknown>>()
 
-    if (!ordered.length) {
-      throw new TypeError(
-        "Judgment evidence payload is missing",
-      )
+  for (const [judgmentId, chunks] of byJudgment) {
+    const revision = revisionByJudgment.get(judgmentId)
+    const matching = chunks
+      .filter((row) => String(row.evidenceRevision) === revision)
+      .sort((a, b) => Number(a.chunkIndex) - Number(b.chunkIndex))
+
+    if (!matching.length) {
+      throw new TypeError(`Judgment evidence payload is missing for ${judgmentId}`)
     }
 
-    const raw = ordered
-      .map((row) =>
-        String(row.payloadChunk),
-      )
-      .join("")
-
+    const raw = matching.map((row) => String(row.payloadChunk)).join("")
     let value: unknown
-
     try {
       value = JSON.parse(raw)
     } catch {
-      throw new TypeError(
-        "Judgment evidence payload is malformed JSON",
-      )
+      throw new TypeError(`Judgment evidence payload is malformed JSON for ${judgmentId}`)
     }
-
-    if (
-      !value ||
-      typeof value !== "object" ||
-      Array.isArray(value)
-    ) {
-      throw new TypeError(
-        "Judgment evidence payload must be an object",
-      )
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new TypeError(`Judgment evidence payload must be an object for ${judgmentId}`)
     }
-
-    return value as Record<
-      string,
-      unknown
-    >
+    output.set(judgmentId, value as Record<string, unknown>)
   }
+
+  return output
+}
 
   /**
    * Stores large judgment evidence as chunked revisioned payload documents.
