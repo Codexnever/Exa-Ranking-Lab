@@ -1,6 +1,6 @@
 import { createHash } from "crypto"
 import { canonicalizeDocumentUrl } from "./canonicalize-url-policy"
-export { CANONICALIZATION_VERSION,TRACKING_PARAMETERS_V1,canonicalizeDocumentUrl } from "./canonicalize-url-policy"
+export { CANONICALIZATION_VERSION, TRACKING_PARAMETERS_V1, canonicalizeDocumentUrl } from "./canonicalize-url-policy"
 
 export interface DocumentIdentity {
   canonicalUrl: string
@@ -30,9 +30,25 @@ export function createJudgmentKey(datasetVersionId: string, evaluationQueryId: s
   return sha256(`${datasetVersionId}\n${evaluationQueryId}\n${documentKey}`)
 }
 
-export function createEvaluationQueryKey(datasetVersionId: string, sourceQueryId: string): string {
-  for (const [name, value] of Object.entries({ datasetVersionId, sourceQueryId })) {
-    if (typeof value !== "string" || value.trim() === "") throw new TypeError(`${name} must be non-empty`)
+export function createEvaluationQueryKey(
+  datasetVersionId: string,
+  sourceQueryId: string,
+): string {
+  for (const [name, value] of Object.entries({
+    datasetVersionId,
+    sourceQueryId,
+  })) {
+    if (
+      typeof value !== "string" ||
+      value.trim() === ""
+    ) {
+      throw new TypeError(
+        `${name} must be non-empty`,
+      )
+    }
   }
-  return sha256(`${datasetVersionId}\n${sourceQueryId}`)
+
+  return sha256(
+    `${datasetVersionId}\n${sourceQueryId}`,
+  )
 }

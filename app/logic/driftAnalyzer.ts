@@ -1,7 +1,9 @@
 // lib/drift-analyzer.ts
 
-import { createHash } from "crypto"
-
+import { getDocumentIdentity } from "@/utils/canonicalize-document-url"
+import {
+  getContentHash,
+} from "@/utils/content-identity"
 import type {
   RankingSnapshot,
   DriftAnalysisResult,
@@ -46,27 +48,6 @@ export function cosineSimilarity(
   )
 }
 
-function computeContentHash(
-  title: string,
-  snippet: string,
-  url: string,
-  fulltext: string,
-): string {
-  const content = [
-    title ?? "",
-    snippet ?? "",
-    fulltext.slice(0, 5000),
-    url ?? "",
-  ]
-    .join("|")
-    .trim()
-    .toLowerCase()
-
-  return createHash("sha256")
-    .update(content)
-    .digest("hex")
-}
-
 function getCombinedText(result: SearchResult): string {
   return [
     `title: ${result.title ?? "none"}`,
@@ -76,18 +57,11 @@ function getCombinedText(result: SearchResult): string {
   ].join(" | ")
 }
 
-function getContentHash(result: SearchResult): string {
-  if (result.contentHash) {
-    return result.contentHash
-  }
-
-  return computeContentHash(
-    result.title ?? "",
-    result.snippet ?? "",
-    result.url ?? "",
-    result.fullText?.slice(0, 5000) ?? "",
-  )
+function getDocumentKey(result: SearchResult): string {
+  return getDocumentIdentity(result.url).documentKey
 }
+
+
 
 interface DriftConfig {
   topN: number
@@ -116,7 +90,7 @@ function calculatePositionOnlyDrift(
 ): number {
   const previousPositions = new Map(
     previousResults.map((result, index) => [
-      result.url,
+      getDocumentKey(result),
       index,
     ]),
   )
@@ -128,9 +102,12 @@ function calculatePositionOnlyDrift(
     currentIndex < currentResults.length;
     currentIndex++
   ) {
-    const previousIndex = previousPositions.get(
-      currentResults[currentIndex].url,
-    )
+    const previousIndex =
+      previousPositions.get(
+        getDocumentKey(
+          currentResults[currentIndex],
+        ),
+      )
 
     if (previousIndex === undefined) {
       continue
@@ -230,12 +207,13 @@ export async function calculateDriftScore(
       }
     }
 
-    const previousResultsByUrl = new Map(
-      previousResults.map((result) => [
-        result.url,
-        result,
-      ]),
-    )
+    const previousResultsByDocumentKey =
+      new Map(
+        previousResults.map((result) => [
+          getDocumentKey(result),
+          result,
+        ]),
+      )
 
     // Deduplicate content before embedding so identical content is embedded once.
     const textByHash = new Map<string, string>()
@@ -302,15 +280,16 @@ export async function calculateDriftScore(
         currentResults[currentIndex]
 
       const previousResult =
-        previousResultsByUrl.get(
-          currentResult.url,
+        previousResultsByDocumentKey.get(
+          getDocumentKey(currentResult),
         )
 
       if (previousResult) {
         const previousIndex =
           previousResults.findIndex(
             (result) =>
-              result.url === currentResult.url,
+              getDocumentKey(result) ===
+              getDocumentKey(currentResult),
           )
 
         const positionDelta =
@@ -343,9 +322,9 @@ export async function calculateDriftScore(
           similarityScore =
             previousVector && currentVector
               ? cosineSimilarity(
-                  previousVector,
-                  currentVector,
-                )
+                previousVector,
+                currentVector,
+              )
               : 0
         }
 
@@ -356,10 +335,10 @@ export async function calculateDriftScore(
         const weight =
           config.positionWeight === "exponential"
             ? Math.exp(
-                -currentIndex / config.topN,
-              )
+              -currentIndex / config.topN,
+            )
             : 1 -
-              currentIndex / config.topN
+            currentIndex / config.topN
 
         const similarityDecay = Math.max(
           0,
@@ -373,7 +352,7 @@ export async function calculateDriftScore(
 
         const thresholdMultiplier =
           similarityScore <
-          config.similarityThreshold
+            config.similarityThreshold
             ? 1.5
             : 1
 
@@ -402,22 +381,24 @@ export async function calculateDriftScore(
       const weight =
         config.positionWeight === "exponential"
           ? Math.exp(
-              -currentIndex / config.topN,
-            )
+            -currentIndex / config.topN,
+          )
           : 1 -
-            currentIndex / config.topN
+          currentIndex / config.topN
 
       totalDrift +=
         config.newResultPenalty * weight
     }
 
+    const currentDocumentKeys = new Set(
+      currentResults.map(getDocumentKey),
+    )
+
     const droppedResults =
       previousResults.filter(
         (previousResult) =>
-          !currentResults.some(
-            (currentResult) =>
-              currentResult.url ===
-              previousResult.url,
+          !currentDocumentKeys.has(
+            getDocumentKey(previousResult),
           ),
       ).length
 
@@ -440,7 +421,7 @@ export async function calculateDriftScore(
         100,
         (totalDrift /
           (config.topN * 15)) *
-          100,
+        100,
       ),
       rankChanges,
       newResults,
@@ -451,7 +432,7 @@ export async function calculateDriftScore(
       identicalContentRate:
         rankChanges.length > 0
           ? identicalCount /
-            rankChanges.length
+          rankChanges.length
           : 0,
       resultsCompared: rankChanges.length,
       embeddingMode,
@@ -590,7 +571,7 @@ export async function analyzeDrift(
   const latestDrift =
     comparisonCount > 0
       ? timeline[comparisonCount - 1]
-          .driftScore
+        .driftScore
       : 0
 
   const stability: DriftAnalysisResult["stability"] =
@@ -647,8 +628,8 @@ export async function analyzeDrift(
             point.decomposedDrift,
         )
         .filter(Boolean) as ReturnType<
-        typeof DriftDecomposer.decompose
-      >[],
+          typeof DriftDecomposer.decompose
+        >[],
     )
 
   return {
@@ -668,24 +649,24 @@ export async function analyzeDrift(
     contentStabilityRate:
       comparisonCount > 0
         ? totalIdenticalRate /
-          comparisonCount
+        comparisonCount
         : 0,
     totalProcessingTime,
     embeddingMode: dominantMode,
     avgContentDrift:
       comparisonCount > 0
         ? totalContentDrift /
-          comparisonCount
+        comparisonCount
         : 0,
     avgCompetitorDrift:
       comparisonCount > 0
         ? totalCompetitorDrift /
-          comparisonCount
+        comparisonCount
         : 0,
     avgRerankDrift:
       comparisonCount > 0
         ? totalRerankDrift /
-          comparisonCount
+        comparisonCount
         : 0,
     dominantDriftCause:
       aggregateDecomposed.dominantCause,

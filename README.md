@@ -12,14 +12,16 @@ Ranking drift is an operational signal. Human relevance judgments and reproducib
 
 ## Core capabilities
 
-- Query execution, immutable snapshots, ranking drift, and algorithm-change evidence
-- Frozen human benchmarks with accepted `0/1/2` judgments and canonical document identity
-- nDCG, benchmark-relative Recall, MRR, Hit, Judged Precision, and Judgment Coverage
-- Immutable evaluation runs, relevance-aware comparison, and query gains/losses
-- Canonical judged-document movement and top-K transitions
-- Generic candidate/retrieval/fusion/rerank/final stage traces and descriptive diagnosis
-- Accepted grade-0 hard-negative candidate and repeated false-positive analysis
-- Imported or native strategy execution benchmarking with quality, latency, error, and stage profiles
+* Query execution, immutable snapshots, ranking drift, and algorithm-change evidence
+* Canonical document identity and separate content identity for reliable drift attribution
+* Frozen human benchmarks with accepted `0/1/2` judgments and canonical document identity
+* nDCG, benchmark-relative Recall, MRR, Hit, Judged Precision, and Judgment Coverage
+* Immutable evaluation runs, relevance-aware comparison, and query gains/losses
+* Canonical judged-document movement and top-K transitions
+* Canonical identity-aware drift comparison across recorded ranking snapshots
+* Generic candidate/retrieval/fusion/rerank/final stage traces and descriptive diagnosis
+* Accepted grade-0 hard-negative candidate and repeated false-positive analysis
+* Imported or native strategy execution benchmarking with quality, latency, error, and stage profiles
 
 ## Architecture
 
@@ -42,6 +44,31 @@ flowchart TD
 
 The system does not combine these signals into a synthetic score or make unsupported causal claims.
 
+## Drift identity and decomposition
+
+Drift analysis keeps three concepts separate:
+
+* **Document identity:** which document is being compared across snapshots. Drift matching uses the shared canonical document identity policy, so URL variants such as tracking parameters, fragments, host/protocol normalization, and trailing-slash differences do not automatically appear as new or dropped documents.
+* **Content identity:** what observed result representation was present at the time. When a stored `contentHash` is unavailable, the Lab derives one consistently from the result's title, snippet, bounded full text, and URL.
+* **Position:** where the document appeared in the ranking. Position changes are measured independently from document and content identity.
+
+This separation prevents URL formatting differences from being mistaken for document turnover while preserving the distinction between a document moving, its observed content changing, and a document entering or leaving the result set.
+
+The overall `driftScore` measures search-result change magnitude. Decomposed signals explain the observed change:
+
+```text
+overall drift
+├── content drift
+├── competitor / result-set turnover
+└── rerank drift
+```
+
+Here, **rerank drift** means observed positional reordering among content-stable documents. It does not prove that a specific ranking algorithm or provider-side component caused the movement.
+
+The decomposer also uses the same canonical document identity when calculating new, dropped, and reordered results. Dominant-cause classification uses the weighted aggregate of the decomposed signals and reports `mixed` when no single signal clearly dominates.
+
+`dominantCause` is therefore a description of the strongest observed signal, not a root-cause diagnosis.
+
 ## Quick start
 
 Requirements: Node.js 22, npm, and an Appwrite project for persisted runtime workflows.
@@ -55,21 +82,21 @@ npm run provision:evaluation-schema
 npm run dev
 ```
 
-Open <http://localhost:3000>. Appwrite clients initialize lazily, so type checking and production compilation do not require live secrets; an actual runtime Appwrite operation fails with a clear missing-variable error until configuration is supplied.
+Open http://localhost:3000. Appwrite clients initialize lazily, so type checking and production compilation do not require live secrets; an actual runtime Appwrite operation fails with a clear missing-variable error until configuration is supplied.
 
 ## Environment setup
 
 `.env.example` is grouped by subsystem. The important classes are:
 
-| Class | Variables | When required |
-|---|---|---|
-| Core runtime | `NEXT_PUBLIC_APPWRITE_ENDPOINT`, `NEXT_PUBLIC_APPWRITE_PROJECT_ID`, `NEXT_PUBLIC_APPWRITE_DATABASE_ID`, `APPWRITE_API_KEY`, core collection IDs | Authentication and persisted application operations |
-| Evaluation | evaluation dataset/query/judgment/run collection IDs | Frozen benchmark workflows |
-| Stage trace | stage trace header/document collection IDs | Trace capture and stage diagnosis |
-| Strategy | strategy/execution/document collection IDs | Strategy Lab persistence |
-| Optional providers | `GEMINI_API_KEY`, `OPENAI_API_KEY`, `WEAVIATE_*`, `RESEND_API_KEY` | Only their embedding, vector, or notification paths |
-| Scheduling/deployment | `CRON_SECRET`, `APP_URL`, `NEXT_PUBLIC_APP_URL` | Scheduled jobs and deployed callbacks |
-| Provisioning only | server Appwrite API key and database/project configuration | Schema provisioning scripts |
+| Class                 | Variables                                                                                                                                       | When required                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Core runtime          | `NEXT_PUBLIC_APPWRITE_ENDPOINT`, `NEXT_PUBLIC_APPWRITE_PROJECT_ID`, `NEXT_PUBLIC_APPWRITE_DATABASE_ID`, `APPWRITE_API_KEY`, core collection IDs | Authentication and persisted application operations |
+| Evaluation            | evaluation dataset/query/judgment/run collection IDs                                                                                            | Frozen benchmark workflows                          |
+| Stage trace           | stage trace header/document collection IDs                                                                                                      | Trace capture and stage diagnosis                   |
+| Strategy              | strategy/execution/document collection IDs                                                                                                      | Strategy Lab persistence                            |
+| Optional providers    | `GEMINI_API_KEY`, `OPENAI_API_KEY`, `WEAVIATE_*`, `RESEND_API_KEY`                                                                              | Only their embedding, vector, or notification paths |
+| Scheduling/deployment | `CRON_SECRET`, `APP_URL`, `NEXT_PUBLIC_APP_URL`                                                                                                 | Scheduled jobs and deployed callbacks               |
+| Provisioning only     | server Appwrite API key and database/project configuration                                                                                      | Schema provisioning scripts                         |
 
 Exa credentials are normally managed through the authenticated Settings workflow. Optional embedding/vector credentials are not required for core evaluation startup. Never commit `.env.local`.
 
@@ -141,8 +168,8 @@ The optional Weaviate integration uses one unified `ExaRankingData` collection b
 
 Historical analytics and benchmark retrieval use that storage differently:
 
-- **Historical analytics** filters `search_result` records by authenticated owner and time range, groups them into snapshots, and retains multiple snapshots for semantic stability, ranking volatility, anomaly detection, semantic clustering, content evolution, discovery trends, and snapshot export. Historical objects are not globally deduplicated or deleted.
-- **Strategy Benchmark retrieval** uses `GET /api/evaluation/datasets/<datasetVersionId>/queries/<evaluationQueryId>/weaviate-search?limit=10`. The authenticated server requires a frozen, owned dataset; resolves the evaluation query's immutable `sourceQueryId`; and derives the controlled corpus from the union of `sourceSnapshotIds` preserved by its accepted judgments. A frozen query currently has no single snapshot pointer, so missing snapshot provenance is rejected instead of falling back to the owner's full history.
+* **Historical analytics** filters `search_result` records by authenticated owner and time range, groups them into snapshots, and retains multiple snapshots for semantic stability, ranking volatility, anomaly detection, semantic clustering, content evolution, discovery trends, and snapshot export. Historical objects are not globally deduplicated or deleted.
+* **Strategy Benchmark retrieval** uses `GET /api/evaluation/datasets/<datasetVersionId>/queries/<evaluationQueryId>/weaviate-search?limit=10`. The authenticated server requires a frozen, owned dataset; resolves the evaluation query's immutable `sourceQueryId`; and derives the controlled corpus from the union of `sourceSnapshotIds` preserved by its accepted judgments. A frozen query currently has no single snapshot pointer, so missing snapshot provenance is rejected instead of falling back to the owner's full history.
 
 The benchmark retrieval flow is:
 
@@ -157,7 +184,9 @@ Frozen dataset and evaluation query
 → server-side Metric Policy evaluation
 ```
 
-Candidate retrieval is bounded but intentionally fetches more than `K` before deduplication. When historical snapshots, repeated synchronization, or content chunks represent the same canonical document, only its highest-ranked occurrence is returned and later unique candidates fill the duplicate slots. The underlying historical records remain unchanged. Canonical identity uses evaluation canonicalization policy v1, including HTTPS/host normalization, fragment and tracking-parameter removal, and trailing-slash normalization.
+Candidate retrieval is bounded but intentionally fetches more than `K` before deduplication. When historical snapshots, repeated synchronization, or content chunks represent the same canonical document, only its highest-ranked occurrence is returned and later unique candidates fill the duplicate slots. The underlying historical records remain unchanged.
+
+Canonical document identity is shared across benchmark retrieval and drift analysis. It uses evaluation canonicalization policy v1, including HTTPS/host normalization, fragment and tracking-parameter removal, and trailing-slash normalization. The resulting canonical URL is hashed into a stable `documentKey` used for document-level comparisons.
 
 Production retrieval no longer stores or reranks with process-local BQ/PQ codes. Existing `binaryCode`, `pqCode`, and `quantizationMethod` properties remain readable for compatibility, but new objects do not populate them. Native Weaviate certainty and distance now describe the same returned ordering.
 
@@ -171,7 +200,7 @@ Embedding reuse follows `small process-local LRU → optional Upstash Redis → 
 
 Set server-only `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enable L2 caching. `EMBEDDING_CACHE_TTL_SECONDS` defaults to seven days. The old Appwrite `embedding_cache` collection is no longer read or written, but is deliberately not deleted. `EMBEDDING_CACHE_DEBUG=true` enables temporary event-level diagnostics with hashed fingerprints and timings; it never logs query text, vectors, credentials, or tokens.
 
-`WEAVIATE_QUANTIZATION=none` is the safe default. `rq-8` explicitly requests Weaviate-native 8-bit rotational quantization with a rescore limit of 20 on HNSW and requires Weaviate 1.32+. Roll out by inspecting the existing collection configuration and server version first, then opting in deliberately. Quantization cannot be disabled or replaced safely in place; the service refuses conflicting quantizers and never recreates the collection. Cache hit statistics and native quantization status are separate—Redis caches provider outputs, while RQ compresses Weaviate's vector index. Judgment and Strategy Lab latency are separate Appwrite batching concerns.
+`WEAVIATE_QUANTIZATION=none` is the safe default. `rq-8` explicitly requests Weaviate-native 8-bit rotational quantization with a rescore limit of 20 on HNSW and requires Weaviate 1.32+. Roll out by inspecting the existing collection configuration and server version first, then opting in deliberately. Quantization cannot be disabled or replaced safely in place; the service refuses conflicting quantizers and never recreates the collection. Cache hit statistics and native quantization status are separate: Redis caches provider outputs, while RQ compresses Weaviate's vector index. Judgment and Strategy Lab latency are separate Appwrite batching concerns.
 
 ### Browser snapshot storage
 
@@ -180,6 +209,19 @@ Full snapshots stay in memory, backed by server storage; only the bounded snapsh
 ## Algorithm Update Detector v2.1
 
 Detector v2.1 identifies coordinated ranking-change candidates whose movement is unusual compared with the category's historical volatility. It observes external ranking behaviour; it cannot prove that Exa or another provider deployed an internal algorithm update. High drift alone is insufficient: enough related queries must move together, and a mature historical baseline must show that the category-wide movement is unusual.
+
+The detector operates on the overall drift signal, while drift decomposition provides supporting evidence about what changed. These are intentionally separate layers:
+
+```text
+Detection
+→ Did coordinated search behaviour become unusual?
+
+Decomposition
+→ What observable result changes contributed to that behaviour?
+
+Evidence
+→ How strong is the evidence that the observed behaviour was unusual?
+```
 
 ```mermaid
 flowchart TD
@@ -215,21 +257,21 @@ Create a ranking-change candidate if coordination also passes.
 
 ### Detector defaults
 
-| Setting | Default |
-| --- | ---: |
-| Affected-query drift-rate threshold | `0.60` |
-| Per-query drift threshold | `30` |
-| Minimum queries in a category | `3` |
-| Correlation window | `24 hours` |
-| Historical lookback | `14 days` before the current window |
-| Minimum historical observations | `10` |
-| Minimum distinct historical queries | `3` |
-| Minimum valid historical windows | `3` |
-| Minimum distinct queries per historical window | `3` |
-| Historical robust-deviation threshold | `2` |
-| Zero-dispersion absolute epsilon | `5` drift points |
-| Fixed-threshold confidence cap | `49` |
-| Change-type dominance ratio | `1.5` |
+| Setting                                        |                             Default |
+| ---------------------------------------------- | ----------------------------------: |
+| Affected-query drift-rate threshold            |                              `0.60` |
+| Per-query drift threshold                      |                                `30` |
+| Minimum queries in a category                  |                                 `3` |
+| Correlation window                             |                          `24 hours` |
+| Historical lookback                            | `14 days` before the current window |
+| Minimum historical observations                |                                `10` |
+| Minimum distinct historical queries            |                                 `3` |
+| Minimum valid historical windows               |                                 `3` |
+| Minimum distinct queries per historical window |                                 `3` |
+| Historical robust-deviation threshold          |                                 `2` |
+| Zero-dispersion absolute epsilon               |                    `5` drift points |
+| Fixed-threshold confidence cap                 |                                `49` |
+| Change-type dominance ratio                    |                               `1.5` |
 
 These are project engineering defaults that require production calibration, not universal search-industry standards. Category-specific overrides also apply where configured.
 
@@ -249,11 +291,11 @@ Content anomalies remain Analytics evidence and do not automatically create noti
 
 Current limitations:
 
-- Baseline-aware detection requires sufficient historical observations, queries, and covered time windows; cold-start candidates remain unverified.
-- Thresholds require calibration, and live-web categories such as news may naturally be more volatile.
-- Query schedules, filters, and `topK` should remain consistent so drift comparisons stay meaningful.
-- The detector finds correlation and abnormal movement, not confirmed causation.
-- Suppressed candidates are not persisted as event records, and the existing UI does not expose every v2.1 evidence field.
+* Baseline-aware detection requires sufficient historical observations, queries, and covered time windows; cold-start candidates remain unverified.
+* Thresholds require calibration, and live-web categories such as news may naturally be more volatile.
+* Query schedules, filters, and `topK` should remain consistent so drift comparisons stay meaningful.
+* The detector finds correlation and abnormal movement, not confirmed causation.
+* Suppressed candidates are not persisted as event records, and the existing UI does not expose every v2.1 evidence field.
 
 Focused verification:
 
@@ -265,7 +307,7 @@ npm run lint
 npm run build
 ```
 
-The last verified project state had 37 passing focused detector tests, 288 passing full-suite tests, zero lint errors with existing warnings, and 47/47 static pages generated. Detection itself runs from scheduled-query processing, not from opening the Analytics UI.
+Detection itself runs from scheduled-query processing, not from opening the Analytics UI.
 
 ## Metric semantics
 
@@ -279,16 +321,16 @@ For server-side embedding diagnostics, set `EMBEDDING_CACHE_DEBUG=true` in your 
 
 AI health reflects recent client-observed API operations, not a continuous database probe. “Not checked” differs from a failed operation, and missing vector inventory is not zero. The separate system-health score is a project heuristic; see [health and timing details](DEVELOPER.md#analytics-health-and-timing-contract).
 
-- `0`: accepted not relevant; `1`: accepted relevant; `2`: accepted highly relevant.
-- **Unjudged is not irrelevant.** Unjudged results occupy ranking positions for nDCG but never become grade 0 truth.
-- **nDCG@K** measures graded ordering quality with gain `2^grade - 1`.
-- **Benchmark Recall@K** is the fraction of known accepted relevant benchmark documents present—not exhaustive web recall.
-- **MRR** uses the first accepted relevant result.
-- **Hit@K** reports whether any accepted relevant result appears in the cutoff.
-- **Judged Precision@K** divides judged relevant results by judged results; unjudged results are excluded from its denominator.
-- **Judgment Coverage@K** reports how much of the evaluated ranking has accepted truth and qualifies interpretation.
-- **Stage Recall** uses the same benchmark-relative truth over one recorded stage; missing stages are not inferred.
-- A **hard-negative candidate** is accepted grade 0 plus high-prominence, persistence, outranking, or stage-survival evidence—not every grade-0 document and not automatically training data.
+* `0`: accepted not relevant; `1`: accepted relevant; `2`: accepted highly relevant.
+* **Unjudged is not irrelevant.** Unjudged results occupy ranking positions for nDCG but never become grade 0 truth.
+* **nDCG@K** measures graded ordering quality with gain `2^grade - 1`.
+* **Benchmark Recall@K** is the fraction of known accepted relevant benchmark documents present, not exhaustive web recall.
+* **MRR** uses the first accepted relevant result.
+* **Hit@K** reports whether any accepted relevant result appears in the cutoff.
+* **Judged Precision@K** divides judged relevant results by judged results; unjudged results are excluded from its denominator.
+* **Judgment Coverage@K** reports how much of the evaluated ranking has accepted truth and qualifies interpretation.
+* **Stage Recall** uses the same benchmark-relative truth over one recorded stage; missing stages are not inferred.
+* A **hard-negative candidate** is accepted grade 0 plus high-prominence, persistence, outranking, or stage-survival evidence, not every grade-0 document and not automatically training data.
 
 ## Screenshots
 
@@ -300,13 +342,13 @@ Evaluation APIs are owner scoped and reject foreign datasets, runs, traces, stra
 
 ## Current limitations
 
-- A live Appwrite project is required for authenticated runtime and infrastructure smoke tests.
-- Strategy outputs may be imported instead of executed natively.
-- Stage diagnosis depends on exactly recorded stages and is descriptive, not causal.
-- Hard-negative analysis depends on accepted human grade-0 judgments.
-- Benchmark Recall is benchmark-relative.
-- Comparisons are descriptive and do not claim statistical significance.
-- Optional semantic/vector/notification paths depend on external provider availability.
+* A live Appwrite project is required for authenticated runtime and infrastructure smoke tests.
+* Strategy outputs may be imported instead of executed natively.
+* Stage diagnosis depends on exactly recorded stages and is descriptive, not causal.
+* Hard-negative analysis depends on accepted human grade-0 judgments.
+* Benchmark Recall is benchmark-relative.
+* Comparisons are descriptive and do not claim statistical significance.
+* Optional semantic/vector/notification paths depend on external provider availability.
 
 ## v1 status
 

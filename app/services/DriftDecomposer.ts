@@ -12,7 +12,11 @@
 
 import { cosineSimilarity } from "@/utils/vector-utils"
 import type { RankingSnapshot, SearchResult } from "@/types/type"
-
+import { getDocumentIdentity } from "@/utils/canonicalize-document-url"
+import { getContentHash } from "@/utils/content-identity"
+function getDocumentKey(result: SearchResult): string {
+  return getDocumentIdentity(result.url).documentKey
+}
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface DecomposedDrift {
@@ -25,7 +29,8 @@ export interface DecomposedDrift {
   competitorDrift: number
 
   // URLs moved positions but their content is unchanged
-  // High rerankDrift = pure algorithmic re-ordering
+  // URLs moved positions while their observed content remained unchanged.
+  // High rerankDrift = observed positional reordering among content-stable URLs.
   rerankDrift: number
 
   // Weighted total (backward-compatible with existing driftScore usage)
@@ -36,24 +41,24 @@ export interface DecomposedDrift {
 
   // Detailed breakdown for UI display
   breakdown: {
-    contentChangedUrls:   string[]  // URLs whose content changed
-    newCompetitorUrls:    string[]  // URLs that newly appeared
-    droppedUrls:          string[]  // URLs that disappeared
-    rerankedUrls:         Array<{
-      url:           string
-      previousRank:  number
-      currentRank:   number
-      delta:         number
+    contentChangedUrls: string[]  // URLs whose content changed
+    newCompetitorUrls: string[]  // URLs that newly appeared
+    droppedUrls: string[]  // URLs that disappeared
+    rerankedUrls: Array<{
+      url: string
+      previousRank: number
+      currentRank: number
+      delta: number
     }>
   }
 }
 
 export interface DecomposeInput {
-  prev:           RankingSnapshot
-  curr:           RankingSnapshot
+  prev: RankingSnapshot
+  curr: RankingSnapshot
   prevEmbeddings: Map<string, number[]>  // contentHash → vector
   currEmbeddings: Map<string, number[]>
-  topN?:          number
+  topN?: number
 }
 
 // ─── Weights ─────────────────────────────────────────────────────────────────
@@ -62,9 +67,9 @@ export interface DecomposeInput {
 // signal (it means your content strategy is misaligned with intent drift).
 
 const WEIGHTS = {
-  content:    0.50,
+  content: 0.50,
   competitor: 0.30,
-  rerank:     0.20,
+  rerank: 0.20,
 }
 
 // ─── DriftDecomposer ─────────────────────────────────────────────────────────
@@ -76,35 +81,52 @@ export class DriftDecomposer {
    * Returns all three typed drift scores + dominant cause + full breakdown.
    */
   static decompose(input: DecomposeInput): DecomposedDrift {
-    const topN        = input.topN ?? 10
+    const topN = input.topN ?? 10
     const prevResults = input.prev.results.slice(0, topN)
     const currResults = input.curr.results.slice(0, topN)
 
-    const prevUrlMap = new Map(prevResults.map(r => [r.url, r]))
-    const currUrlSet = new Set(currResults.map(r => r.url))
+    const prevDocumentMap =
+      new Map(
+        prevResults.map((result) => [
+          getDocumentKey(result),
+          result,
+        ]),
+      )
+
+    const currDocumentKeys =
+      new Set(
+        currResults.map(getDocumentKey),
+      )
 
     const contentChangedUrls: string[] = []
-    const newCompetitorUrls:  string[] = []
-    const droppedUrls:        string[] = []
-    const rerankedUrls:       DecomposedDrift["breakdown"]["rerankedUrls"] = []
+    const newCompetitorUrls: string[] = []
+    const droppedUrls: string[] = []
+    const rerankedUrls: DecomposedDrift["breakdown"]["rerankedUrls"] = []
 
-    let contentDriftTotal    = 0
+    let contentDriftTotal = 0
     let competitorDriftTotal = 0
-    let rerankDriftTotal     = 0
+    let rerankDriftTotal = 0
 
     // ── Iterate current results ─────────────────────────────────────────────
     for (let ci = 0; ci < currResults.length; ci++) {
       const currR = currResults[ci]
-      const prevR = prevUrlMap.get(currR.url)
+      const prevR =
+        prevDocumentMap.get(
+          getDocumentKey(currR),
+        )
       const weight = 1 - ci / topN  // top results weighted more heavily
 
       if (prevR) {
         // URL exists in both snapshots
-        const prevHash = prevR.contentHash  ?? ""
-        const currHash = currR.contentHash  ?? ""
+        const prevHash = getContentHash(prevR)
+        const currHash = getContentHash(currR)
         const contentChanged = prevHash !== currHash && prevHash !== "" && currHash !== ""
 
-        const pi = prevResults.findIndex(r => r.url === currR.url)
+        const pi = prevResults.findIndex(
+          (r) =>
+            getDocumentKey(r) ===
+            getDocumentKey(currR),
+        )
         const positionDelta = Math.abs(pi - ci)
 
         if (contentChanged) {
@@ -122,13 +144,14 @@ export class DriftDecomposer {
 
         if (positionDelta > 0) {
           if (!contentChanged) {
-            // RERANK DRIFT — position changed, content same = pure algo signal
+            // OBSERVED RANKING REORDERING — position changed while
+            // content remained unchanged.
             rerankDriftTotal += (positionDelta / topN) * weight * 100
             rerankedUrls.push({
-              url:          currR.url,
+              url: currR.url,
               previousRank: pi + 1,
-              currentRank:  ci + 1,
-              delta:        ci - pi,  // positive = fell, negative = rose
+              currentRank: ci + 1,
+              delta: ci - pi,  // positive = fell, negative = rose
             })
           }
           // (if content also changed, that contribution is already in contentDrift)
@@ -142,11 +165,15 @@ export class DriftDecomposer {
 
     // ── Dropped URLs ────────────────────────────────────────────────────────
     for (const prevR of prevResults) {
-      if (!currUrlSet.has(prevR.url)) {
+      if (!currDocumentKeys.has(getDocumentKey(prevR))) {
         droppedUrls.push(prevR.url)
         // Dropped results also contribute to competitor drift
         // (something pushed them out)
-        const pi     = prevResults.findIndex(r => r.url === prevR.url)
+        const pi = prevResults.findIndex(
+          (r) =>
+            getDocumentKey(r) ===
+            getDocumentKey(prevR),
+        )
         const weight = 1 - pi / topN
         competitorDriftTotal += weight * 30  // lower penalty than new entrant
       }
@@ -154,15 +181,15 @@ export class DriftDecomposer {
 
     // ── Normalize to 0-100 ──────────────────────────────────────────────────
     const normalize = (v: number) => Math.min(100, Math.max(0, v))
-    const contentDrift    = normalize(contentDriftTotal)
+    const contentDrift = normalize(contentDriftTotal)
     const competitorDrift = normalize(competitorDriftTotal)
-    const rerankDrift     = normalize(rerankDriftTotal)
+    const rerankDrift = normalize(rerankDriftTotal)
 
     // Weighted total — backward-compatible replacement for the old driftScore
     const total = normalize(
-      contentDrift    * WEIGHTS.content    +
+      contentDrift * WEIGHTS.content +
       competitorDrift * WEIGHTS.competitor +
-      rerankDrift     * WEIGHTS.rerank
+      rerankDrift * WEIGHTS.rerank
     )
 
     // ── Dominant cause ──────────────────────────────────────────────────────
@@ -190,23 +217,31 @@ export class DriftDecomposer {
    * Returns per-type averages and the overall dominant cause.
    */
   static aggregateTimeline(points: DecomposedDrift[]): {
-    avgContentDrift:    number
+    avgContentDrift: number
     avgCompetitorDrift: number
-    avgRerankDrift:     number
-    dominantCause:      DecomposedDrift["dominantCause"]
+    avgRerankDrift: number
+    dominantCause: DecomposedDrift["dominantCause"]
   } {
     if (points.length === 0) {
       return { avgContentDrift: 0, avgCompetitorDrift: 0, avgRerankDrift: 0, dominantCause: "stable" }
     }
 
-    const avgContentDrift    = points.reduce((s, p) => s + p.contentDrift,    0) / points.length
+    const avgContentDrift = points.reduce((s, p) => s + p.contentDrift, 0) / points.length
     const avgCompetitorDrift = points.reduce((s, p) => s + p.competitorDrift, 0) / points.length
-    const avgRerankDrift     = points.reduce((s, p) => s + p.rerankDrift,     0) / points.length
+    const avgRerankDrift = points.reduce((s, p) => s + p.rerankDrift, 0) / points.length
 
-    const dominantCause = DriftDecomposer.computeDominantCause(
-      avgContentDrift, avgCompetitorDrift, avgRerankDrift,
-      (avgContentDrift + avgCompetitorDrift + avgRerankDrift) / 3
-    )
+    const aggregateTotal =
+      avgContentDrift * WEIGHTS.content +
+      avgCompetitorDrift * WEIGHTS.competitor +
+      avgRerankDrift * WEIGHTS.rerank
+
+    const dominantCause =
+      DriftDecomposer.computeDominantCause(
+        avgContentDrift,
+        avgCompetitorDrift,
+        avgRerankDrift,
+        aggregateTotal,
+      )
 
     return { avgContentDrift, avgCompetitorDrift, avgRerankDrift, dominantCause }
   }
@@ -214,21 +249,51 @@ export class DriftDecomposer {
   // ── Helper ────────────────────────────────────────────────────────────────
 
   private static computeDominantCause(
-    content:    number,
+    content: number,
     competitor: number,
-    rerank:     number,
-    total:      number
+    rerank: number,
+    total: number
   ): DecomposedDrift["dominantCause"] {
     if (total < 10) return "stable"
 
-    const max = Math.max(content, competitor, rerank)
-    const threshold = 0.5 * (content + competitor + rerank)
+    const max = Math.max(
+      content,
+      competitor,
+      rerank,
+    )
 
-    // "mixed" if no single type contributes more than 50%
-    if (max < threshold) return "mixed"
+    const sum =
+      content +
+      competitor +
+      rerank
 
-    if (max === content)    return "content"
-    if (max === competitor) return "competitor"
+    if (sum === 0) {
+      return "stable"
+    }
+
+    const threshold = 0.5 * sum
+
+    if (max < threshold) {
+      return "mixed"
+    }
+
+    const maxCount =
+      [content, competitor, rerank].filter(
+        (value) => value === max,
+      ).length
+
+    if (maxCount > 1) {
+      return "mixed"
+    }
+
+    if (max === content) {
+      return "content"
+    }
+
+    if (max === competitor) {
+      return "competitor"
+    }
+
     return "rerank"
   }
 }
