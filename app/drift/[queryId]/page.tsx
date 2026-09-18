@@ -248,7 +248,7 @@ export default function QueryDriftPage({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {(driftResult.driftTimeline?.length || 0) + 1}
+              {snapshots.length}
             </div>
             <p className="text-xs text-gray-500 mt-1">Total snapshots in analysis</p>
           </CardContent>
@@ -258,7 +258,7 @@ export default function QueryDriftPage({
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
               <Hash className="w-4 h-4" />
-              Content Changes
+Content Changes Detected
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -329,24 +329,6 @@ export default function QueryDriftPage({
                 <p className="text-xs text-gray-500 mt-1">Overall query stability</p>
               </div>
             </div>
-
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-amber-50">
-                <Hash className="w-5 h-5 text-amber-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">Content Efficiency</p>
-                <p className="text-2xl font-bold text-amber-600">
-                  {(driftResult.totalResultsCompared ?? 0) === 0
-                    ? "100%"
-                    : `${Math.min(100, Math.max(0,
-                        (((driftResult.totalResultsCompared ?? 0) - (driftResult.totalContentChanges || 0))
-                          / (driftResult.totalResultsCompared ?? 1)) * 100
-                      )).toFixed(0)}%`}
-                </p>
-                <p className="text-xs text-gray-500">Unchanged content ratio</p>
-              </div>
-            </div>
           </div>
 
           {/* Content Stability */}
@@ -361,7 +343,7 @@ export default function QueryDriftPage({
                   {(driftResult.contentStabilityRate * 100).toFixed(1)}%
                 </p>
                 <p className="text-xs text-gray-500">
-                  Results with identical content between snapshots
+Matched results whose content remained unchanged
                 </p>
               </div>
             </div>
@@ -413,7 +395,7 @@ export default function QueryDriftPage({
         />
       )}
 
-      {/* ✅ FIX: CoverageGapChart now receives real `snapshots` state
+      {/*  FIX: CoverageGapChart now receives real `snapshots` state
           instead of an undefined variable `snapshots` — the previous
           version caused ReferenceError: snapshots is not defined which
           surfaced as the "Real-time Connection Issue / embeddingMode is
@@ -438,7 +420,7 @@ export default function QueryDriftPage({
               <p>
                 <strong>Timeline Analysis:</strong>{" "}
                 {driftResult.driftTimeline.length} drift comparisons completed.{" "}
-                Content changes detected in {driftResult.totalContentChanges || 0} snapshots.{" "}
+                {driftResult.totalContentChanges || 0} result-level content changes detected across comparisons.
                 Average cache hit rate:{" "}
                 {((driftResult.averageCacheHitRate || 0) * 100).toFixed(1)}%
               </p>
@@ -462,7 +444,7 @@ export default function QueryDriftPage({
               <ul className="text-sm text-gray-600 space-y-2">
                 <li className="flex items-center gap-2">
                   <span className="w-2 h-2 bg-blue-500 rounded-full" />
-                  {driftResult.totalContentChanges || 0} content modifications via SHA-256 hashing
+                  {driftResult.totalContentChanges || 0} result-level content changes detected via content hashing
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-2 h-2 bg-green-500 rounded-full" />
@@ -491,7 +473,7 @@ export default function QueryDriftPage({
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-2 h-2 bg-purple-500 rounded-full" />
-                  Smart caching reduces computation by up to 80% for unchanged content
+                  Smart caching avoids repeated embedding computation for unchanged content
                 </li>
               </ul>
             </div>

@@ -1,4 +1,3 @@
-// app/api/drift/[queryid]/route.ts
 import { type NextRequest, NextResponse } from "next/server";
 import { databaseService } from "@/app/services/database/database-service";
 import { analyzeDrift } from "@/app/logic/driftAnalyzer";
@@ -11,49 +10,81 @@ async function getSingleDriftHandler(
   context: SecurityContext,
   routeParams: { params: Promise<{ queryid: string }> }
 ) {
-  //  Captured outside try/catch so the catch block can log the real
-  //    queryid instead of an unresolved Promise (was: console.error(...,
-  //    routeParams.params) — logged "[object Promise]" on any error,
-  //    since the destructure previously only happened inside the try).
   let queryid = "unknown";
 
   try {
     const params = await routeParams.params;
     queryid = params.queryid;
+
     const userId = context.user.$id;
 
     if (!queryid?.trim()) {
-      return NextResponse.json({ error: "Invalid query ID" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid query ID" },
+        { status: 400 }
+      );
     }
 
-    console.log(`[Drift API] Single query analysis for: ${queryid}, user: ${userId}`);
+    console.log(
+      `[Drift API] Single query analysis for: ${queryid}, user: ${userId}`
+    );
 
-    //  Renamed from `startTime` to `routeStartTime` to make the distinction
-    //    explicit: this measures the ENTIRE request (auth + DB fetch +
-    //    analysis), not just the drift computation itself.
+    // Measures the entire API request.
     const routeStartTime = performance.now();
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Load query
+    // ─────────────────────────────────────────────────────────────────────
+
     const queryLoadStartedAt = performance.now();
+
     const query = await databaseService.queryService.getQuery(queryid);
+
     const queryLoadMs = performance.now() - queryLoadStartedAt;
+
     if (!query) {
-      return NextResponse.json({
-        error: "Query not found",
-        queryId: queryid
-      }, { status: 404 });
+      return NextResponse.json(
+        {
+          error: "Query not found",
+          queryId: queryid,
+        },
+        { status: 404 }
+      );
     }
 
     if (query.userId !== userId) {
-      console.warn(`[Drift API] Unauthorized access attempt: user ${userId} tried to access query ${queryid} owned by ${query.userId}`);
-      return NextResponse.json({
-        error: "Access denied - you don't own this query"
-      }, { status: 403 });
+      console.warn(
+        `[Drift API] Unauthorized access attempt: user ${userId} ` +
+        `tried to access query ${queryid} owned by ${query.userId}`
+      );
+
+      return NextResponse.json(
+        {
+          error: "Access denied - you don't own this query",
+        },
+        { status: 403 }
+      );
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Load snapshots
+    // ─────────────────────────────────────────────────────────────────────
+
     const snapshotFetchStartedAt = performance.now();
-    const snapshots = await databaseService.snapshotService.getSnapshots(queryid, userId);
-    const snapshotFetchMs = performance.now() - snapshotFetchStartedAt;
-    console.log(`[Drift API] Found ${snapshots.length} snapshots for query ${queryid}`);
+
+    const snapshots =
+      await databaseService.snapshotService.getSnapshots(queryid, userId);
+
+    const snapshotFetchMs =
+      performance.now() - snapshotFetchStartedAt;
+
+    console.log(
+      `[Drift API] Found ${snapshots.length} snapshots for query ${queryid}`
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Not enough data for a comparison
+    // ─────────────────────────────────────────────────────────────────────
 
     if (snapshots.length < 2) {
       return NextResponse.json({
@@ -63,87 +94,191 @@ async function getSingleDriftHandler(
         averageDrift: 0,
         maxDrift: 0,
         latestDrift: 0,
-        stability: 'stable' as const,
-        driftTrend: 'stable' as const,
+        stability: "stable" as const,
+        driftTrend: "stable" as const,
         totalContentChanges: 0,
         averageCacheHitRate: 0,
         totalResultsCompared: 0,
         contentStabilityRate: 0,
         totalProcessingTime: 0,
+        routeProcessingTime: performance.now() - routeStartTime,
         metadata: {
           snapshotsAnalyzed: snapshots.length,
-          processingTime: 0,
+          processingTime: performance.now() - routeStartTime,
           timestamp: new Date().toISOString(),
-          message: `Insufficient snapshots: found ${snapshots.length}, need at least 2 for drift analysis`
-        }
+          message:
+            `Insufficient snapshots: found ${snapshots.length}, ` +
+            `need at least 2 for drift analysis`,
+        },
       });
     }
 
-    // analyzeDrift() returns its OWN totalProcessingTime — pure computation
-    // time (embedding calls + comparison math), excluding auth/DB latency.
+    // ─────────────────────────────────────────────────────────────────────
+    // Drift analysis + cache metrics
+    // ─────────────────────────────────────────────────────────────────────
+
     const cacheBefore = getEmbeddingService().cacheStats;
+
+    // Start BEFORE analyzeDrift(), not after it.
     const driftStartedAt = performance.now();
-    const driftResult = await analyzeDrift(queryid, query.name, snapshots);
-    const driftCalculationMs = performance.now() - driftStartedAt;
+
+    const driftResult = await analyzeDrift(
+      queryid,
+      query.name,
+      snapshots
+    );
+
+    const driftCalculationMs =
+      performance.now() - driftStartedAt;
+
     const cacheAfter = getEmbeddingService().cacheStats;
 
-    //  Route-level wall-clock time — includes auth, DB fetch, everything.
-    //    Kept SEPARATE from driftResult.totalProcessingTime instead of
-    //    overwriting it. Previously: `totalProcessingTime: processingTime`
-    //    silently replaced analyzeDrift's own (more precise, narrower)
-    //    measurement with this broader one — collapsing two different
-    //    timings into one field, which is likely why processing time
-    //    appeared to jump ~250x between requests (one reflected a cached
-    //    fast-path drift computation alone; the other reflected full
-    //    request latency including Appwrite + cold Gemini calls).
-    const routeProcessingTime = performance.now() - routeStartTime;
+    // ─────────────────────────────────────────────────────────────────────
+    // Per-request embedding cache hit rate
+    //
+    // Hits = L1 hits + Redis hits
+    // Lookups = L1 hits + Redis hits + misses
+    // ─────────────────────────────────────────────────────────────────────
+
+    const l1Hits =
+      cacheAfter.l1Hits - cacheBefore.l1Hits;
+
+    const redisHits =
+      cacheAfter.redisHits - cacheBefore.redisHits;
+
+    const cacheMisses =
+     cacheAfter.totalMisses - cacheBefore.totalMisses;
+
+    const cacheHits = l1Hits + redisHits;
+
+    const cacheLookups =
+      cacheHits + cacheMisses;
+
+    const requestCacheHitRate =
+      cacheLookups > 0
+        ? cacheHits / cacheLookups
+        : 0;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Full route timing
+    // ─────────────────────────────────────────────────────────────────────
+
+    const routeProcessingTime =
+      performance.now() - routeStartTime;
 
     console.log(
       `[Drift API] Single query analysis completed — ` +
       `drift computation: ${driftResult.totalProcessingTime.toFixed(2)}ms, ` +
-      `full request: ${routeProcessingTime.toFixed(2)}ms`
+      `measured drift wall time: ${driftCalculationMs.toFixed(2)}ms, ` +
+      `full request: ${routeProcessingTime.toFixed(2)}ms, ` +
+      `cache hit rate: ${(requestCacheHitRate * 100).toFixed(1)}%`
     );
-    if (process.env.PERFORMANCE_DEBUG === "true") console.info("[Drift API] Single-query timing (approximate process deltas)", {
-      queryId: queryid,
-      queryLoadMs: Math.round(queryLoadMs),
-      snapshotFetchMs: Math.round(snapshotFetchMs),
-      driftCalculationMs: Math.round(driftCalculationMs),
-      totalMs: Math.round(routeProcessingTime),
-      embeddingRequests: cacheAfter.totalRequests - cacheBefore.totalRequests,
-      embeddingKeyLookups: cacheAfter.embeddingKeyLookups - cacheBefore.embeddingKeyLookups,
-      l1Hits: cacheAfter.l1Hits - cacheBefore.l1Hits,
-      redisHits: cacheAfter.redisHits - cacheBefore.redisHits,
-      cacheMisses: cacheAfter.totalMisses - cacheBefore.totalMisses,
-      providerLoadOperations: cacheAfter.providerLoadOperations - cacheBefore.providerLoadOperations,
-      providerInputs: cacheAfter.providerInputs - cacheBefore.providerInputs,
-      inflightHits: cacheAfter.inflightHits - cacheBefore.inflightHits,
-      redisFailures: cacheAfter.redisFailures - cacheBefore.redisFailures,
-    });
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Performance diagnostics
+    // ─────────────────────────────────────────────────────────────────────
+
+    if (process.env.PERFORMANCE_DEBUG === "true") {
+      console.info(
+        "[Drift API] Single-query timing",
+        {
+          queryId: queryid,
+
+          queryLoadMs: Math.round(queryLoadMs),
+
+          snapshotFetchMs: Math.round(snapshotFetchMs),
+
+          driftCalculationMs: Math.round(driftCalculationMs),
+
+          analyzeDriftReportedMs: Math.round(
+            driftResult.totalProcessingTime
+          ),
+
+          totalMs: Math.round(routeProcessingTime),
+
+          embeddingRequests:
+            cacheAfter.totalRequests -
+            cacheBefore.totalRequests,
+
+          embeddingKeyLookups:
+            cacheAfter.embeddingKeyLookups -
+            cacheBefore.embeddingKeyLookups,
+
+          l1Hits,
+
+          redisHits,
+
+          cacheMisses,
+
+          cacheHits,
+
+          cacheLookups,
+
+          requestCacheHitRate: Number(
+            requestCacheHitRate.toFixed(4)
+          ),
+
+          providerLoadOperations:
+            cacheAfter.providerLoadOperations -
+            cacheBefore.providerLoadOperations,
+
+          providerInputs:
+            cacheAfter.providerInputs -
+            cacheBefore.providerInputs,
+
+          inflightHits:
+            cacheAfter.inflightHits -
+            cacheBefore.inflightHits,
+
+          redisFailures:
+            cacheAfter.redisFailures -
+            cacheBefore.redisFailures,
+        }
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Response
+    // ─────────────────────────────────────────────────────────────────────
 
     return NextResponse.json({
       ...driftResult,
-      //  driftResult.totalProcessingTime is preserved as-is (drift
-      //    computation only). routeProcessingTime is added under its own
-      //    field name so the client can show either figure, or both.
+
+      // Per-request cache metric.
+      // This replaces the global L1 cache hit rate returned by analyzeDrift.
+      averageCacheHitRate: requestCacheHitRate,
+
+      // Full HTTP request timing.
       routeProcessingTime,
+
       metadata: {
         snapshotsAnalyzed: snapshots.length,
-        processingTime: routeProcessingTime,
-        timestamp: new Date().toISOString(),
-        queryId: queryid,
-        userId: userId,
-      }
-    });
 
+        processingTime: routeProcessingTime,
+
+        timestamp: new Date().toISOString(),
+
+        queryId: queryid,
+
+        userId,
+      },
+    });
   } catch (error) {
-    //  Logs the actual queryid string, not an unresolved Promise object.
-    console.error(`[Drift API] Failed to analyze drift for query ${queryid}:`, error);
+    console.error(
+      `[Drift API] Failed to analyze drift for query ${queryid}:`,
+      error
+    );
+
     return NextResponse.json(
       {
         error: "Failed to analyze drift for query",
-        details: process.env.NODE_ENV === 'development' ?
-          (error instanceof Error ? error.message : "Unknown error") :
-          undefined
+
+        details:
+          process.env.NODE_ENV === "development"
+            ? error instanceof Error
+              ? error.message
+              : "Unknown error"
+            : undefined,
       },
       { status: 500 }
     );
@@ -155,6 +290,8 @@ export const GET = withEnhancedSecurity(getSingleDriftHandler, {
     windowMs: 60 * 1000,
     maxRequests: 30,
   },
-  allowedMethods: ['GET'],
+
+  allowedMethods: ["GET"],
+
   logAttempts: true,
 });

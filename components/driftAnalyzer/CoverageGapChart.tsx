@@ -90,15 +90,17 @@ export function CoverageGapChart({ snapshots, queryName }: CoverageGapChartProps
       <Card>
         <CardHeader>
           <CardTitle className="text-gray-900">Result Coverage Gap</CardTitle>
-          <CardDescription>Tracking how many results Exa returns vs what was requested</CardDescription>
+          <CardDescription>
+  Tracking returned results against the requested result count
+</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-10 text-gray-500">
             <CheckCircle className="h-10 w-10 text-gray-300 mb-3" />
             <p className="text-sm">No coverage data yet</p>
             <p className="text-xs mt-1 text-gray-400">
-              Coverage tracking requires snapshots captured after the latest update
-            </p>
+  Coverage data appears after ranking runs with requested and returned result counts
+</p>
           </div>
         </CardContent>
       </Card>
@@ -112,7 +114,7 @@ export function CoverageGapChart({ snapshots, queryName }: CoverageGapChartProps
           <div>
             <CardTitle className="text-gray-900">Result Coverage Gap</CardTitle>
             <CardDescription>
-              How many results Exa returned vs requested over time — "{queryName}"
+             How returned results compare with the requested count over time for "{queryName}"
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -225,20 +227,20 @@ export function CoverageGapChart({ snapshots, queryName }: CoverageGapChartProps
         <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-600">
           {trend.trend === "worsening" ? (
             <span>
-              <span className="text-red-600 font-medium">Coverage declining.</span>{" "}
-              Exa is returning fewer results for this query over time — the topic may be becoming less
-              indexed or the query is too narrow for the current result pool.
-            </span>
+  <span className="text-red-600 font-medium">Coverage declining.</span>{" "}
+  Fewer results are being returned for this query over the observed runs.
+  This can reflect changes in retrieval coverage or result availability.
+</span>
           ) : trend.trend === "improving" ? (
             <span>
-              <span className="text-green-600 font-medium">Coverage improving.</span>{" "}
-              Exa is returning more results for this query over time — broader topic coverage or index growth.
-            </span>
+  <span className="text-green-600 font-medium">Coverage improving.</span>{" "}
+  More results are being returned for this query over the observed runs.
+</span>
           ) : (
             <span>
-              <span className="text-blue-600 font-medium">Coverage stable.</span>{" "}
-              Exa consistently returns a similar number of results — no significant index changes for this query.
-            </span>
+  <span className="text-blue-600 font-medium">Coverage stable.</span>{" "}
+  The returned result count has remained similar across the observed runs.
+</span>
           )}
         </div>
       </CardContent>

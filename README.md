@@ -59,7 +59,7 @@ The overall `driftScore` measures search-result change magnitude. Decomposed sig
 ```text
 overall drift
 ├── content drift
-├── competitor / result-set turnover
+├── SERP / result-set turnover
 └── rerank drift
 ```
 

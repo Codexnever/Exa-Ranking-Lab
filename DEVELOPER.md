@@ -269,19 +269,26 @@ Dropped penalty:  +3 per dropped URL
 driftScore = min(100, totalDrift / (topN × 15) × 100)
 ```
 
-### Drift decomposition (DriftDecomposer)
+## Drift decomposition
 
-```
-contentDrift    — URL stayed, content changed semantically
-                  (same URL, prevHash ≠ currHash, sim dropped)
-competitorDrift — new URL entered the SERP
-                  (URL not in previous snapshot)
-rerankDrift     — position moved, content unchanged
-                  (same URL, same hash, different position)
+`DriftDecomposer.decompose()` separates pairwise ranking changes into three
+observed signals.
 
-dominantCause   — whichever type contributes >50% of total
-                  or "mixed" if no single type dominates
-```
+### 1. Content drift
+
+Content drift measures semantic change for documents that exist in both
+snapshots.
+
+```text
+same canonical document
+        ↓
+content hash changed
+        ↓
+compare previous/current embeddings
+        ↓
+semantic similarity decreases
+        ↓
+contentDrift
 
 ### Algorithm Update Detector v2.1
 
