@@ -24,7 +24,7 @@ jobs:
             --max-time 120 \
             -w "\n%{http_code}" \
             -X GET \
-            "${APP_URL}/api/cron/process-scheduled" \
+            "http://localhost:3000/api/cron/process-scheduled" \
             -H "Authorization: Bearer ${CRON_SECRET}")
 
           http_code=$(echo "$response" | tail -n1)
