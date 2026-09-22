@@ -2,44 +2,34 @@ name: Process Scheduled Queries
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # Off round numbers (not :00/:30) so this isn't queued behind every other
+    # repo's cron jobs that fire on the popular times.
+    - cron: "7,37 * * * *"
   workflow_dispatch: {}
 
 jobs:
-  trigger:
+  process:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # GitHub Actions' own ceiling for this job — adjust as needed
 
     steps:
-      - name: Call process-scheduled endpoint
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scheduled query processing
         env:
-          APP_URL: ${{ secrets.APP_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-
-        run: |
-          set -euo pipefail
-
-          response=$(curl \
-            --silent \
-            --show-error \
-            --max-time 120 \
-            -w "\n%{http_code}" \
-            -X GET \
-            "${APP_URL}/api/cron/process-scheduled" \
-            -H "Authorization: Bearer ${CRON_SECRET}")
-
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
-
-          echo "HTTP status: $http_code"
-          echo "Response body:"
-
-          if echo "$body" | jq . 2>/dev/null; then
-            true
-          else
-            echo "$body"
-          fi
-
-          if [ "$http_code" -ge 400 ]; then
-            echo "::error::Request failed with status $http_code"
-            exit 1
-          fi
+          # Rename these to whatever your services actually read from
+          # process.env — check appwrite-server.ts, weaviate-service.ts, etc.
+          NEXT_PUBLIC_APPWRITE_ENDPOINT: ${{ secrets.NEXT_PUBLIC_APPWRITE_ENDPOINT }}
+          NEXT_PUBLIC_APPWRITE_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_APPWRITE_PROJECT_ID }}
+          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
+          WEAVIATE_URL: ${{ secrets.WEAVIATE_URL }}
+          WEAVIATE_API_KEY: ${{ secrets.WEAVIATE_API_KEY }}
+        run: npx tsx scripts/process-scheduled.ts

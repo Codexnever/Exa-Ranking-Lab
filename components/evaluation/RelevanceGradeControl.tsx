@@ -13,8 +13,10 @@ export const RELEVANCE_GRADES=[
 export function RelevanceGradeControl({value,onChange,disabled=false}:{value?:RelevanceGrade;onChange:(grade:RelevanceGrade)=>void;disabled?:boolean}){
   return <div role="radiogroup" aria-label="Relevance grade" className="flex flex-wrap gap-2">
     {RELEVANCE_GRADES.map(item=>
-    <Button key={item.grade} type="button" role="radio"
-    aria-checked={value===item.grade} disabled={disabled}
+    <Button key={item.grade} 
+    type="button" role="radio"
+    aria-checked={value===item.grade} 
+    disabled={disabled}
     variant={value===item.grade?"default":"outline"}
     size="sm" onClick={()=>onChange(item.grade)}
     className={cn("justify-start",value===item.grade&&"ring-2 ring-blue-300")}>

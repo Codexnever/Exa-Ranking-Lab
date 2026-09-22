@@ -121,7 +121,7 @@ async function executeOneQuery(
     })
 
     const { responseTime, searchTime } = exaResults
-    console.log(`[Cron:Query] ✅ Exa returned ${exaResults?.results?.length ?? 0} results for "${query.name}" in ${searchTime ?? responseTime}ms`)
+    console.log(`[Cron:Query]  Exa returned ${exaResults?.results?.length ?? 0} results for "${query.name}" in ${searchTime ?? responseTime}ms`)
 
     const mappedResults: SearchResult[] = (exaResults?.results ?? []).map((r: any, idx: number) => {
       const title    = r.title   ?? ""
@@ -163,7 +163,7 @@ async function executeOneQuery(
         responseTime:   searchTime ?? responseTime,
         executedAt:     new Date().toISOString(),
         executionType:  "scheduled",
-        source:         "cron_scheduler",
+        source:         "github_actions_cron",
         configHash,
         numRequested:   coverageGap.numRequested,
         numReturned:    coverageGap.numReturned,
@@ -174,7 +174,7 @@ async function executeOneQuery(
       timestamp: new Date(),
     })
 
-    console.log(`[Cron:Query] ✅ Snapshot created: ${snapshot.id} for "${query.name}"`)
+    console.log(`[Cron:Query] Snapshot created: ${snapshot.id} for "${query.name}"`)
 
     // Weaviate sync — fire-and-forget
     getWeaviateService()
@@ -182,11 +182,11 @@ async function executeOneQuery(
         console.log(`[Cron:Weaviate] Syncing snapshot ${snapshot.id} for "${query.name}"`)
         return w.initialize().then(() => w.syncSnapshot(snapshot))
       })
-      .then(() => console.log(`[Cron:Weaviate] ✅ Sync complete for "${query.name}"`))
+      .then(() => console.log(`[Cron:Weaviate]  Sync complete for "${query.name}"`))
       .catch(err => console.error(`[Cron:Weaviate] ❌ Sync failed for "${query.name}": ${formatError(err)}`))
 
     await databaseService.queryService.updateQuery(query.id, { lastRun: new Date() })
-    console.log(`[Cron:Query] ✅ Updated lastRun for "${query.name}"`)
+    console.log(`[Cron:Query]  Updated lastRun for "${query.name}"`)
 
     return { queryId: query.id, userId: query.userId, status: "success", snapshotId: snapshot.id }
 
@@ -215,10 +215,10 @@ async function handler(request: NextRequest) {
 
   // ── STEP 2: Auth check ────────────────────────────────────────────────────
   if (!isAuthorized(request)) {
-    console.error(`[Cron] ❌ Unauthorized — returning 401`)
+    console.error(`[Cron]  Unauthorized — returning 401`)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  console.log(`[Cron] ✅ Authorization passed`)
+  console.log(`[Cron]  Authorization passed`)
 
   try {
     // ── STEP 3: Fetch all scheduled queries ──────────────────────────────────
@@ -286,7 +286,7 @@ async function handler(request: NextRequest) {
       )
       const key = (settingsRes?.documents?.[0]?.apiKey as string | undefined) ?? null
       if (key) {
-        console.log(`[Cron] ✅ API key found for userId=${userId}`)
+        console.log(`[Cron]  API key found for userId=${userId}`)
       } else {
         console.warn(`[Cron] ⚠️  No API key found for userId=${userId} — queries will be skipped`)
       }
@@ -327,7 +327,7 @@ async function handler(request: NextRequest) {
         if (r.status === "fulfilled") {
           results.push(r.value)
           if (r.value.status === "success") {
-            console.log(`[Cron] ✅ Batch result: "${r.value.queryId}" succeeded → snapshot ${r.value.snapshotId}`)
+            console.log(`[Cron]  Batch result: "${r.value.queryId}" succeeded → snapshot ${r.value.snapshotId}`)
           } else {
             console.log(`[Cron] ⚠️  Batch result: "${r.value.queryId}" ${r.value.status}${r.value.error ? ` — ${r.value.error}` : ""}`)
           }
@@ -418,7 +418,7 @@ async function handler(request: NextRequest) {
             console.log(`[Cron:PostProcess]   • ${e.category} — ${e.severity} (${Math.round(e.metrics.driftRate * 100)}% drift rate, avg score ${e.metrics.avgDriftScore.toFixed(1)}, ${e.confidence.score}% confidence)`)
           )
           await algorithmUpdateDetector.persistEvents(userId, updateEvents)
-          console.log(`[Cron:PostProcess] ✅ Persisted ${updateEvents.length} algorithm update event(s)`)
+          console.log(`[Cron:PostProcess]  Persisted ${updateEvents.length} algorithm update event(s)`)
         }
 
       }).catch((err: unknown) => {

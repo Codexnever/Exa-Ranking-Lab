@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, BarChart3, Copy, Loader2, Lock, Save, Plus } from "lucide-react";
 import Link from "next/link";
@@ -64,6 +64,7 @@ export default function EvaluationWorkspace() {
   const [stageDiagnosis, setStageDiagnosis] = useState<StageDiagnosisResult>();
   const [hardNegatives, setHardNegatives] = useState<HardNegativeResult>();
   const [judgmentData, setJudgmentData] = useState<EvaluationQueryJudgments>();
+ 
   const [queryProgress, setQueryProgress] = useState<
     Record<string, { accepted: number; conflicted: number }>
   >({});
@@ -75,38 +76,77 @@ export default function EvaluationWorkspace() {
   const selectedQuery = detail?.queries.find(q => q.id === selectedQueryId);
   const selectedSnapshot = snapshots.find(s => s.id === selectedSnapshotId);
   const frozen = detail?.dataset.status === "frozen";
-  const refresh = useCallback(async () => {
-    setError("");
-    try {
-      const value = await evaluationApi.detail(id);
-      setDetail(value);
-      const summaries = await Promise.all(
-        value.queries.map(async q => (await evaluationApi.judgments(id, q.id)).summary),
-      );
-      setQueryProgress(
-        Object.fromEntries(
-          value.queries.map((q, index) => [
-            q.id,
-            { accepted: summaries[index].accepted, conflicted: summaries[index].conflicted },
-          ]),
-        ),
-      );
-      if (!selectedQueryId && value.queries[0]) setSelectedQueryId(value.queries[0].id);
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [id, selectedQueryId]);
+
+  // FIX (double-fetch on mount):
+  // Previously `refresh` had `selectedQueryId` in its dependency array, and read it
+  // to decide whether to set the initial selection. On first mount, `selectedQueryId`
+  // was "" → refresh() ran → it set `selectedQueryId` for the first time → that state
+  // change gave `refresh` a brand-new function identity (since it depended on
+  // `selectedQueryId`) → the `useEffect([refresh])` below saw a new `refresh` and
+  // fired a second time → the whole detail + judgments fetch ran twice on every
+  // mount. Using a functional state update (`current => current || ...`) means we
+  // never need to *read* `selectedQueryId` inside `refresh`, so `refresh` now only
+  // depends on `id` and its identity is stable across the initial selection being set.
+  const refresh = useCallback(
+    async (isStale?: () => boolean) => {
+      setError("");
+      try {
+        const value = await evaluationApi.detail(id);
+        // FIX (stale-response race): if the user has already navigated to a
+        // different dataset (or this effect was cleaned up) while this request was
+        // in flight, bail out instead of applying an out-of-date response.
+        if (isStale?.()) return;
+        setDetail(value);
+        const summaries = await Promise.all(
+          value.queries.map(async q => (await evaluationApi.judgments(id, q.id)).summary),
+        );
+        if (isStale?.()) return;
+        setQueryProgress(
+          Object.fromEntries(
+            value.queries.map((q, index) => [
+              q.id,
+              { accepted: summaries[index].accepted, conflicted: summaries[index].conflicted },
+            ]),
+          ),
+        );
+        setSelectedQueryId(current => current || value.queries[0]?.id || "");
+      } catch (e) {
+        if (!isStale?.()) setError(message(e));
+      } finally {
+        if (!isStale?.()) setLoading(false);
+      }
+    },
+    [id],
+  );
+
   useEffect(() => {
-    refresh();
+    // `cancelled` is flipped true by the cleanup function below if `id` changes
+    // (i.e. the user navigated to a different dataset) before this fetch finishes.
+    // We pass a getter into `refresh` so it can check this without needing
+    // `cancelled` in its own dependency array.
+    let cancelled = false;
+    refresh(() => cancelled);
     evaluationApi
       .queries()
-      .then(setOperational)
-      .catch(e => setError(message(e)));
+      .then(list => {
+        if (!cancelled) setOperational(list);
+      })
+      .catch(e => {
+        if (!cancelled) setError(message(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
+
   useEffect(() => {
     if (!selectedQuery) return;
+    // FIX (stale-response race): switching the selected benchmark query (or
+    // navigating to a different dataset) while a snapshot/judgment fetch is still
+    // in flight used to let an old response land after a newer one — briefly
+    // showing the wrong query's snapshots/judgments. `cancelled` guards against
+    // that; it's set by the cleanup function whenever this effect re-runs.
+    let cancelled = false;
     setSelectedSnapshotId(metricSelections[selectedQuery.id] ?? "");
     setDrafts({});
     Promise.all([
@@ -114,6 +154,7 @@ export default function EvaluationWorkspace() {
       evaluationApi.judgments(id, selectedQuery.id),
     ])
       .then(([all, j]) => {
+        if (cancelled) return;
         setSnapshots(
           all.filter(
             s => !s.metadata.configHash || s.metadata.configHash === selectedQuery.configHash,
@@ -121,24 +162,49 @@ export default function EvaluationWorkspace() {
         );
         setJudgmentData(j);
       })
-      .catch(e => setError(message(e)));
+      .catch(e => {
+        if (!cancelled) setError(message(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id, selectedQuery, metricSelections]);
+
   useEffect(() => {
-    if (frozen) {
-      evaluationApi
-        .runs(id)
-        .then(result => setRunHistory(result.runs))
-        .catch(e => setError(message(e)));
-      evaluationApi
-        .stageTraces({ datasetVersionId: id })
-        .then(result => setStageTraces(result.traces))
-        .catch(e => setError(message(e)));
-      evaluationApi
-        .hardNegatives(id)
-        .then(setHardNegatives)
-        .catch(e => setError(message(e)));
-    }
+    if (!frozen) return;
+    // FIX (stale-response race): same issue as above — guard the three parallel
+    // fetches here so a slow response arriving after the user has navigated away
+    // (or the dataset un-froze somehow) doesn't overwrite fresher state.
+    let cancelled = false;
+    evaluationApi
+      .runs(id)
+      .then(result => {
+        if (!cancelled) setRunHistory(result.runs);
+      })
+      .catch(e => {
+        if (!cancelled) setError(message(e));
+      });
+    evaluationApi
+      .stageTraces({ datasetVersionId: id })
+      .then(result => {
+        if (!cancelled) setStageTraces(result.traces);
+      })
+      .catch(e => {
+        if (!cancelled) setError(message(e));
+      });
+    evaluationApi
+      .hardNegatives(id)
+      .then(result => {
+        if (!cancelled) setHardNegatives(result);
+      })
+      .catch(e => {
+        if (!cancelled) setError(message(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [frozen, id]);
+
   const addedSourceIds = useMemo(
     () => new Set(detail?.queries.map(q => q.sourceQueryId)),
     [detail],
@@ -147,6 +213,7 @@ export default function EvaluationWorkspace() {
     selectedSnapshot?.results.filter(result =>
       judgmentData?.judgments.some(j => j.canonicalUrl === canonicalizeDocumentUrl(result.url)),
     ).length ?? 0;
+
   async function addQueries() {
     setBusy(true);
     try {

@@ -114,7 +114,7 @@ export interface RankingSnapshot {
     exaVersion?: string
     contentHash?: string
     executionType?: "manual" | "scheduled"
-    source?: "snapshots_api" | "query_run_api" | "analytics_refresh_api" | "cron_scheduler" | "appwrite"
+    source?: "snapshots_api" | "query_run_api" | "analytics_refresh_api" | "github_actions_cron" | "appwrite"
     isVectorEnhanced?: boolean
     vectorCount?: number
     semanticProcessingTime?: number

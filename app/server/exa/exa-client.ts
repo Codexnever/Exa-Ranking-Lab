@@ -45,7 +45,7 @@ export class ExaClient {
   private readonly baseUrl: string = "https://api.exa.ai"
 
   constructor(apiKey: string) {
-    // ✅ Fail fast — empty key would silently get a 401 from Exa
+    //  Fail fast — empty key would silently get a 401 from Exa
     if (!apiKey?.trim()) throw new Error("[ExaClient] apiKey is required")
     this.apiKey = apiKey.trim()
   }
@@ -55,7 +55,7 @@ export class ExaClient {
     // Used as fallback if Exa doesn't return searchTime.
     const wallClockStart = Date.now()
 
-    // ✅ AbortController — prevents indefinite hang if Exa is slow/unresponsive
+    //  AbortController — prevents indefinite hang if Exa is slow/unresponsive
     const controller = new AbortController()
     const timeoutId  = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
@@ -103,7 +103,7 @@ export class ExaClient {
       }
 
       const data: ExaRawResponse = await response.json()
-
+ 
       // ─── Timing ────────────────────────────────────────────────────────────
       //
       // data.searchTime  — milliseconds, Exa server-side only.
@@ -115,13 +115,13 @@ export class ExaClient {
       //
       const wallClockElapsedMs = Date.now() - wallClockStart
 
-      // ✅ searchTime: Exa's server time (ms) — primary value for analytics.
+      //  searchTime: Exa's server time (ms) — primary value for analytics.
       //    If Exa doesn't return it, fall back to wall-clock.
       const searchTime = typeof data.searchTime === "number"
         ? data.searchTime
         : "none"
 
-      // ✅ responseTime: alias for searchTime so all existing callers
+      //  responseTime: alias for searchTime so all existing callers
       //    (run/route.ts, analytics/refresh/route.ts, process-scheduled/route.ts)
       //    reading exaResults.responseTime continue to work unchanged.
       //    Both point to the same value — Exa's server search time in ms.
@@ -129,7 +129,7 @@ export class ExaClient {
 
       console.log(
         `[ExaClient] search "${options.query}" — ` +
-        `Exa: ${searchTime}ms | wall: ${wallClockElapsedMs}ms`
+        `Exa: ${responseTime}ms | ApplicationTime: ${wallClockElapsedMs}ms`
       )
 
       const results: ExaSearchResult[] = (data.results ?? []).map(result => ({

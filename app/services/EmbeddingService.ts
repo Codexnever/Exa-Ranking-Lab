@@ -75,17 +75,29 @@ export class EmbeddingService {
   async embedBatch(texts: string[], contentHashes?: string[]): Promise<BatchEmbeddingResult> {
     if (contentHashes && contentHashes.length !== texts.length) throw new TypeError("contentHashes must align with texts")
     if (!texts.length) return { vectors: [], mode: "gemini", cacheHits: 0, cacheMisses: 0 }
+
     const identities = texts.map((text, index) => contentHashes?.[index] ?? this.prepareText(text))
     const requests = identities.map(identity => this.request(GEMINI_NAMESPACE, identity))
     const geminiCached = await this.cache.getMany(requests)
-    const missing = geminiCached.flatMap((value, index) => value ? [] : [index])
+    const missing = geminiCached.flatMap((value, index) => (value ? [] : [index]))
     const initialHits = texts.length - missing.length
     if (!missing.length) return { vectors: geminiCached, mode: "gemini", cacheHits: initialHits, cacheMisses: 0 }
+
+    // Map each request object -> its source text, by reference. Avoids O(n^2)
+    // indexOf scans and fails loudly (instead of silently sending the wrong
+    // text) if the cache ever hands back a request we didn't give it.
+    const textByRequest = new Map(missing.map(index => [requests[index], texts[index]] as const))
+    const textForRequest = (request: EmbeddingCacheRequest): string => {
+      const text = textByRequest.get(request)
+      if (text === undefined) throw new Error("Embedding cache returned an unrecognized request")
+      return text
+    }
+
     try {
       const missRequests = missing.map(index => requests[index])
       const missVectors = await this.cache.resolveMany(
         missRequests,
-        unresolved => this.providers.gemini(unresolved.map(request => texts[requests.indexOf(request)])),
+        unresolved => this.providers.gemini(unresolved.map(textForRequest)),
         new Array(missRequests.length).fill(null),
       )
       missing.forEach((index, offset) => { geminiCached[index] = missVectors[offset] })
@@ -95,17 +107,28 @@ export class EmbeddingService {
     }
 
     const fallbackRequests = missing.map(index => this.request(OPENAI_NAMESPACE, identities[index]))
-    const fallbackCached = await this.cache.getMany(fallbackRequests)
-    const fallbackMissing = fallbackCached.flatMap((value, index) => value ? [] : [index])
-    fallbackCached.forEach((vector, offset) => { if (vector) geminiCached[missing[offset]] = vector })
-    if (!fallbackMissing.length) {
-      return { vectors: geminiCached, mode: "openai", cacheHits: initialHits + fallbackCached.length, cacheMisses: missing.length }
+    const fallbackTextByRequest = new Map(missing.map((index, offset) => [fallbackRequests[offset], texts[index]] as const))
+    const fallbackTextForRequest = (request: EmbeddingCacheRequest): string => {
+      const text = fallbackTextByRequest.get(request)
+      if (text === undefined) throw new Error("Embedding cache returned an unrecognized request")
+      return text
     }
+
+    const fallbackCached = await this.cache.getMany(fallbackRequests)
+    const fallbackMissing = fallbackCached.flatMap((value, index) => (value ? [] : [index]))
+    fallbackCached.forEach((vector, offset) => { if (vector) geminiCached[missing[offset]] = vector })
+
+    if (!fallbackMissing.length) {
+      // Every remaining slot was resolved from the OpenAI cache directly —
+      // no provider call happened, so this is NOT a cache miss.
+      return { vectors: geminiCached, mode: "openai", cacheHits: initialHits + fallbackCached.filter(Boolean).length, cacheMisses: 0 }
+    }
+
     try {
       const unresolvedRequests = fallbackMissing.map(index => fallbackRequests[index])
       const vectors = await this.cache.resolveMany(
         unresolvedRequests,
-        unresolved => this.providers.openai(unresolved.map(request => texts[missing[fallbackRequests.indexOf(request)]])),
+        unresolved => this.providers.openai(unresolved.map(fallbackTextForRequest)),
         new Array(unresolvedRequests.length).fill(null),
       )
       fallbackMissing.forEach((offset, vectorIndex) => { geminiCached[missing[offset]] = vectors[vectorIndex] })
@@ -113,7 +136,7 @@ export class EmbeddingService {
         vectors: geminiCached,
         mode: "openai",
         cacheHits: initialHits + fallbackCached.filter(Boolean).length,
-        cacheMisses: missing.length,
+        cacheMisses: fallbackMissing.length,
       }
     } catch (error) {
       this.logFailure("OpenAI batch", error)
@@ -121,7 +144,7 @@ export class EmbeddingService {
         vectors: geminiCached,
         mode: "position-only",
         cacheHits: initialHits + fallbackCached.filter(Boolean).length,
-        cacheMisses: missing.length,
+        cacheMisses: fallbackMissing.length,
       }
     }
   }
@@ -135,11 +158,15 @@ export class EmbeddingService {
     return { namespace: namespaceValue, identity }
   }
 
-  private assertBatch(vectors: number[][], expected: number): void {
-    if (vectors.length !== expected) throw new Error("Embedding provider returned an incomplete batch")
-    if (vectors.some(vector => vector.length !== OUTPUT_DIMENSIONS || vector.some(value => !Number.isFinite(value)))) {
-      throw new Error("Embedding provider returned an invalid vector")
-    }
+  private assertBatch(vectors: Array<number[] | undefined | null>, expected: number): asserts vectors is number[][] {
+
+    if (vectors.length !== expected) throw new Error(`Embedding provider returned an incomplete batch (expected ${expected}, got ${vectors.length})`)
+   
+      vectors.forEach((vector, index) => {
+      if (!vector) throw new Error(`Embedding provider returned no vector for item ${index}`)
+      if (vector.length !== OUTPUT_DIMENSIONS) throw new Error(`Embedding provider returned wrong dimensions for item ${index} (expected ${OUTPUT_DIMENSIONS}, got ${vector.length})`)
+      if (vector.some(value => !Number.isFinite(value))) throw new Error(`Embedding provider returned a non-finite value for item ${index}`)
+    })
   }
 
   private prepareText(text: string): string {
@@ -148,9 +175,12 @@ export class EmbeddingService {
 
   private async callGeminiBatch(texts: string[]): Promise<number[][]> {
     const key = process.env.GEMINI_API_KEY
+
     if (!key) throw new Error("GEMINI_API_KEY not set")
-    const results: number[][] = []
+
+    const results: Array<number[] | undefined> = []
     const base = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}`
+
     for (let index = 0; index < texts.length; index += BATCH_LIMIT) {
       const chunk = texts.slice(index, index + BATCH_LIMIT)
       const isSingle = chunk.length === 1
@@ -160,10 +190,18 @@ export class EmbeddingService {
       const response = await fetch(`${base}:${isSingle ? "embedContent" : "batchEmbedContents"}?key=${key}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       })
-      if (!response.ok) throw new Error(`Gemini embedding request failed (${response.status})`)
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "")
+        throw new Error(`Gemini embedding request failed (${response.status}): ${errorBody.slice(0, 500)}`)
+      }
       const data = await response.json()
-      if (isSingle) results.push(data?.embedding?.values)
-      else results.push(...(data?.embeddings ?? []).map((item: { values: number[] }) => item.values))
+      if (isSingle) {
+        results.push(data?.embedding?.values)
+      } else {
+        const embeddings = data?.embeddings
+        if (!Array.isArray(embeddings)) throw new Error("Gemini batch response missing 'embeddings' array")
+        results.push(...embeddings.map((item: { values?: number[] }) => item?.values))
+      }
     }
     this.assertBatch(results, texts.length)
     return results
@@ -177,10 +215,15 @@ export class EmbeddingService {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: OPENAI_MODEL, input: texts.map(text => text.slice(0, MAX_CHARS)), dimensions: OUTPUT_DIMENSIONS }),
     })
-    if (!response.ok) throw new Error(`OpenAI embedding request failed (${response.status})`)
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "")
+      throw new Error(`OpenAI embedding request failed (${response.status}): ${errorBody.slice(0, 500)}`)
+    }
     const data = await response.json()
-    const vectors = ((data?.data ?? []) as Array<{ embedding: number[]; index: number }>)
-      .sort((a, b) => a.index - b.index).map(item => item.embedding)
+    if (!Array.isArray(data?.data)) throw new Error("OpenAI response missing 'data' array")
+    const vectors = (data.data as Array<{ embedding?: number[]; index: number }>)
+      .sort((a, b) => a.index - b.index)
+      .map(item => item.embedding)
     this.assertBatch(vectors, texts.length)
     return vectors
   }
