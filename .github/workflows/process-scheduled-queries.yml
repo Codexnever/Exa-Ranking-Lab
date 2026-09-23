@@ -34,4 +34,9 @@ jobs:
           NEXT_PUBLIC_COLLECTION_SETTINGS: ${{ secrets.NEXT_PUBLIC_COLLECTION_SETTINGS }}
           WEAVIATE_URL: ${{ secrets.WEAVIATE_URL }}
           WEAVIATE_API_KEY: ${{ secrets.WEAVIATE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          EMBEDDING_CACHE_TTL_SECONDS: ${{ secrets.EMBEDDING_CACHE_TTL_SECONDS }}
         run: npx tsx scripts/process-scheduled.ts
