@@ -35,3 +35,4 @@ jobs:
   WEAVIATE_URL: ${{ secrets.WEAVIATE_URL }}
   WEAVIATE_API_KEY: ${{ secrets.WEAVIATE_API_KEY }}
         run: npx tsx scripts/process-scheduled.ts
+        
