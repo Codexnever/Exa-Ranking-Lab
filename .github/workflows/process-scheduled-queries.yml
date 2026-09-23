@@ -25,11 +25,13 @@ jobs:
 
       - name: Run scheduled query processing
         env:
-          # Rename these to whatever your services actually read from
-          # process.env — check appwrite-server.ts, weaviate-service.ts, etc.
-          NEXT_PUBLIC_APPWRITE_ENDPOINT: ${{ secrets.NEXT_PUBLIC_APPWRITE_ENDPOINT }}
-          NEXT_PUBLIC_APPWRITE_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_APPWRITE_PROJECT_ID }}
-          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
-          WEAVIATE_URL: ${{ secrets.WEAVIATE_URL }}
-          WEAVIATE_API_KEY: ${{ secrets.WEAVIATE_API_KEY }}
+  NEXT_PUBLIC_APPWRITE_ENDPOINT: ${{ secrets.NEXT_PUBLIC_APPWRITE_ENDPOINT }}
+  NEXT_PUBLIC_APPWRITE_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_APPWRITE_PROJECT_ID }}
+  NEXT_PUBLIC_APPWRITE_DATABASE_ID: ${{ secrets.NEXT_PUBLIC_APPWRITE_DATABASE_ID }}
+  APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
+  COLLECTION_QUERIES: ${{ secrets.COLLECTION_QUERIES }}
+  COLLECTION_SNAPSHOTS: ${{ secrets.COLLECTION_SNAPSHOTS }}
+  NEXT_PUBLIC_COLLECTION_SETTINGS: ${{ secrets.NEXT_PUBLIC_COLLECTION_SETTINGS }}
+  WEAVIATE_URL: ${{ secrets.WEAVIATE_URL }}
+  WEAVIATE_API_KEY: ${{ secrets.WEAVIATE_API_KEY }}
         run: npx tsx scripts/process-scheduled.ts
